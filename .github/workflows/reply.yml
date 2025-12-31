@@ -1,0 +1,32 @@
+name: Reply to Mentions
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'  # كل 20 دقيقة
+  workflow_dispatch:  # يسمح بالتشغيل اليدوي
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Reply Agent
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
+        run: python -c "from src.reply_agent import process_mentions; process_mentions('${{ vars.BOT_USERNAME }}')"
