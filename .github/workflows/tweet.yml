@@ -1,12 +1,12 @@
-name: Reply to Mentions
+name: Daily Tech Tweet
 
 on:
   schedule:
-    - cron: '*/20 * * * *'  # كل 20 دقيقة
+    - cron: '0 */6 * * *'  # كل 6 ساعات (UTC)
   workflow_dispatch:  # يسمح بالتشغيل اليدوي
 
 jobs:
-  reply:
+  tweet:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +21,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Reply Agent
+      - name: Run bot
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-        run: python -c "from src.reply_agent import process_mentions; process_mentions('${{ vars.BOT_USERNAME }}')"
+        run: python src/bot.py
