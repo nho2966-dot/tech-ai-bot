@@ -29,3 +29,6 @@ jobs:
 run: |
   cd src
   python reply_agent.py
+if __name__ == "__main__":
+    BOT_USERNAME = os.getenv("BOT_USERNAME", "TechAI_Bot")
+    process_mentions(BOT_USERNAME)
