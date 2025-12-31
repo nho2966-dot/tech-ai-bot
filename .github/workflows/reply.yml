@@ -29,7 +29,9 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-run: cd src && python -c "from reply_agent import process_mentions; process_mentions('${{ vars.BOT_USERNAME }}')"
+run: |
+  cd src
+  python reply_agent.py
 if __name__ == "__main__":
     BOT_USERNAME = os.getenv("BOT_USERNAME", "TechAI_Bot")
     process_mentions(BOT_USERNAME)
