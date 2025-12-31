@@ -26,6 +26,6 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-        run: |
-          cd src
-          python reply_agent.py
+run: |
+  cd src
+  python reply_agent.py
