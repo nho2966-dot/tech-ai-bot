@@ -18,10 +18,10 @@ def get_reply_bot():
         wait_on_rate_limit=True
     )
 
-def is_valid_mention(tweet_text, @X_TechNews_):
+def is_valid_mention(tweet_text, bot_username):
     """تحقق من أن التغريدة موجهة للبوت مباشرة"""
-    return f"@{X_TechNews_.lower()}" in tweet_text.lower()
-
+    return f"@{bot_username.lower()}" in tweet_text.lower()
+    
 def generate_smart_reply(question: str) -> str:
     """استخدم Gemini لإنشاء رد احترافي"""
     prompt = (
@@ -90,4 +90,5 @@ def process_mentions(bot_username: str):
         except Exception as e:
 
             logging.error(f"فشل نشر الرد: {e}")
+
 
