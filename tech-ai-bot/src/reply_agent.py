@@ -1,94 +1,71 @@
-# src/reply_agent.py
 import os
+import requests
 import tweepy
+import random
 import google.generativeai as genai
-from datetime import datetime, timezone
+from tenacity import retry, stop_after_attempt, wait_fixed
 import logging
+import hashlib
 
-logging.basicConfig(level=logging.INFO)
-
+# إعداد الصلاحيات
 genai.configure(api_key=os.getenv('GEMINI_KEY'))
 
-def get_reply_bot():
-    return tweepy.Client(
-        consumer_key=os.getenv('X_API_KEY'),
-        consumer_secret=os.getenv('X_API_SECRET'),
-        access_token=os.getenv('X_ACCESS_TOKEN'),
-        access_token_secret=os.getenv('X_ACCESS_SECRET'),
-        wait_on_rate_limit=True
-    )
+# إعداد التسجيل
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def is_valid_mention(tweet_text, bot_username):
-    """تحقق من أن التغريدة موجهة للبوت مباشرة"""
-    return f"@{bot_username.lower()}" in tweet_text.lower()
-    
-def generate_smart_reply(question: str) -> str:
-    """استخدم Gemini لإنشاء رد احترافي"""
-    prompt = (
-        "أنت بوت تقني ذكي ومهذب اسمك 'تيك بوت'.\n"
-        "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
-        "بأسلوب ودود ومحترف، ولا تكرر السؤال.\n\n"
-        f"السؤال: {question}"
-    )
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt, safety_settings={
-            "HARM_CATEGORY_HARASSMENT": "BLOCK_MEDIUM_AND_ABOVE",
-            "HARM_CATEGORY_HATE_SPEECH": "BLOCK_MEDIUM_AND_ABOVE",
-        })
-        reply = response.text.strip()
-        return reply[:270] + "..." if len(reply) > 280 else reply
-    except Exception as e:
-        logging.error(f"فشل توليد الرد: {e}")
-        return "شكرًا لسؤالك! حاليًا أتعلم المزيد عن هذا الموضوع. 🤖✨"
+LAST_HASH_FILE = "last_hash.txt"
 
-def process_mentions(bot_username: str):
-    client = get_reply_bot()
-    
-    try:
-        user = client.get_me()
-        user_id = user.data.id
-    except Exception as e:
-        logging.error(f"فشل جلب معلومات الحساب: {e}")
-        return
+def get_content_hash(text):
+    return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
 
+def is_duplicate(content):
+    current_hash = get_content_hash(content)
+    if os.path.exists(LAST_HASH_FILE):
+        with open(LAST_HASH_FILE, "r") as f:
+            last_hash = f.read().strip()
+        if current_hash == last_hash:
+            return True
+    with open(LAST_HASH_FILE, "w") as f:
+        f.write(current_hash)
+    return False
+
+# نظام إعادة المحاولة لضمان الموثوقية (3 محاولات)
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+def get_verified_content():
     try:
-        mentions = client.get_users_mentions(
-            id=user_id,
-            max_results=10,
-            tweet_fields=["created_at", "author_id"]
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": os.getenv('TAVILY_KEY'),
+                "query": "latest verified AI productivity tools and smartphone hacks 2026",
+                "max_results": 3
+            },
+            timeout=10
         )
+        response.raise_for_status()
+        search_res = response.json()
+
+        if not search_res.get('results'):
+            raise Exception("No results from Tavily API.")
+
+        news = random.choice(search_res['results'])
+        content_text = news.get('content') or news.get('snippet', '')
+
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        prompt = f"Summarize this for a tech tip in Arabic: {content_text}. Ensure it's verified."
+        response = model.generate_content(prompt)
+        
+        content = response.text.strip()
+        if not content:
+            raise Exception("Gemini returned empty content.")
+
+        return content, news['url']
+
     except Exception as e:
-        logging.error(f"فشل جلب التغريدات الموجهة: {e}")
-        return
+        raise Exception(f"Failed to fetch content: {e}")
 
-    if not mentions.data:
-        logging.info("لا توجد تغريدات موجهة جديدة.")
-        return
-
-    for mention in mentions.data:
-        created_at = mention.created_at
-        if (datetime.now(timezone.utc) - created_at).total_seconds() > 3600:
-            continue
-
-        tweet_text = mention.text
-        logging.info(f"معالجة تغريدة: {tweet_text}")
-
-        if not is_valid_mention(tweet_text, bot_username):
-            continue
-
-        question = tweet_text.replace(f"@{bot_username}", "").strip()
-
-        reply_text = generate_smart_reply(question)
-
-        try:
-            client.create_tweet(
-                text=reply_text,
-                in_reply_to_tweet_id=mention.id
-            )
-            logging.info(f"تم الرد على التغريدة {mention.id}")
-        except Exception as e:
-
-            logging.error(f"فشل نشر الرد: {e}")
-
-
+def run_mission():
+    logging.info("🚀 انطلاق المهمة بنظام الموثوقية العالي...")
+    try:
+        # 1. جلب المحتوى مع نظام إعادة المحاولة
+       
