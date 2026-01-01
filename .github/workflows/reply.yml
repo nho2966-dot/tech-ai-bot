@@ -2,8 +2,8 @@ name: Reply to Mentions
 
 on:
   schedule:
-    - cron: '*/20 * * * *'  # كل 20 دقيقة
-  workflow_dispatch:  # يسمح بالتشغيل اليدوي
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
 
 jobs:
   reply:
