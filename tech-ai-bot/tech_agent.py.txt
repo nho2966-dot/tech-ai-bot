@@ -1,0 +1,47 @@
+import requests
+import json
+import os
+import tweepy
+import time
+
+# --- استدعاء المفاتيح من نظام GitHub Secrets (للأمان) ---
+GEMINI_KEY = os.getenv('GEMINI_KEY')
+TAVILY_KEY = os.getenv('TAVILY_KEY')
+X_API_KEY = os.getenv('X_API_KEY')
+X_API_SECRET = os.getenv('X_API_SECRET')
+X_ACCESS_TOKEN = os.getenv('X_ACCESS_TOKEN')
+X_ACCESS_SECRET = os.getenv('X_ACCESS_SECRET')
+TG_TOKEN = os.getenv('TG_TOKEN')
+TG_CHAT_ID = os.getenv('TG_CHAT_ID')
+
+def post_to_x_thread(ar, en, url):
+    try:
+        client = tweepy.Client(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET)
+        first = f"🇸🇦 {ar[:220]}\n\n🔗 المصدر:\n{url}"
+        res = client.create_tweet(text=first)
+        client.create_tweet(text=f"🌐 Translation:\n\n{en[:270]}", in_reply_to_tweet_id=res.data['id'])
+        print("✅ تم النشر على تويتر.")
+    except Exception as e: print(f"❌ خطأ تويتر: {e}")
+
+def run_mission():
+    print("🚀 بدء المهمة...")
+    # 1. البحث
+    search = requests.post("https://api.tavily.com/search", json={
+        "api_key": TAVILY_KEY, "query": "latest AI cybersecurity news 2025", "max_results": 1
+    }).json()
+    
+    if not search.get('results'): return
+    news = search['results'][0]
+
+    # 2. الصياغة عبر Gemini
+    prompt = {"contents": [{"parts": [{"text": f"Summarize this in professional Arabic and English, separate with '---': {news['content']}"}]}]}
+    res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}", json=prompt).json()
+    
+    ar_part, en_part = res['candidates'][0]['content']['parts'][0]['text'].split('---', 1)
+
+    # 3. النشر
+    post_to_x_thread(ar_part.strip(), en_part.strip(), news['url'])
+    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": f"{ar_part}\n\n{news['url']}"})
+
+if __name__ == "__main__":
+    run_mission() # تشغيل لمرة واحدة فقط

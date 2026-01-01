@@ -1,0 +1,2 @@
+body { direction: rtl; font-family: sans-serif; padding: 20px; background: #f0f0f0; }
+#log-content { background: #222; color: #0f0; padding: 15px; border-radius: 8px; white-space: pre-wrap; max-height: 80vh; overflow: auto; }
