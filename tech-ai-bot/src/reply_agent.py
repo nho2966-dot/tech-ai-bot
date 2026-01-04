@@ -1,8 +1,6 @@
-# src/reply_agent.py
-
 import os
 import tweepy
-import google.genai as genai  # ✅ تم الإصلاح: google.genai بدلاً من google.generativeai
+from google import genai  # المكتبة الجديدة
 from datetime import datetime, timezone
 import logging
 import hashlib
@@ -10,62 +8,55 @@ import hashlib
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# إعداد Gemini API
-genai.configure(api_key=os.getenv('GEMINI_KEY'))
-
-LAST_HASH_FILE = "last_hash.txt"
-
-def get_content_hash(text):
-    return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-
-def is_duplicate(content):
-    current_hash = get_content_hash(content)
-    if os.path.exists(LAST_HASH_FILE):
-        with open(LAST_HASH_FILE, "r") as f:
-            last_hash = f.read().strip()
-        if current_hash == last_hash:
-            logging.info(f"Duplicate content detected with hash: {current_hash}")
-            return True
-    with open(LAST_HASH_FILE, "w") as f:
-        f.write(current_hash)
-    return False
-
 def get_reply_bot():
-    """إرجاع عميل X باستخدام Bearer Token"""
-    return tweepy.Client(bearer_token=os.getenv('X_BEARER_TOKEN'))
-
-def is_valid_mention(tweet_text, bot_username):
-    """تحقق من أن التغريدة موجهة للبوت مباشرة"""
-    return f"@{bot_username.lower()}" in tweet_text.lower()
+    """إرجاع عميل X مع صلاحيات الكتابة الكاملة باستخدام OAuth 1.0a"""
+    return tweepy.Client(
+        bearer_token=os.getenv('X_BEARER_TOKEN'),
+        consumer_key=os.getenv('X_API_KEY'),
+        consumer_secret=os.getenv('X_API_SECRET'),
+        access_token=os.getenv('X_ACCESS_TOKEN'),
+        access_token_secret=os.getenv('X_ACCESS_TOKEN_SECRET')
+    )
 
 def generate_smart_reply(question: str) -> str:
-    """استخدم Gemini لإنشاء رد احترافي"""
+    """استخدم Gemini 2.0 لإنشاء رد احترافي"""
+    # إعداد عميل Gemini الجديد
+    client_ai = genai.Client(api_key=os.getenv('GEMINI_KEY'))
+    
     prompt = (
         "أنت بوت تقني ذكي ومهذب اسمك 'تيك بوت'.\n"
         "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
         "بأسلوب ودود ومحترف، ولا تكرر السؤال.\n\n"
         f"السؤال: {question}"
     )
+    
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(contents=prompt)  # ✅ تم الإصلاح: contents=
+        # استخدام موديل Flash 2.0 السريع
+        response = client_ai.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt
+        )
         reply = response.text.strip()
-        return reply[:270] + "..." if len(reply) > 280 else reply
+        # التأكد من طول التغريدة (تويتر يسمح بـ 280 حرف)
+        return reply[:275] if len(reply) > 280 else reply
     except Exception as e:
         logging.error(f"فشل توليد الرد: {e}")
-        return "شكرًا لسؤالك! حاليًا أتعلم المزيد عن هذا الموضوع. 🤖✨"
+        return "شكرًا لسؤالك! أعمل حالياً على معالجة طلبك تقنياً. 🤖✨"
 
 def process_mentions(bot_username: str):
     client = get_reply_bot()
     
     try:
+        # جلب معرف البوت (User ID)
         user = client.get_me()
         user_id = user.data.id
+        logging.info(f"تم تسجيل الدخول بنجاح كـ: {user.data.username}")
     except Exception as e:
-        logging.error(f"فشل جلب معلومات الحساب: {e}")
+        logging.error(f"فشل جلب معلومات الحساب (تأكد من المفاتيح): {e}")
         return
 
     try:
+        # جلب المنشن (آخر 10 تغريدات)
         mentions = client.get_users_mentions(
             id=user_id,
             max_results=10,
@@ -75,34 +66,38 @@ def process_mentions(bot_username: str):
         logging.error(f"فشل جلب التغريدات الموجهة: {e}")
         return
 
-    if not mentions.data:
+    if not mentions or not mentions.data:
         logging.info("لا توجد تغريدات موجهة جديدة.")
         return
 
     for mention in mentions.data:
+        # معالجة التغريدات التي لم يمر عليها أكثر من ساعة
         created_at = mention.created_at
         if (datetime.now(timezone.utc) - created_at).total_seconds() > 3600:
             continue
 
         tweet_text = mention.text
-        logging.info(f"معالجة تغريدة: {tweet_text}")
+        logging.info(f"يتم الآن معالجة: {tweet_text}")
 
-        if not is_valid_mention(tweet_text, bot_username):
-            continue
-
-        question = tweet_text.replace(f"@{bot_username}", "").strip()
-
-        reply_text = generate_smart_reply(question)
+        # تنظيف النص من اسم البوت للحصول على السؤال
+        question = tweet_text.lower().replace(f"@{bot_username.lower()}", "").strip()
+        
+        if not question:
+            reply_text = "مرحباً! أنا تيك بوت، كيف يمكنني مساعدتك تقنياً اليوم؟ 🤖"
+        else:
+            reply_text = generate_smart_reply(question)
 
         try:
+            # الرد على التغريدة
             client.create_tweet(
                 text=reply_text,
                 in_reply_to_tweet_id=mention.id
             )
-            logging.info(f"تم الرد على التغريدة {mention.id}")
+            logging.info(f"✅ تم الرد بنجاح على التغريدة: {mention.id}")
         except Exception as e:
-            logging.error(f"فشل نشر الرد: {e}")
+            logging.error(f"❌ فشل نشر الرد: {e}")
 
 if __name__ == "__main__":
-    BOT_USERNAME = os.getenv("BOT_USERNAME", "TechAI_Bot")
+    # تأكد من وضع اسم حساب البوت بدون @ هنا
+    BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername") 
     process_mentions(BOT_USERNAME)
