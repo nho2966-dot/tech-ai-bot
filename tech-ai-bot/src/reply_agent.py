@@ -106,13 +106,7 @@ def run_mission():
             logging.info("✅ تم تجاهل التغريدة (مكررة).")
             return
 
-        client = tweepy.Client(
-            bearer_token=os.getenv('X_BEARER_TOKEN'),
-            consumer_key=os.getenv('X_API_KEY'),
-            consumer_secret=os.getenv('X_API_SECRET'),
-            access_token=os.getenv('X_ACCESS_TOKEN'),
-            access_token_secret=os.getenv('X_ACCESS_SECRET')
-        )
+       client = tweepy.Client(bearer_token=os.getenv('X_BEARER_TOKEN'))
 
         max_tweet_length = 280
         link_length = len(source_url)
@@ -137,3 +131,4 @@ def run_mission():
 
 if __name__ == "__main__":
     run_mission()
+
