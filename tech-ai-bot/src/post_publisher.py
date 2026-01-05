@@ -103,7 +103,8 @@ def publish_tech_tweet():
 
         # بناء التغريدة
         max_text_len = 280 - len(url) - 10  # مساحة للرابط والتنسيق
-        tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}"
+        import random
+tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}\n\n#{random.randint(1000, 9999)}"
 
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:275] + "..."
@@ -122,3 +123,4 @@ def publish_tech_tweet():
 
 if __name__ == "__main__":
     publish_tech_tweet()
+
