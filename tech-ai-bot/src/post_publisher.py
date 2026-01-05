@@ -48,7 +48,7 @@ def generate_tech_content():
 
         # طلب البحث من Tavily API
         response = requests.post(
-            "https://api.tavily.com/search",
+            "https://api.tavily.com/search",  # ✅ تم إصلاح المسافات
             json={
                 "api_key": tavily_key,
                 "query": "newest verified AI tools and smartphone hacks Jan 2026",
@@ -98,13 +98,19 @@ def publish_tech_tweet():
         if is_duplicate(content):
             return
 
-        # تهيئة عميل X باستخدام Bearer Token
-        client = tweepy.Client(bearer_token=os.getenv("X_BEARER_TOKEN"))
+        # ✅ استخدام المفاتيح الأربعة للنشر (OAuth 1.0a)
+        client = tweepy.Client(
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True
+        )
 
         # بناء التغريدة
         max_text_len = 280 - len(url) - 10  # مساحة للرابط والتنسيق
         import random
-tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}\n\n#{random.randint(1000, 9999)}"
+        tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}\n\n#{random.randint(1000, 9999)}"
 
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:275] + "..."
@@ -123,4 +129,3 @@ tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}\n\n#{
 
 if __name__ == "__main__":
     publish_tech_tweet()
-
