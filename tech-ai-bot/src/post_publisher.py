@@ -6,7 +6,6 @@ import google.genai as genai
 from tenacity import retry, stop_after_attempt, wait_fixed
 import logging
 import hashlib
-from datetime import datetime
 
 # إعداد نظام التسجيل
 logging.basicConfig(
@@ -18,10 +17,10 @@ logging.basicConfig(
     ]
 )
 
-# تهيئة Gemini API
+# تهيئة مفتاح Gemini من المتغيرات السرية
 genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
-# ملف لتجنب النشر المتكرر
+# ملف منع التكرار
 LAST_HASH_FILE = "last_hash.txt"
 
 def get_content_hash(text: str) -> str:
@@ -33,7 +32,7 @@ def is_duplicate(content: str) -> bool:
         with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
             last_hash = f.read().strip()
         if current_hash == last_hash:
-            logging.info("تم اكتشاف محتوى مكرر — تم تخطيه.")
+            logging.info("تم اكتشاف محتوى مكرر — تم تجاهله.")
             return True
     with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
         f.write(current_hash)
@@ -41,66 +40,70 @@ def is_duplicate(content: str) -> bool:
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def generate_tech_content():
-    """جلب محتوى تقني موثوق من Tavily وتلخيصه عبر Gemini."""
+    """جلب وتحليل محتوى تقني موثوق من Tavily، ثم تلخيصه عبر Gemini."""
     try:
         tavily_key = os.getenv("TAVILY_KEY")
         if not tavily_key:
-            raise ValueError("TAVILY_KEY غير مضبوط في المتغيرات.")
+            raise ValueError("TAVILY_KEY غير مضبوط في المتغيرات السرية.")
 
-        # طلب البحث من Tavily
+        # طلب البحث من Tavily API
         response = requests.post(
             "https://api.tavily.com/search",
             json={
                 "api_key": tavily_key,
-                "query": "latest verified AI productivity tools and smartphone hacks 2026",
+                "query": "newest verified AI tools and smartphone hacks Jan 2026",
                 "max_results": 3,
                 "search_depth": "basic"
             },
             timeout=10
         )
         response.raise_for_status()
-        search_res = response.json()
+        data = response.json()
 
-        if not search_res.get("results"):
-            raise Exception("لم يتم العثور على نتائج من Tavily API.")
+        if not data.get("results"):
+            raise Exception("لا توجد نتائج من Tavily API.")
 
         # اختيار نتيجة عشوائية
-        news = random.choice(search_res["results"])
-        content_text = news.get("content") or news.get("snippet", "")
-        source_url = news.get("url", "N/A")
+        item = random.choice(data["results"])
+        raw_content = item.get("content") or item.get("snippet", "")
+        source_url = item.get("url", "N/A")
 
-        logging.info(f"تم جلب المحتوى من: {source_url}")
+        logging.info(f"تم جلب محتوى من: {source_url}")
 
-        # توليد الرد بالعربية عبر Gemini
-        prompt = f"لخّص المحتوى التالي في جملة واحدة بالعربية الفصحى، بطريقة جذابة ومهنية، مناسبة لتغريدة تقنية: {content_text}"
+        # توليد تلخيص جذاب بالعربية
+        prompt = (
+            "لخّص المحتوى التالي في جملة واحدة بالعربية الفصحى، "
+            "بطريقة جذابة ومهنية، مناسبة لتغريدة تقنية قصيرة: "
+            f"{raw_content}"
+        )
         model = genai.GenerativeModel("gemini-2.0-flash")
         gemini_response = model.generate_content(contents=prompt)
-        final_content = gemini_response.text.strip()
+        summary = gemini_response.text.strip()
 
-        if not final_content:
+        if not summary:
             raise Exception("Gemini أعاد محتوى فارغًا.")
 
-        return final_content, source_url
+        return summary, source_url
 
     except Exception as e:
-        logging.error(f"فشل جلب أو معالجة المحتوى: {e}")
+        logging.error(f"فشل جلب أو توليد المحتوى: {e}")
         raise
 
 def publish_tech_tweet():
     """نشر تغريدة تقنية على X."""
     logging.info("🚀 بدء مهمة النشر التلقائي...")
     try:
-        content, source_url = generate_tech_content()
+        content, url = generate_tech_content()
 
         if is_duplicate(content):
             return
 
-        # تهيئة عميل X
+        # تهيئة عميل X باستخدام Bearer Token
         client = tweepy.Client(bearer_token=os.getenv("X_BEARER_TOKEN"))
 
         # بناء التغريدة
-        max_content_len = 280 - len(source_url) - 10  # احتفظ بمساحة للرابط والرموز
-        tweet_text = f"🛡️ موثوق | {content[:max_content_len]}\n\n🔗 {source_url}"
+        max_text_len = 280 - len(url) - 10  # مساحة للرابط والتنسيق
+        tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}"
 
         if len(tweet_text) > 280:
             tweet_text = tweet_text[:275] + "..."
@@ -108,7 +111,7 @@ def publish_tech_tweet():
         # النشر الفعلي
         response = client.create_tweet(text=tweet_text)
 
-        if response.data:
+        if response and response.data:
             tweet_id = response.data["id"]
             logging.info(f"✅ تم النشر بنجاح! رقم التغريدة: {tweet_id}")
         else:
