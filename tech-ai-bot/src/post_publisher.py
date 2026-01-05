@@ -48,7 +48,7 @@ def generate_tech_content():
 
         # طلب البحث من Tavily API
         response = requests.post(
-            "https://api.tavily.com/search",  # ✅ إزالة المسافات الزائدة
+            "https://api.tavily.com/search",
             json={
                 "api_key": tavily_key,
                 "query": "newest verified AI tools and smartphone hacks Jan 2026",
@@ -77,7 +77,7 @@ def generate_tech_content():
             f"{raw_content}"
         )
         model = genai.GenerativeModel("gemini-2.0-flash")
-        gemini_response = model.generate_content(contents=prompt)
+        gemini_response = model.generate_content(contents=prompt)  # ✅ تم التحديث: contents=
         summary = gemini_response.text.strip()
 
         if not summary:
