@@ -52,7 +52,7 @@ def generate_smart_reply(question: str) -> str:
     )
     try:
         model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(contents=prompt)
+        response = model.generate_content(contents=prompt)  # ✅ تم التحديث: contents=
         reply = response.text.strip()
         return reply[:270] + "..." if len(reply) > 280 else reply
     except Exception as e:
