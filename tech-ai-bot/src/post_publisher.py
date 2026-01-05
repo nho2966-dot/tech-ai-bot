@@ -17,7 +17,7 @@ logging.basicConfig(
     ]
 )
 
-# تهيئة مفتاح Gemini من المتغيرات السرية
+# تهيئة Gemini API
 genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
 # ملف منع التكرار
@@ -48,7 +48,7 @@ def generate_tech_content():
 
         # طلب البحث من Tavily API
         response = requests.post(
-            "https://api.tavily.com/search",  # ✅ تم إصلاح المسافات
+            "https://api.tavily.com/search",  # ✅ إزالة المسافات الزائدة
             json={
                 "api_key": tavily_key,
                 "query": "newest verified AI tools and smartphone hacks Jan 2026",
@@ -109,7 +109,6 @@ def publish_tech_tweet():
 
         # بناء التغريدة
         max_text_len = 280 - len(url) - 10  # مساحة للرابط والتنسيق
-        import random
         tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}\n\n#{random.randint(1000, 9999)}"
 
         if len(tweet_text) > 280:
@@ -118,7 +117,7 @@ def publish_tech_tweet():
         # النشر الفعلي
         response = client.create_tweet(text=tweet_text)
 
-        if response and response.data:
+        if response and response.
             tweet_id = response.data["id"]
             logging.info(f"✅ تم النشر بنجاح! رقم التغريدة: {tweet_id}")
         else:
