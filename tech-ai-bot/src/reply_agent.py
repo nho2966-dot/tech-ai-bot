@@ -83,37 +83,3 @@ def process_mentions(bot_username: str):
         return
 
     if not mentions.
-        logging.info("لا توجد تغريدات موجهة جديدة.")
-        return
-
-    for mention in mentions.
-        # تجاهل التغريدات الأقدم من ساعة
-        created_at = mention.created_at
-        if (datetime.now(timezone.utc) - created_at).total_seconds() > 3600:
-            continue
-
-        tweet_text = mention.text
-        logging.info(f"معالجة تغريدة: {tweet_text}")
-
-        if not is_valid_mention(tweet_text, bot_username):
-            continue
-
-        question = tweet_text.replace(f"@{bot_username}", "").strip()
-        if not question:
-            continue
-
-        reply_text = generate_smart_reply(question)
-
-        # ✅ نشر الرد الفعلي على X
-        try:
-            response = client.create_tweet(
-                text=reply_text,
-                in_reply_to_tweet_id=mention.id
-            )
-            logging.info(f"✅ تم الرد على التغريدة {mention.id} بنجاح!")
-        except Exception as e:
-            logging.error(f"❌ فشل نشر الرد: {e}")
-
-if __name__ == "__main__":
-    bot_username = os.getenv("BOT_USERNAME", "TechAI_Bot")
-    process_mentions(bot_username)
