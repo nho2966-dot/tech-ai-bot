@@ -2,10 +2,10 @@ import os
 import logging
 from dotenv import load_dotenv
 
-# تحميل المتغيرات من .env (اختياري، لكن مفيد للتشغيل المحلي)
+# تحميل المتغيرات (للاستخدام المحلي)
 load_dotenv()
 
-# إعداد نظام التسجيل
+# إعداد التسجيل الموحّد
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -16,33 +16,29 @@ logging.basicConfig(
 )
 
 def main():
-    """
-    الملف الرئيسي لتشغيل البوت كوحدة واحدة:
-    - نشر التغريدات التلقائية
-    - الرد على التغريدات الموجهة
-    """
+    """الوظيفة الرئيسية: نشر تلقائي + ردود ذكية"""
     try:
-        # استيراد الملفات بعد تهيئة التسجيل
+        logging.info("🤖 تشغيل البوت الموحّد...")
+
+        # استيراد المهام بعد التحديثات
         from post_publisher import publish_tech_tweet
         from reply_agent import process_mentions
 
-        logging.info("🚀 بدء تشغيل البوت الموحّد...")
-
-        # 1. نشر التغريدة التلقائية
-        logging.info("🔍 تشغيل مهمة النشر...")
+        # 1. نشر تغريدة تقنية
         publish_tech_tweet()
 
-        # 2. معالجة الردود على التغريدات
-        logging.info("💬 تشغيل مهمة الردود...")
-        bot_username = os.getenv("BOT_USERNAME", "TechAI_Bot")
-        process_mentions(bot_username)
+        # 2. الرد على التغريدات الموجهة
+        bot_username = os.getenv("BOT_USERNAME")
+        if bot_username:
+            process_mentions(bot_username)
+        else:
+            logging.warning("⚠️ BOT_USERNAME غير مضبوط — لن يتم الرد على التغريدات.")
 
-        logging.info("✅ اكتملت جميع المهام بنجاح!")
+        logging.info("✅ اكتملت جميع المهام بنجاح.")
 
-    except ImportError as e:
-        logging.error(f"❌ خطأ في الاستيراد: {e}")
     except Exception as e:
-        logging.error(f"❌ خطأ غير متوقع: {e}")
+        logging.error(f"❌ فشل تشغيل البوت: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
