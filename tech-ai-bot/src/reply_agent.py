@@ -15,37 +15,35 @@ logging.basicConfig(
     ]
 )
 
-# تهيئة مفتاح Gemini من المتغيرات السرية
+# تهيئة Gemini API
 genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
-# ملف منع التكرار
-LAST_HASH_FILE = "last_hash.txt"
-
-def get_content_hash(text: str) -> str:
-    return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-
-def is_duplicate(content: str) -> bool:
-    current_hash = get_content_hash(content)
-    if os.path.exists(LAST_HASH_FILE):
-        with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
-            last_hash = f.read().strip()
-        if current_hash == last_hash:
-            logging.info("تم اكتشاف محتوى مكرر — تم تجاهله.")
-            return True
-    with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
-        f.write(current_hash)
-    return False
-
 def get_reply_bot():
-    """تهيئة عميل X باستخدام Bearer Token"""
-    return tweepy.Client(bearer_token=os.getenv("X_BEARER_TOKEN"))
+    """تهيئة عميل X بصلاحية القراءة والكتابة (OAuth 1.0a)"""
+    required_keys = [
+        "X_API_KEY",
+        "X_API_SECRET",
+        "X_ACCESS_TOKEN",
+        "X_ACCESS_SECRET"
+    ]
+    for key in required_keys:
+        if not os.getenv(key):
+            raise ValueError(f"❌ المتغير {key} غير مضبوط في GitHub Secrets.")
+
+    return tweepy.Client(
+        consumer_key=os.getenv("X_API_KEY"),
+        consumer_secret=os.getenv("X_API_SECRET"),
+        access_token=os.getenv("X_ACCESS_TOKEN"),
+        access_token_secret=os.getenv("X_ACCESS_SECRET"),
+        wait_on_rate_limit=True
+    )
 
 def is_valid_mention(tweet_text: str, bot_username: str) -> bool:
     """التحقق من أن التغريدة موجهة مباشرة للبوت"""
     return f"@{bot_username.lower()}" in tweet_text.lower()
 
 def generate_smart_reply(question: str) -> str:
-    """توليد رد ذكي باستخدام نموذج Gemini"""
+    """توليد رد ذكي باستخدام Gemini"""
     prompt = (
         "أنت بوت تقني ذكي ومهذب اسمك 'تيك بوت'.\n"
         "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
@@ -64,15 +62,16 @@ def generate_smart_reply(question: str) -> str:
 def process_mentions(bot_username: str):
     client = get_reply_bot()
 
-    # جلب معرف الحساب
+    # جلب معلومات الحساب (للتأكد من أن المصادقة صحيحة)
     try:
         user = client.get_me()
         user_id = user.data.id
+        logging.info(f"تم الاتصال بحساب: @{user.data.username}")
     except Exception as e:
-        logging.error(f"فشل جلب معلومات الحساب: {e}")
+        logging.error(f"فشل المصادقة مع X API. تأكد من صحة المفاتيح الأربعة: {e}")
         return
 
-    # جلب التغريدات الموجهة (mentions)
+    # جلب التغريدات الموجهة
     try:
         mentions = client.get_users_mentions(
             id=user_id,
@@ -83,11 +82,11 @@ def process_mentions(bot_username: str):
         logging.error(f"فشل جلب التغريدات الموجهة: {e}")
         return
 
-    if not mentions.data:
+    if not mentions.
         logging.info("لا توجد تغريدات موجهة جديدة.")
         return
 
-    for mention in mentions.data:
+    for mention in mentions.
         # تجاهل التغريدات الأقدم من ساعة
         created_at = mention.created_at
         if (datetime.now(timezone.utc) - created_at).total_seconds() > 3600:
@@ -105,15 +104,15 @@ def process_mentions(bot_username: str):
 
         reply_text = generate_smart_reply(question)
 
-        # نشر الرد
+        # ✅ نشر الرد الفعلي على X
         try:
-            client.create_tweet(
+            response = client.create_tweet(
                 text=reply_text,
                 in_reply_to_tweet_id=mention.id
             )
-            logging.info(f"✅ تم الرد على التغريدة {mention.id}")
+            logging.info(f"✅ تم الرد على التغريدة {mention.id} بنجاح!")
         except Exception as e:
-            logging.error(f"فشل نشر الرد: {e}")
+            logging.error(f"❌ فشل نشر الرد: {e}")
 
 if __name__ == "__main__":
     bot_username = os.getenv("BOT_USERNAME", "TechAI_Bot")
