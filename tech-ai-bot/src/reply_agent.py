@@ -15,10 +15,10 @@ logging.basicConfig(
     ]
 )
 
-# تهيئة مفتاح Gemini
+# تهيئة مفتاح Gemini من المتغيرات السرية
 genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
-# ملف لحفظ الهاش ومنع التكرار
+# ملف منع التكرار
 LAST_HASH_FILE = "last_hash.txt"
 
 def get_content_hash(text: str) -> str:
@@ -30,7 +30,7 @@ def is_duplicate(content: str) -> bool:
         with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
             last_hash = f.read().strip()
         if current_hash == last_hash:
-            logging.info("تم اكتشاف محتوى مكرر.")
+            logging.info("تم اكتشاف محتوى مكرر — تم تجاهله.")
             return True
     with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
         f.write(current_hash)
@@ -41,11 +41,11 @@ def get_reply_bot():
     return tweepy.Client(bearer_token=os.getenv("X_BEARER_TOKEN"))
 
 def is_valid_mention(tweet_text: str, bot_username: str) -> bool:
-    """التحقق من أن التغريدة موجهة للبوت مباشرة"""
+    """التحقق من أن التغريدة موجهة مباشرة للبوت"""
     return f"@{bot_username.lower()}" in tweet_text.lower()
 
 def generate_smart_reply(question: str) -> str:
-    """توليد رد ذكي باستخدام Gemini"""
+    """توليد رد ذكي باستخدام نموذج Gemini"""
     prompt = (
         "أنت بوت تقني ذكي ومهذب اسمك 'تيك بوت'.\n"
         "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
@@ -64,7 +64,7 @@ def generate_smart_reply(question: str) -> str:
 def process_mentions(bot_username: str):
     client = get_reply_bot()
 
-    # جلب معلومات الحساب
+    # جلب معرف الحساب
     try:
         user = client.get_me()
         user_id = user.data.id
@@ -72,7 +72,7 @@ def process_mentions(bot_username: str):
         logging.error(f"فشل جلب معلومات الحساب: {e}")
         return
 
-    # جلب التغريدات الموجهة
+    # جلب التغريدات الموجهة (mentions)
     try:
         mentions = client.get_users_mentions(
             id=user_id,
@@ -99,12 +99,10 @@ def process_mentions(bot_username: str):
         if not is_valid_mention(tweet_text, bot_username):
             continue
 
-        # استخراج السؤال
         question = tweet_text.replace(f"@{bot_username}", "").strip()
         if not question:
             continue
 
-        # توليد الرد
         reply_text = generate_smart_reply(question)
 
         # نشر الرد
@@ -113,7 +111,7 @@ def process_mentions(bot_username: str):
                 text=reply_text,
                 in_reply_to_tweet_id=mention.id
             )
-            logging.info(f"تم الرد على التغريدة {mention.id}")
+            logging.info(f"✅ تم الرد على التغريدة {mention.id}")
         except Exception as e:
             logging.error(f"فشل نشر الرد: {e}")
 
