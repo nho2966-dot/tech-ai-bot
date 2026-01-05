@@ -1,4 +1,29 @@
-name: Unified Tech Bot
+name: Tech Bot Service
+on:
+  schedule:
+    - cron: '*/15 * * * *' # تشغيل كل 15 دقيقة
+  workflow_dispatch:      # تشغيل يدوي
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Execute
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
+        run: python src/reply_agent.pyname: Unified Tech Bot
 
 on:
   schedule:
