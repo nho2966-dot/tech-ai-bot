@@ -1,13 +1,10 @@
 name: Unified Tech Bot
 
 on:
-  # التشغيل التلقائي كل 20 دقيقة للردود، وكل 6 ساعات للنشر
   schedule:
-    - cron: '*/20 * * * *'   # للردود (كل 20 دقيقة)
+    - cron: '*/20 * * * *'  # للردود (كل 20 دقيقة)
     - cron: '0 */6 * * *'    # للنشر (كل 6 ساعات)
-  # السماح بالتشغيل اليدوي من واجهة GitHub
   workflow_dispatch:
-  # التشغيل عند دفع الكود لفرع main
   push:
     branches: [ main ]
 
@@ -16,34 +13,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. استنساخ الكود
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. تهيئة Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # 3. تثبيت المكتبات
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. تشغيل البوت الموحّد
       - name: Run Unified Bot
         env:
-          # ربط الأسرار المخزنة في GitHub بمتغيرات البيئة في الكود
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          # ربط المتغيرات (مثل BOT_USERNAME)
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }} # توحيد الاسم هنا
           BOT_USERNAME: ${{ vars.BOT_USERNAME }}
         run: |
-          cd src
-          python bot.py
+          # التشغيل من المجلد الرئيسي لضمان رؤية المجلدات الفرعية
+          python src/main.py
