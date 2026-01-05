@@ -1,49 +1,46 @@
-name: Unified Tech Bot
+@@ -1,45 +1,49 @@
+import os
+import logging
+from dotenv import load_dotenv
 
-on:
-  # التشغيل التلقائي كل 20 دقيقة للردود، وكل 6 ساعات للنشر
-  schedule:
-    - cron: '*/20 * * * *'   # للردود (كل 20 دقيقة)
-    - cron: '0 */6 * * *'    # للنشر (كل 6 ساعات)
-  # السماح بالتشغيل اليدوي من واجهة GitHub
-  workflow_dispatch:
-  # التشغيل عند دفع الكود لفرع main
-  push:
-    branches: [ main ]
+# تحميل المتغيرات (اختياري — مفيد في التطوير المحلي)
+load_dotenv()
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
+# إعداد نظام التسجيل الموحّد
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("logs/bot.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
-    steps:
-      # 1. استنساخ الكود
-      - name: Checkout Code
-        uses: actions/checkout@v4
+def main():
+    """الوظيفة الرئيسية: تشغيل المهام: النشر + الردود."""
+    try:
+        logging.info("🤖 تشغيل البوت الموحّد: النشر التلقائي + الردود الذكية")
 
-      # 2. تهيئة Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+        # استيراد الوظائف بعد التحديثات
+        from post_publisher import publish_tech_tweet
+        from reply_agent import process_mentions
 
-      # 3. تثبيت المكتبات
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        # 1. نشر تغريدة تقنية
+        publish_tech_tweet()
 
-      # 4. تشغيل البوت الموحّد
-      - name: Run Unified Bot
-        env:
-          # ربط الأسرار المخزنة في GitHub بمتغيرات البيئة في الكود
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          # ربط المتغيرات (مثل BOT_USERNAME)
-          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-        run: |
-          cd src
-          python bot.py
+        # 2. الرد على التغريدات الموجهة
+        bot_username = os.getenv("BOT_USERNAME")
+        if bot_username:
+            logging.info(f"البدء في معالجة الردود على @{bot_username}")
+            process_mentions(bot_username)
+        else:
+            logging.warning("⚠️ BOT_USERNAME غير مضبوط — لن يتم معالجة الردود.")
+
+        logging.info("✅ اكتملت جميع المهام بنجاح.")
+
+    except Exception as e:
+        logging.error(f"❌ فشل تشغيل البوت الموحّد: {e}")
+        raise
+
+if __name__ == "__main__":
+    main()
