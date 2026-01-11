@@ -1,6 +1,6 @@
 import os
 import tweepy
-from google import genai  # التصحيح: استدعاء المكتبة بشكل صحيح
+from google import genai
 import logging
 
 def process_mentions(username):
@@ -33,3 +33,4 @@ def process_mentions(username):
 
     except Exception as e:
         logging.error(f"❌ خطأ في نظام الردود: {e}")
+
