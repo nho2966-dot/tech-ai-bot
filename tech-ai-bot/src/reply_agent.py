@@ -5,15 +5,14 @@ import logging
 
 def process_mentions(username):
     try:
-        # إعداد Gemini و Twitter
+        # الاتصال بـ Gemini و Twitter باستخدام الأسرار المحددة في إعداداتك
         client_ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
         bot_id = client.get_me().data.id
