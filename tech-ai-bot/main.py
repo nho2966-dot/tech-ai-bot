@@ -14,14 +14,12 @@ logging.basicConfig(
 def main():
     logging.info("🚀 بدء تشغيل المنظومة الموحدة...")
     
-    # 1. تنفيذ الردود (الأولوية القصوى)
+    # 1. الردود
     bot_username = os.getenv("BOT_USERNAME")
     if bot_username:
-        logging.info(f"🔎 فحص الإشارات للحساب: @{bot_username}")
         process_mentions(bot_username)
     
-    # 2. تنفيذ النشر التلقائي
-    logging.info("📝 محاولة نشر تغريدة تقنية جديدة...")
+    # 2. النشر
     publish_tech_tweet()
 
     logging.info("🏁 تمت جميع العمليات بنجاح.")
