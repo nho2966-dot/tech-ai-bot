@@ -1,40 +1,47 @@
-name: Unified Tech Bot
+import os
+import logging
+from dotenv import load_dotenv
 
-on:
-  schedule:
-    - cron: '*/20 * * * *'  # للردود (كل 20 دقيقة)
-    - cron: '0 */6 * * *'    # للنشر (كل 6 ساعات)
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+# تحميل الإعدادات
+load_dotenv()
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
+# التأكد من وجود مجلد السجلات
+if not os.path.exists("logs"):
+    os.makedirs("logs")
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("logs/bot.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+def main():
+    try:
+        logging.info("🤖 تشغيل البوت الموحّد: النشر التلقائي + الردود الذكية")
 
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        # استيراد الوظائف محلياً لتجنب مشاكل المسارات
+        from post_publisher import publish_tech_tweet
+        from reply_agent import process_mentions
 
-      - name: Run Unified Bot
-        env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }} # توحيد الاسم هنا
-          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-        run: |
-          # التشغيل من المجلد الرئيسي لضمان رؤية المجلدات الفرعية
-          python src/main.py
+        # 1. مهمة النشر
+        logging.info("--- بدء مهمة النشر ---")
+        publish_tech_tweet()
+
+        # 2. مهمة الردود
+        bot_username = os.getenv("BOT_USERNAME")
+        if bot_username:
+            logging.info(f"--- معالجة الردود لـ @{bot_username} ---")
+            process_mentions(bot_username)
+        else:
+            logging.warning("⚠️ BOT_USERNAME مفقود.")
+
+        logging.info("✅ انتهت جميع العمليات بنجاح.")
+
+    except Exception as e:
+        logging.error(f"❌ خطأ في التشغيل الرئيسي: {e}")
+
+if __name__ == "__main__":
+    main()
