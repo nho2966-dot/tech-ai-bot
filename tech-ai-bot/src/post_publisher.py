@@ -1,16 +1,18 @@
 import os
 import tweepy
-import genai from google
+from google import genai  # التصحيح هنا: استخدام from قبل google
 import logging
 
 def publish_tech_tweet():
     try:
+        # إعداد العميل باستخدام مفتاح API من الأسرار (Secrets)
         client_ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         
         prompt = "أعطني معلومة تقنية مذهلة وجديدة عن الذكاء الاصطناعي في عام 2026 لتغريدة عربية مشوقة مع هاشتاقات."
         response = client_ai.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         tweet_text = response.text.strip()
 
+        # الاتصال بمنصة X باستخدام المفاتيح الممررة من ملف الـ YAML
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
@@ -23,4 +25,3 @@ def publish_tech_tweet():
 
     except Exception as e:
         logging.error(f"❌ خطأ في نظام النشر: {e}")
-
