@@ -8,6 +8,9 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./tech-ai-bot  # هذا السطر يحل مشكلة No such file or directory
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
