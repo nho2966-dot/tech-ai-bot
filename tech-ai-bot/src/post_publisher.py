@@ -1,5 +1,4 @@
 import os
-import requests
 import tweepy
 from google import genai
 import logging
@@ -8,9 +7,7 @@ def publish_tech_tweet():
     try:
         client_ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         
-        # البحث عن خبر (يمكنك استخدام Tavily هنا إذا أردت)
         prompt = "أعطني معلومة تقنية مذهلة وجديدة عن الذكاء الاصطناعي في عام 2026 لتغريدة عربية مشوقة مع هاشتاقات."
-        
         response = client_ai.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         tweet_text = response.text.strip()
 
