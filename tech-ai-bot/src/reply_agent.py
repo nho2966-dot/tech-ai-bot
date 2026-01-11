@@ -1,6 +1,6 @@
 import os
 import tweepy
-import genai from google
+from google import genai  # التصحيح: استدعاء المكتبة بشكل صحيح
 import logging
 
 def process_mentions(username):
@@ -23,12 +23,13 @@ def process_mentions(username):
             return
 
         for tweet in mentions.data:
+            # استخدام نموذج gemini-2.0-flash كما هو محدد في الكود الخاص بك
             prompt = f"رد على هذه التغريدة بأسلوب تقني ذكي وقصير جداً بالعربية: {tweet.text}"
             response = client_ai.models.generate_content(model="gemini-2.0-flash", contents=prompt)
             
+            # الرد على التغريدة مع الالتزام بحد الـ 280 حرفاً
             client.create_tweet(text=response.text[:280], in_reply_to_tweet_id=tweet.id)
             logging.info(f"✅ تم الرد على التغريدة رقم: {tweet.id}")
 
     except Exception as e:
         logging.error(f"❌ خطأ في نظام الردود: {e}")
-
