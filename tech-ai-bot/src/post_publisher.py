@@ -1,6 +1,6 @@
 import os
 import tweepy
-from google import genai  # التصحيح هنا: استخدام from قبل google
+from google import genai
 import logging
 
 def publish_tech_tweet():
@@ -25,3 +25,4 @@ def publish_tech_tweet():
 
     except Exception as e:
         logging.error(f"❌ خطأ في نظام النشر: {e}")
+
