@@ -1,54 +1,30 @@
-name: Unified Tech Bot
+import os
+import logging
+from src.post_publisher import publish_tech_tweet
+from src.reply_agent import process_mentions
 
-on:
-  schedule:
-    # تشغيل كل 20 دقيقة للردود
-    - cron: '*/20 * * * *'
-    # تشغيل كل 6 ساعات للنشر
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+# إعداد السجلات
+if not os.path.exists("logs"): os.makedirs("logs")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[logging.FileHandler("logs/bot.log", encoding='utf-8'), logging.StreamHandler()]
+)
 
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
+def main():
+    logging.info("🚀 بدء تشغيل المنظومة الموحدة...")
+    
+    # 1. تنفيذ الردود (الأولوية القصوى)
+    bot_username = os.getenv("BOT_USERNAME")
+    if bot_username:
+        logging.info(f"🔎 فحص الإشارات للحساب: @{bot_username}")
+        process_mentions(bot_username)
+    
+    # 2. تنفيذ النشر التلقائي
+    logging.info("📝 محاولة نشر تغريدة تقنية جديدة...")
+    publish_tech_tweet()
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    logging.info("🏁 تمت جميع العمليات بنجاح.")
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Run Unified Bot
-        env:
-          # تم مطابقة هذه الأسماء بدقة مع الصورة التي أرفقتها لـ Repository Secrets
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_SECRET }} # لاحظ هنا ربطنا Secret الخاص بك بالاسم الذي يتوقعه الكود
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          # أضفنا أسرار تليجرام أيضاً لأنها تظهر في صورتك
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
-        run: |
-          # تشغيل main.py الموجود في المجلد الرئيسي (Root) كما يظهر في صورتك
-          python main.py
-
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-logs
-          path: logs/
+if __name__ == "__main__":
+    main()
