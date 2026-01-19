@@ -2,7 +2,6 @@ import os
 import requests
 import tweepy
 import random
-import google.genai as genai
 from tenacity import retry, stop_after_attempt, wait_fixed
 import logging
 import hashlib
@@ -16,9 +15,6 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
-# تهيئة Gemini API
-genai.configure(api_key=os.getenv("GEMINI_KEY"))
 
 # ملف منع التكرار
 LAST_HASH_FILE = "last_hash.txt"
@@ -39,50 +35,47 @@ def is_duplicate(content: str) -> bool:
     return False
 
 def generate_tech_content():
-    """توليد محتوى تقني من Gemini — مع نص احتياطي عند الفشل."""
+    """توليد محتوى تقني من OpenRouter — مع نص احتياطي عند الفشل."""
     try:
-        tavily_key = os.getenv("TAVILY_KEY")
-        if not tavily_key:
-            raise ValueError("TAVILY_KEY غير مضبوط.")
+        # استخدم مفتاح OpenRouter
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_key:
+            raise ValueError("OPENROUTER_API_KEY غير مضبوط.")
+
+        # استخدم نموذج سريع وخفيف (مثلاً: llama-3.1-8b-instruct)
+        model = "meta-llama/llama-3.1-8b-instruct"
+
+        headers = {
+            "Authorization": f"Bearer {openrouter_key}",
+            "Content-Type": "application/json"
+        }
+
+        prompt = (
+            "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
+            "بأسلوب ودود ومحترف، ولا تكرر السؤال.\n\n"
+            "السؤال: ما هو أحدث تطور في الذكاء الاصطناعي لعام 2026؟"
+        )
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7
+        }
 
         response = requests.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": tavily_key,
-                "query": "newest verified AI tools and smartphone hacks Jan 2026",
-                "max_results": 3,
-                "search_depth": "basic"
-            },
+            "https://openrouter.ai/api/v1/chat/completions",
+            json=payload,
+            headers=headers,
             timeout=10
         )
         response.raise_for_status()
         data = response.json()
 
-        if not data.get("results"):
-            raise Exception("لا توجد نتائج من Tavily API.")
-
-        item = random.choice(data["results"])
-        raw_content = item.get("content") or item.get("snippet", "")
-        source_url = item.get("url", "N/A")
-
-        logging.info(f"تم جلب محتوى من: {source_url}")
-
-        prompt = (
-            "لخّص المحتوى التالي في جملة واحدة بالعربية الفصحى، "
-            "بطريقة جذابة ومهنية، مناسبة لتغريدة تقنية قصيرة: "
-            f"{raw_content}"
-        )
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        gemini_response = model.generate_content(contents=prompt)
-        summary = gemini_response.text.strip()
-
-        if not summary:
-            raise Exception("Gemini أعاد محتوى فارغًا.")
-
-        return summary, source_url
+        content = data["choices"][0]["message"]["content"].strip()
+        return content, "https://openrouter.ai/"
 
     except Exception as e:
-        logging.error(f"فشل توليد المحتوى من Gemini: {e}")
+        logging.error(f"فشل توليد المحتوى من OpenRouter: {e}")
         # ✅ نص احتياطي
         fallback_content = [
             "اكتشف أحدث أدوات الذكاء الاصطناعي التي تغيّر عالمنا كل يوم 🤖",
@@ -121,7 +114,7 @@ def publish_tech_tweet():
         # ✅ النشر الفعلي
         response = client.create_tweet(text=tweet_text)
 
-        if response and response.data:
+        if response and response.
             tweet_id = response.data["id"]
             logging.info(f"✅ تم النشر بنجاح! رقم التغريدة: {tweet_id}")
         else:
