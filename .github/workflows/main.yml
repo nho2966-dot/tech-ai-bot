@@ -1,30 +1,47 @@
-name: Unified Tech Bot 2026
+name: AI Tech Bot 2026
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch: # هذا السطر هو المسؤول عن إظهار الزر الأزرق
+    # تم ضبط الأوقات لتناسب ذروة التفاعل (بتوقيت جرينتش UTC)
+    # 06:00 UTC = 09:00 AM بتوقيت مكة
+    # 10:00 UTC = 01:00 PM بتوقيت مكة
+    # 15:00 UTC = 06:00 PM بتوقيت مكة
+    # 18:00 UTC = 09:00 PM بتوقيت مكة
+    - cron: '0 6,10,15,18 * * *'
+  
+  workflow_dispatch: # زر التشغيل اليدوي للاختبار في أي وقت
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./tech-ai-bot
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install Dependencies
-        run: pip install -r requirements.txt
-      - name: Execution
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Tech AI Bot
         env:
+          # مفاتيح Gemini و OpenRouter
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          
+          # مفاتيح منصة X (Twitter)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
         run: python main.py
+
+      - name: Keep Workflow Active
+        # هذه الخطوة تمنع GitHub من إيقاف الـ Workflow إذا لم يتم تحديث الكود لفترة طويلة
+        uses: gautamkrishnar/keepalive-workflow@v2
