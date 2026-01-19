@@ -2,25 +2,30 @@ name: AI Tech Bot 2026
 
 on:
   schedule:
-    # النشر 4 مرات يومياً في أوقات الذروة (بتوقيت مكة المكرمة)
     - cron: '0 6,10,15,18 * * *'
   workflow_dispatch: 
+
+# إعطاء صلاحيات صريحة وشاملة
+permissions:
+  contents: write
+  actions: write
+  id-token: write
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    # حل مشكلة Repository access blocked عبر منح صلاحيات الكتابة
-    permissions:
-      contents: write
     
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true # لضمان بقاء الصلاحيات نشطة
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip' # تسريع العملية وتقليل طلبات التحميل
 
       - name: Install Dependencies
         run: |
@@ -36,6 +41,3 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: python main.py
-
-      - name: Keep Workflow Active
-        uses: gautamkrishnar/keepalive-workflow@v2
