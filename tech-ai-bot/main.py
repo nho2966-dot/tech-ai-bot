@@ -1,28 +1,16 @@
+import sys
 import os
 import logging
-from src.post_publisher import publish_tech_tweet
-from src.reply_agent import process_mentions
 
-# إعداد السجلات
-if not os.path.exists("logs"): os.makedirs("logs")
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[logging.FileHandler("logs/bot.log", encoding='utf-8'), logging.StreamHandler()]
-)
+# إضافة مسار src للنظام لضمان الاستيراد الصحيح
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-def main():
-    logging.info("🚀 بدء تشغيل المنظومة الموحدة...")
-    
-    # 1. الردود
-    bot_username = os.getenv("BOT_USERNAME")
-    if bot_username:
-        process_mentions(bot_username)
-    
-    # 2. النشر
-    publish_tech_tweet()
-
-    logging.info("🏁 تمت جميع العمليات بنجاح.")
+try:
+    from post_publisher import publish_tech_tweet
+    from reply_agent import run_reply_agent
+except ImportError as e:
+    logging.error(f"❌ خطأ في الاستيراد: {e}")
 
 if __name__ == "__main__":
-    main()
+    # هذا الملف سيتم استدعاؤه بواسطة YAML للنشر
+    publish_tech_tweet()
