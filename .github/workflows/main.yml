@@ -1,46 +1,34 @@
-name: Tech AI Bot System 2026
+name: Tech AI Bot 2026
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # نظام الردود كل 5 دقائق
-    - cron: '0 6,15 * * *' # النشر مرتين يومياً
+    - cron: '*/10 * * * *' # تفقد الردود كل 10 دقائق
+    - cron: '0 9,18 * * *' # النشر مرتين يومياً
   workflow_dispatch:
 
 jobs:
-  build-and-run:
+  run-system:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: 📂 سحب الكود
-        uses: actions/checkout@v4
-
-      - name: 🐍 إعداد بايثون
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      
+      - name: Install
+        run: pip install -r tech-ai-bot/requirements.txt
 
-      - name: 📦 تثبيت المكتبات (مع تصحيح المسار)
-        run: |
-          python -m pip install --upgrade pip
-          # أضفنا اسم المجلد قبل الملف
-          pip install -r tech-ai-bot/requirements.txt 
-
-      - name: 🤖 تشغيل نظام الردود
+      - name: Run Reply Agent
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python tech-ai-bot/src/reply_agent.py
 
-      - name: 📢 تشغيل نظام النشر
-        if: github.event_schedule == '0 6,15 * * *' || github.event_name == 'workflow_dispatch'
+      - name: Run Publisher
+        if: github.event_schedule == '0 9,18 * * *' || github.event_name == 'workflow_dispatch'
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
