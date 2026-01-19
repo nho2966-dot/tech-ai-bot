@@ -16,6 +16,15 @@ logging.basicConfig(
     ]
 )
 
+# تهيئة Gemini API (إذا كان متوفرًا)
+def init_gemini():
+    gemini_key = os.getenv("GEMINI_KEY")
+    if gemini_key:
+        import google.genai as genai
+        genai.configure(api_key=gemini_key)
+        return genai
+    return None
+
 # ملف منع التكرار
 LAST_HASH_FILE = "last_hash.txt"
 
@@ -34,31 +43,37 @@ def is_duplicate(content: str) -> bool:
         f.write(current_hash)
     return False
 
-def generate_tech_content():
-    """توليد محتوى تقني من OpenRouter — مع نص احتياطي عند الفشل."""
+def generate_content_from_gemini():
+    """توليد محتوى من Gemini — مع إمكانية الفشل."""
     try:
-        # استخدم مفتاح OpenRouter
+        genai = init_gemini()
+        if not genai:
+            raise ValueError("GEMINI_KEY غير مضبوط.")
+
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        prompt = "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، بأسلوب ودود ومحترف: ما هو أحدث تطور في الذكاء الاصطناعي لعام 2026؟"
+        response = model.generate_content(contents=prompt)
+        content = response.text.strip()
+        return content, "https://gemini.google.com/"
+    except Exception as e:
+        logging.error(f"فشل توليد المحتوى من Gemini: {e}")
+        return None, None
+
+def generate_content_from_openrouter():
+    """توليد محتوى من OpenRouter — مع إمكانية الفشل."""
+    try:
         openrouter_key = os.getenv("OPENROUTER_API_KEY")
         if not openrouter_key:
             raise ValueError("OPENROUTER_API_KEY غير مضبوط.")
-
-        # استخدم نموذج سريع وخفيف (مثلاً: llama-3.1-8b-instruct)
-        model = "meta-llama/llama-3.1-8b-instruct"
 
         headers = {
             "Authorization": f"Bearer {openrouter_key}",
             "Content-Type": "application/json"
         }
 
-        prompt = (
-            "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، "
-            "بأسلوب ودود ومحترف، ولا تكرر السؤال.\n\n"
-            "السؤال: ما هو أحدث تطور في الذكاء الاصطناعي لعام 2026؟"
-        )
-
         payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "model": "meta-llama/llama-3.1-8b-instruct",
+            "messages": [{"role": "user", "content": "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، بأسلوب ودود ومحترف: ما هو أحدث تطور في الذكاء الاصطناعي لعام 2026؟"}],
             "temperature": 0.7
         }
 
@@ -73,18 +88,34 @@ def generate_tech_content():
 
         content = data["choices"][0]["message"]["content"].strip()
         return content, "https://openrouter.ai/"
-
     except Exception as e:
         logging.error(f"فشل توليد المحتوى من OpenRouter: {e}")
-        # ✅ نص احتياطي
-        fallback_content = [
-            "اكتشف أحدث أدوات الذكاء الاصطناعي التي تغيّر عالمنا كل يوم 🤖",
-            "هل تساءلت يومًا كيف يعمل الذكاء الاصطناعي؟ إليك نظرة سريعة! 🧠",
-            "ابقَ على اطلاع دائم بأحدث التقنيات المذهلة في عالم الذكاء الاصطناعي!",
-            "الذكاء الاصطناعي لا يحل محل البشر، بل يعزز قدراتهم! 💡",
-            "تتطور التكنولوجيا بسرعة، ابقَ معها دائمًا! 🚀"
-        ]
-        return random.choice(fallback_content), "https://example.com/fallback"
+        return None, None
+
+def generate_tech_content():
+    """توليد محتوى تقني — مع محاولة Gemini أولاً، ثم OpenRouter، وأخيرًا نص احتياطي."""
+    # 1. محاولة Gemini
+    content, source = generate_content_from_gemini()
+    if content:
+        logging.info("✅ تم توليد المحتوى من Gemini.")
+        return content, source
+
+    # 2. محاولة OpenRouter
+    content, source = generate_content_from_openrouter()
+    if content:
+        logging.info("✅ تم توليد المحتوى من OpenRouter.")
+        return content, source
+
+    # 3. استخدام نص احتياطي
+    logging.warning("⚠️ تم استخدام محتوى احتياطي.")
+    fallback_content = [
+        "اكتشف أحدث أدوات الذكاء الاصطناعي التي تغيّر عالمنا كل يوم 🤖",
+        "هل تساءلت يومًا كيف يعمل الذكاء الاصطناعي؟ إليك نظرة سريعة! 🧠",
+        "ابقَ على اطلاع دائم بأحدث التقنيات المذهلة في عالم الذكاء الاصطناعي!",
+        "الذكاء الاصطناعي لا يحل محل البشر، بل يعزز قدراتهم! 💡",
+        "تتطور التكنولوجيا بسرعة، ابقَ معها دائمًا! 🚀"
+    ]
+    return random.choice(fallback_content), "https://example.com/fallback"
 
 def publish_tech_tweet():
     """نشر تغريدة تقنية على X."""
