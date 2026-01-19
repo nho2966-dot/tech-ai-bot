@@ -7,43 +7,55 @@ from google import genai
 from google.genai import types
 from openai import OpenAI
 
-# إعدادات التسجيل لمراقبة النظام
+# إعدادات التسجيل
 logging.basicConfig(level=logging.INFO)
 
 def clean_text(text):
-    """تنظيف النص لضمان جودة النشر وتوافق الرموز."""
     if not text: return ""
-    cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)a-zA-Z🐦🤖🚀💡✨🧠🌍📱💻⌚📊📈🔋🚨]', '', text)
+    # إزالة الرموز الغريبة مع الحفاظ على الإيموجي واللغتين
+    cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)a-zA-Z🐦🤖🚀💡✨🧠🌍📱💻⌚📊📈🔋🚨🔗🎯🛠️🔋📷]', '', text)
     return " ".join(cleaned.split())
 
+def smart_truncate(content, length=280):
+    """يقص النص بذكاء عند نهاية جملة أو مسافة للحفاظ على القيمة المعرفية."""
+    if len(content) <= length:
+        return content
+    
+    # محاولة القص عند آخر نقطة أو فاصلة قبل الحد الأقصى
+    truncated = content[:length-3]
+    last_punctuation = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('؟'))
+    
+    if last_punctuation > length * 0.7: # إذا كانت النقطة قريبة من النهاية
+        return content[:last_punctuation + 1]
+    
+    # إذا لم توجد نقطة، قص عند آخر مسافة
+    last_space = truncated.rfind(' ')
+    return content[:last_space] + "..."
+
 def get_pro_tips():
-    """مخزن المحتوى التعليمي: يشرح الميزة، أهميتها، وكيفية توظيفها عملياً."""
+    """محتوى بديل عالي القيمة يركز على التطبيق العملي والمصدر."""
     tips = [
         {
-            "ar": "🎯 تقنية RAG في الذكاء الاصطناعي\n💡 الأهمية: تمنع 'هلوسة' النماذج عبر ربطها بمصادر موثوقة.\n🛠️ توظيفها: اربط ملفاتك الخاصة بـ LLM عبر أدوات RAG للحصول على إجابات دقيقة من داخل بياناتك فقط.\n🔗 المصدر: IBM Research",
-            "en": "🎯 RAG in AI\n💡 Importance: Prevents AI hallucinations by grounding it in trusted data.\n🛠️ Practice: Connect your private docs to LLMs using RAG tools for source-based accurate answers.\n🔗 Source: IBM Research"
+            "ar": "🎯 تقنية RAG في الذكاء الاصطناعي\n💡 الأهمية: تمنع 'التأليف' بربط AI بمصادر موثوقة.\n🛠️ توظيفها: اربط ملفاتك بـ LLM للحصول على نتائج دقيقة من بياناتك فقط.\n🔗 المصدر: IBM",
+            "en": "🎯 RAG in AI\n💡 Importance: Prevents AI hallucinations by grounding it in data.\n🛠️ Practice: Connect your docs to LLMs for accurate, source-based results.\n🔗 Source: IBM"
         },
         {
-            "ar": "🔋 ميزة LTPO في الشاشات\n💡 الأهمية: السر خلف كفاءة البطارية في الهواتف الرائدة.\n🛠️ توظيفها: فعل وضع 'Adaptive'؛ الشاشة ستخفض التحديث لـ 1Hz تلقائياً عند السكون لتوفير الطاقة.\n🔗 المصدر: Samsung Display",
-            "en": "🔋 LTPO Display Tech\n💡 Importance: The key to battery efficiency in flagship phones.\n🛠️ Practice: Enable 'Adaptive' mode; the screen will auto-drop to 1Hz when idle to save power.\n🔗 Source: Samsung Display"
-        },
-        {
-            "ar": "📷 التصوير بصيغة RAW/ProRAW\n💡 الأهمية: الاحتفاظ بكامل بيانات الإضاءة والألوان دون معالجة ضارة.\n🛠️ توظيفها: استخدمها في الإضاءة الصعبة، ثم عدل 'Shadows' في Lightroom لنتائج سينمائية.\n🔗 المصدر: Adobe Professional",
-            "en": "📷 RAW/ProRAW Photography\n💡 Importance: Preserves all light and color data without destructive processing.\n🛠️ Practice: Use it for tricky lighting, then edit Shadows in Lightroom for cinematic results.\n🔗 Source: Adobe Professional"
+            "ar": "🔋 ميزة LTPO في الشاشات\n💡 الأهمية: سر كفاءة البطارية في الهواتف الرائدة.\n🛠️ توظيفها: فعل وضع 'Adaptive'؛ ستخفض الشاشة التحديث لـ 1Hz تلقائياً لتوفير الطاقة.\n🔗 المصدر: Samsung",
+            "en": "🔋 LTPO Tech\n💡 Importance: Key to battery life in flagships.\n🛠️ Practice: Enable 'Adaptive' mode; screen auto-drops to 1Hz to save power.\n🔗 Source: Samsung"
         }
     ]
     selected = random.choice(tips)
-    return f"{selected['ar']}\n\n{selected['en']}\n\n#AI #TechTips #Innovation #خفايا_التقنية"
+    return f"{selected['ar']}\n\n{selected['en']}\n\n#TechTips #Innovation"
 
 def generate_with_gemini():
-    """المستوى الأول: البحث العالمي عبر Gemini 2.0."""
     try:
         api_key = os.getenv("GEMINI_KEY")
         if not api_key: return None
         client = genai.Client(api_key=api_key)
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         
-        prompt = "ابحث عن خبر تقني عالمي جديد (آخر 7 أيام). اكتب تغريدة دسمة: الميزة، أهميتها للمستخدم، كيفية توظيفها، والمصدر. باللغتين العربية والإنجليزية مع الهاشتاقات."
+        prompt = ("ابحث عن خبر تقني عالمي جديد. اكتب تغريدة دسمة تشمل: الميزة، أهميتها، كيفية توظيفها، والمصدر. "
+                  "باللغتين العربية والإنجليزية. اجعل النص مختصراً ومركزاً جداً ليناسب 280 حرفاً.")
         
         response = client.models.generate_content(
             model="gemini-2.0-flash", 
@@ -56,38 +68,26 @@ def generate_with_gemini():
         return None
 
 def generate_with_qwen_groq():
-    """المستوى الثاني: البديل السريع عبر Qwen/Groq."""
     try:
         api_key = os.getenv("QWEN_API_KEY")
         if not api_key: return None
         client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
-        
         completion = client.chat.completions.create(
             model="qwen-2.5-32b",
-            messages=[
-                {"role": "system", "content": "أنت خبير تقني تشرح الميزات وأهميتها وتطبيقها العملي بالعربي والإنجليزي مع المصادر."},
-                {"role": "user", "content": "هات خبر تقني عالمي جديد (آخر 7 أيام) بصيغة دسمة ومفيدة للمستخدم."}
-            ]
+            messages=[{"role": "user", "content": "هات خبر تقني جديد (عربي وإنجليزي) مركز جداً مع الميزة والفائدة والمصدر."}]
         )
         return clean_text(completion.choices[0].message.content)
     except Exception as e:
-        logging.error(f"⚠️ Groq/Qwen Error: {e}")
+        logging.error(f"⚠️ Groq Error: {e}")
         return None
 
 def publish_tech_tweet():
-    """المحرك الرئيسي لنظام النشر الذكي."""
     try:
-        logging.info("🚀 جاري محاولة استخراج أفضل محتوى تقني...")
-        
-        content = generate_with_gemini()
-        if not content:
-            logging.info("🔄 انتقل إلى الخطة البديلة: Qwen/Groq...")
-            content = generate_with_qwen_groq()
-        if not content:
-            logging.info("💡 استخدم الخطة الاحتياطية: دليل المستخدم الذكي...")
-            content = get_pro_tips()
+        logging.info("🚀 محاولة جلب محتوى ذو قيمة عالية...")
+        content = generate_with_gemini() or generate_with_qwen_groq() or get_pro_tips()
 
-        # إعدادات X (Twitter)
+        final_tweet = smart_truncate(content)
+
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
@@ -95,9 +95,8 @@ def publish_tech_tweet():
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
         
-        if content:
-            client.create_tweet(text=content[:280]) # ضمان عدم تجاوز حد الحروف
-            logging.info("✅ تم النشر بنجاح!")
+        client.create_tweet(text=final_tweet)
+        logging.info(f"✅ تم النشر! الطول النهائي: {len(final_tweet)}")
             
     except Exception as e:
         logging.error(f"❌ فشل النشر: {e}")
