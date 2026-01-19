@@ -1,58 +1,134 @@
 import os
+import requests
 import tweepy
-from google import genai
+import random
+import google.genai as genai
+from tenacity import retry, stop_after_attempt, wait_fixed
 import logging
-import time
+import hashlib
 
-# إعداد التسجيل لمراقبة أداء البوت
-logging.basicConfig(level=logging.INFO)
+# إعداد نظام التسجيل
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("logs/bot.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+# تهيئة Gemini API
+genai.configure(api_key=os.getenv("GEMINI_KEY"))
+
+# ملف منع التكرار
+LAST_HASH_FILE = "last_hash.txt"
+
+def get_content_hash(text: str) -> str:
+    return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
+
+def is_duplicate(content: str) -> bool:
+    current_hash = get_content_hash(content)
+    if os.path.exists(LAST_HASH_FILE):
+        with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
+            last_hash = f.read().strip()
+        if current_hash == last_hash:
+            logging.info("تم اكتشاف محتوى مكرر — تم تجاهله.")
+            return True
+    with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
+        f.write(current_hash)
+    return False
+
+def generate_tech_content():
+    """توليد محتوى تقني من Gemini — مع نص احتياطي عند الفشل."""
+    try:
+        tavily_key = os.getenv("TAVILY_KEY")
+        if not tavily_key:
+            raise ValueError("TAVILY_KEY غير مضبوط.")
+
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": tavily_key,
+                "query": "newest verified AI tools and smartphone hacks Jan 2026",
+                "max_results": 3,
+                "search_depth": "basic"
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if not data.get("results"):
+            raise Exception("لا توجد نتائج من Tavily API.")
+
+        item = random.choice(data["results"])
+        raw_content = item.get("content") or item.get("snippet", "")
+        source_url = item.get("url", "N/A")
+
+        logging.info(f"تم جلب محتوى من: {source_url}")
+
+        prompt = (
+            "لخّص المحتوى التالي في جملة واحدة بالعربية الفصحى، "
+            "بطريقة جذابة ومهنية، مناسبة لتغريدة تقنية قصيرة: "
+            f"{raw_content}"
+        )
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        gemini_response = model.generate_content(contents=prompt)
+        summary = gemini_response.text.strip()
+
+        if not summary:
+            raise Exception("Gemini أعاد محتوى فارغًا.")
+
+        return summary, source_url
+
+    except Exception as e:
+        logging.error(f"فشل توليد المحتوى من Gemini: {e}")
+        # ✅ نص احتياطي
+        fallback_content = [
+            "اكتشف أحدث أدوات الذكاء الاصطناعي التي تغيّر عالمنا كل يوم 🤖",
+            "هل تساءلت يومًا كيف يعمل الذكاء الاصطناعي؟ إليك نظرة سريعة! 🧠",
+            "ابقَ على اطلاع دائم بأحدث التقنيات المذهلة في عالم الذكاء الاصطناعي!",
+            "الذكاء الاصطناعي لا يحل محل البشر، بل يعزز قدراتهم! 💡",
+            "تتطور التكنولوجيا بسرعة، ابقَ معها دائمًا! 🚀"
+        ]
+        return random.choice(fallback_content), "https://example.com/fallback"
 
 def publish_tech_tweet():
+    """نشر تغريدة تقنية على X."""
+    logging.info("🚀 بدء مهمة النشر التلقائي...")
     try:
-        # 1. إعداد عميل Gemini 2.0
-        client_ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-        
-        prompt = "أعطني معلومة تقنية مذهلة وجديدة عن الذكاء الاصطناعي في عام 2026 لتغريدة عربية مشوقة مع هاشتاقات تقنية."
-        
-        # 2. آلية إعادة المحاولة في حال وجود زحام (خطأ 429)
-        response = None
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                logging.info(f"🔄 محاولة توليد المحتوى (محاولة رقم {attempt + 1})...")
-                response = client_ai.models.generate_content(
-                    model="gemini-2.0-flash", 
-                    contents=prompt
-                )
-                break  # نجحت العملية، اخرج من حلقة التكرار
-            except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 20  # انتظار تصاعدي: 20، 40 ثانية
-                    logging.warning(f"⚠️ زحام في السيرفر، سأنتظر {wait_time} ثانية...")
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise e
+        content, url = generate_tech_content()
 
-        if not response or not response.text:
-            raise Exception("لم يتم توليد نص من Gemini")
+        if is_duplicate(content):
+            return
 
-        tweet_text = response.text.strip()
-
-        # 3. إعداد عميل X (Twitter)
+        # ✅ استخدام المفاتيح الأربعة للنشر (OAuth 1.0a)
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
+            access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True
         )
 
-        # 4. نشر التغريدة (مع قص النص إذا تجاوز الحد المسموح)
-        client.create_tweet(text=tweet_text[:280])
-        logging.info("✅ تم نشر التغريدة التقنية بنجاح على حسابك.")
+        # بناء التغريدة
+        max_text_len = 280 - len(url) - 10
+        tweet_text = f"🛡️ موثوق | {content[:max_text_len]}\n\n🔗 {url}"
+
+        if len(tweet_text) > 280:
+            tweet_text = tweet_text[:275] + "..."
+
+        # ✅ النشر الفعلي
+        response = client.create_tweet(text=tweet_text)
+
+        if response and response.data:
+            tweet_id = response.data["id"]
+            logging.info(f"✅ تم النشر بنجاح! رقم التغريدة: {tweet_id}")
+        else:
+            logging.warning("⚠️ لم يتم تأكيد النشر من X.")
 
     except Exception as e:
-        logging.error(f"❌ فشل نظام النشر: {e}")
+        logging.error(f"❌ فشل النشر: {e}")
 
 if __name__ == "__main__":
     publish_tech_tweet()
