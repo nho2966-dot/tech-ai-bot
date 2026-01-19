@@ -2,18 +2,16 @@ name: AI Tech Bot 2026
 
 on:
   schedule:
-    # تم ضبط الأوقات لتناسب ذروة التفاعل (بتوقيت جرينتش UTC)
-    # 06:00 UTC = 09:00 AM بتوقيت مكة
-    # 10:00 UTC = 01:00 PM بتوقيت مكة
-    # 15:00 UTC = 06:00 PM بتوقيت مكة
-    # 18:00 UTC = 09:00 PM بتوقيت مكة
+    # النشر 4 مرات يومياً في أوقات الذروة (بتوقيت مكة المكرمة)
     - cron: '0 6,10,15,18 * * *'
-  
-  workflow_dispatch: # زر التشغيل اليدوي للاختبار في أي وقت
+  workflow_dispatch: 
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    # حل مشكلة Repository access blocked عبر منح صلاحيات الكتابة
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout Repository
@@ -31,11 +29,8 @@ jobs:
 
       - name: Run Tech AI Bot
         env:
-          # مفاتيح Gemini و OpenRouter
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          
-          # مفاتيح منصة X (Twitter)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -43,5 +38,4 @@ jobs:
         run: python main.py
 
       - name: Keep Workflow Active
-        # هذه الخطوة تمنع GitHub من إيقاف الـ Workflow إذا لم يتم تحديث الكود لفترة طويلة
         uses: gautamkrishnar/keepalive-workflow@v2
