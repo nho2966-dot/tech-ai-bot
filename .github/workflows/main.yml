@@ -1,39 +1,54 @@
-name: AI Tech Bot 2026
+name: Tech AI Bot System 2026
 
 on:
   schedule:
-    - cron: '0 6,10,15,18 * * *'
-  workflow_dispatch: 
+    # 1. نظام الردود الذكية: يعمل كل 5 دقائق لمراقبة التعليقات والرد عليها فوراً
+    - cron: '*/5 * * * *'
+    
+    # 2. نظام النشر التلقائي: يغرد مرتين يومياً (9 صباحاً و 6 مساءً بتوقيت مكة)
+    # ملاحظة: سيقوم الأكشن بتشغيل كل الملفات، لكن الكود مبرمج ليفصل المهام
+    - cron: '0 6,15 * * *'
 
-permissions:
-  contents: write
+  workflow_dispatch: # زر التشغيل اليدوي للتجربة في أي وقت
 
 jobs:
-  run-bot:
+  build-and-run:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout Repository
+      - name: 📂 سحب الكود من المستودع
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 إعداد بيئة بايثون
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip' # تسريع التشغيل عبر تخزين المكتبات
 
-      - name: Install Dependencies
+      - name: 📦 تثبيت المكتبات اللازمة
         run: |
           python -m pip install --upgrade pip
-          # الدخول للمجلد الصحيح وتثبيت المكتبات
-          pip install -r tech-ai-bot/requirements.txt
+          pip install -r requirements.txt
 
-      - name: Run Tech AI Bot
+      - name: 🤖 تشغيل نظام الردود (Reply Agent)
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        # التعديل هنا لضمان تشغيل الملف من مكانه الصحيح
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+        run: python tech-ai-bot/src/reply_agent.py
+
+      - name: 📢 تشغيل نظام النشر (Post Publisher)
+        # هذا السطر يضمن أن النشر لا يحدث إلا في أوقات الكرون المحددة للنشر فقط
+        if: github.event_schedule == '0 6,15 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
         run: python tech-ai-bot/main.py
