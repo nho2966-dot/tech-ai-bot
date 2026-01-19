@@ -1,60 +1,56 @@
 import os
 import tweepy
 from google import genai
-from google.genai import types # لاستخدام أدوات البحث
+from google.genai import types
 import logging
 import re
 
 logging.basicConfig(level=logging.INFO)
 
-def clean_arabic_text(text):
-    """تنظيف النص وضمان الفصاحة."""
-    cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)🐦🤖🚀💡✨🧠🌍📱💻]', '', text)
+def clean_text(text):
+    """تنظيف النص مع الحفاظ على الحروف العربية والإنجليزية والإيموجي."""
+    # نسمح بالحروف العربية، الإنجليزية، الأرقام، والرموز التقنية
+    cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)a-zA-Z🐦🤖🚀💡✨🧠🌍📱💻⌚📊📈]', '', text)
     return " ".join(cleaned.split())
 
-def generate_verified_content():
-    """توليد محتوى مبني على بحث حقيقي من مصادر موثوقة."""
+def generate_global_content():
+    """توليد محتوى تقني أكاديمي وبياني باللغتين العربية والإنجليزية."""
     try:
         api_key = os.getenv("GEMINI_KEY")
         client = genai.Client(api_key=api_key)
-
-        # تفعيل أداة البحث من جوجل للوصول لأحدث الأخبار الموثقة
-        google_search_tool = types.Tool(
-            google_search=types.GoogleSearch()
-        )
+        google_search_tool = types.Tool(google_search=types.GoogleSearch())
 
         prompt = """
-        ابحث الآن عن أحدث خبر تقني موثق (أو تسريب مؤكد من مصدر موثوق) لعام 2026.
-        المصادر المطلوبة: (Apple Newsroom, Samsung News, The Verge, Reuters Technology).
+        بصفتك محللاً تقنياً عالمياً، ابحث في أحدث أبحاث الجامعات (MIT, Stanford, ETH Zurich) أو تقارير (Gartner, Reuters) لعام 2026.
+        الهدف: استخراج خبر دسم يحتوي على أرقام أو بيانات تقنية.
         
-        بعد البحث، اكتب تغريدة باللغة العربية تشمل:
-        1. الخبر الحقيقي مع ذكر أرقام أو مواصفات دقيقة.
-        2. اسم المصدر العالمي الذي نقل الخبر (مثلاً: وفقاً لـ رويترز).
-        3. وسم #خبر_موثق ووسوم تقنية ذات صلة.
+        قم بصياغة التغريدة بالترتيب التالي:
+        1. النص العربي: (عنوان مشوق + المعلومة التقنية والبيانية بأسلوب فصيح + المصدر).
+        2. فاصلاً بسيطاً (مثل خط أو إيموجي).
+        3. النص الإنجليزي: (ترجمة احترافية ودقيقة لنفس المحتوى السابق).
+        4. وسوم مشتركة: #AI #Tech2026 #MIT #Stanford #تقنية #ذكاء_اصطناعي.
         
-        صيغة التغريدة: يجب أن تكون رصينة، فصيحة، وبعيدة عن المبالغة.
+        ملاحظة: تأكد من أن إجمالي النص لا يتجاوز 280 حرفاً قدر الإمكان، وإذا كان الخبر طويلاً، ركز على الجوهر في اللغتين.
         """
         
         response = client.models.generate_content(
             model="gemini-2.0-flash", 
             contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[google_search_tool] # تم تفعيل البحث الحي هنا
-            )
+            config=types.GenerateContentConfig(tools=[google_search_tool])
         )
         
         if response and response.text:
-            return clean_arabic_text(response.text.strip())
+            return clean_text(response.text.strip())
         return None
     except Exception as e:
-        logging.error(f"❌ خطأ في البحث والتوليد: {e}")
+        logging.error(f"❌ خطأ في التوليد العالمي: {e}")
         return None
 
 def publish_tech_tweet():
     try:
-        content = generate_verified_content()
+        content = generate_global_content()
         if not content:
-            content = "نعتذر، لم نتمكن من التحقق من خبر موثق حالياً. سنوافيكم بجديد التقنية فور تأكيده. #تقنية #AI"
+            content = "نتابع أحدث ابتكارات 2026 عالمياً. 🌐 Monitoring the latest 2026 innovations globally. #Tech #AI"
 
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
@@ -64,7 +60,7 @@ def publish_tech_tweet():
         )
 
         client.create_tweet(text=content[:280])
-        logging.info("✅ تم نشر خبر موثق بنجاح!")
+        logging.info("✅ تم نشر التغريدة العالمية بنجاح!")
     except Exception as e:
         logging.error(f"❌ خطأ في النشر: {e}")
 
