@@ -1,68 +1,86 @@
 import os
 import tweepy
-from google import genai
 import logging
-import time
+from google import genai
+from openai import OpenAI
+import re
 
-# إعداد التسجيل ليكون واضحاً في GitHub Actions
+# إعدادات التسجيل
 logging.basicConfig(level=logging.INFO)
 
-def process_mentions():
+def clean_reply(text):
+    """تنظيف الرد لضمان عدم تجاوز حدود X."""
+    if not text: return ""
+    cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)a-zA-Z🐦🤖🚀💡✨🧠🌍📱💻⌚📊📈🔋🚨🔗🎯🛠️]', '', text)
+    return cleaned[:280]
+
+def generate_smart_reply(comment_text):
+    """توليد رد تقني ذكي باستخدام Gemini مع fallback لـ Qwen."""
+    prompt = f"أجب على هذا التعليق التقني بلباقة (عربي وإنجليزي) مع توضيح الفائدة العملية: {comment_text}"
+    
+    # المحاولة 1: Gemini
     try:
-        logging.info("🔍 فحص التعليقات والإشارات (Mentions) الجديدة...")
+        api_key = os.getenv("GEMINI_KEY")
+        if api_key:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return clean_reply(response.text.strip())
+    except Exception as e:
+        logging.error(f"⚠️ Gemini Reply Error: {e}")
+
+    # المحاولة 2: Qwen (B-plan)
+    try:
+        api_key = os.getenv("QWEN_API_KEY")
+        if api_key:
+            client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+            completion = client.chat.completions.create(
+                model="qwen-2.5-32b",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return clean_reply(completion.choices[0].message.content)
+    except Exception as e:
+        logging.error(f"⚠️ Qwen Reply Error: {e}")
         
-        # 1. إعداد الاتصال بـ X (نحتاج v1.1 لقراءة المنشن و v2 للرد)
-        auth = tweepy.OAuth1UserHandler(
-            os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
-            os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
-        )
-        api_v1 = tweepy.API(auth)
-        client_v2 = tweepy.Client(
+    return "شكراً لتفاعلك! نحن هنا لدعم رحلتك التقنية. 🚀 | Thanks for your interaction!"
+
+def run_reply_agent():
+    """المحرك الرئيسي لمراقبة التعليقات والرد عليها."""
+    try:
+        # إعداد عميل Twitter (V2)
+        client = tweepy.Client(
+            bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-
-        # 2. جلب آخر 5 إشارات
-        mentions = api_v1.mentions_timeline(count=5)
         
-        if not mentions:
-            logging.info("💡 لا توجد تعليقات جديدة للرد عليها.")
+        # 1. جلب معرف البوت (ID)
+        me = client.get_me().data
+        if not me: return
+
+        # 2. جلب آخر الردود (Mentions)
+        mentions = client.get_users_mentions(id=me.id, max_results=10)
+        
+        if not mentions.data:
+            logging.info("😴 لا توجد إشارات جديدة حالياً.")
             return
 
-        client_ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-
-        for mention in mentions:
-            logging.info(f"📩 تعليق جديد من: {mention.user.screen_name}")
+        for tweet in mentions.data:
+            logging.info(f"🔍 معالجة التعليق: {tweet.text}")
             
-            # منع الرد المتكرر أو الرد على النفس
-            # ملاحظة: تأكد من تغيير ID حسابك ليتناسب مع حسابك الفعلي
+            # منع البوت من الرد على نفسه في حلقة مفرغة
+            # (سيتم التحقق من الردود التي لم يتم الرد عليها مسبقاً)
             
-            prompt = f"""
-            أنت خبير تقني ودود. رد على هذا التعليق: "{mention.text}"
-            بأسلوب ذكي، فصيح، ومختصر جداً (أقل من 140 حرفاً). 
-            استخدم لغة عربية سليمة وإيموجي واحد.
-            """
-            
-            response = client_ai.models.generate_content(
-                model="gemini-2.0-flash", 
-                contents=prompt
+            reply_text = generate_smart_reply(tweet.text)
+            client.create_tweet(
+                text=reply_text,
+                in_reply_to_tweet_id=tweet.id
             )
-
-            if response and response.text:
-                reply_text = f"@{mention.user.screen_name} {response.text.strip()}"
-                
-                # إرسال الرد عبر API v2
-                client_v2.create_tweet(
-                    text=reply_text,
-                    in_reply_to_tweet_id=mention.id
-                )
-                logging.info(f"✅ تم الرد بنجاح على @{mention.user.screen_name}")
-                time.sleep(2) # تجنب الحظر
+            logging.info(f"✅ تم الرد على التغريدة رقم: {tweet.id}")
 
     except Exception as e:
-        logging.error(f"❌ خطأ في نظام الردود: {e}")
+        logging.error(f"❌ خطأ حرج في عميل الردود: {e}")
 
 if __name__ == "__main__":
-    process_mentions()
+    run_reply_agent()
