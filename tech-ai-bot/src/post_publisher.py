@@ -1,52 +1,31 @@
 import os
-import requests
 import tweepy
 import random
 from google import genai
 import logging
-import hashlib
-import time
 import re
 
-# إعداد نظام التسجيل
-if not os.path.exists("logs"):
-    os.makedirs("logs")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("logs/bot.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+# إعداد التسجيل
+logging.basicConfig(level=logging.INFO)
 
 def clean_arabic_text(text):
-    """تنظيف النص لضمان الفصاحة ومنع الرموز الغريبة."""
+    """تنظيف النص وضمان جودة الحروف العربية."""
     cleaned = re.sub(r'[^\u0600-\u06FF\s0-9\.\?\!\,\:\-\#\(\)🐦🤖🚀💡✨🧠🌍]', '', text)
     return " ".join(cleaned.split())
 
 def generate_content_from_gemini():
-    """توليد محتوى تقني فصيح عبر Gemini."""
+    """توليد محتوى تقني مع المصدر والوسوم (#)."""
     try:
         api_key = os.getenv("GEMINI_KEY")
-        if not api_key:
-            return None, None
-        
         client = genai.Client(api_key=api_key)
 
-        topics = [
-            "مستقبل الذكاء الاصطناعي في الإدارة السياسية والمدن الذكية.",
-            "أحدث قفزة في الروبوتات الطبية ودورها في العمليات المعقدة.",
-            "تأثير تقنيات 2026 على خصوصية البيانات والحرية الفردية."
-        ]
-        
-        selected_topic = random.choice(topics)
-        
-        prompt = f"""
-        أنت خبير تقني ومحرر لغوي محترف. اكتب تغريدة جذابة باللغة العربية الفصحى السليمة عن: {selected_topic}.
-        المواصفات: جملة افتتاحية قوية، حقيقة تقنية، وسؤال تفاعلي. 
-        ممنوع أي أخطاء إملائية أو رموز غريبة.
+        prompt = """
+        اكتب تغريدة احترافية عن مستقبل التقنية في 2026.
+        المتطلبات:
+        1. نص فصيح ومشوق.
+        2. المصدر: اذكر "المصدر: ذكاء Gemini التقني".
+        3. الوسوم (#): أضف وسوم ذات صلة مثل #ذكاء_اصطناعي #تقنية #مستقبل #AI.
+        4. الطول: حافظ على اختصار النص ليكون مناسباً لمنصة X.
         """
         
         response = client.models.generate_content(
@@ -55,22 +34,19 @@ def generate_content_from_gemini():
         )
         
         if response and response.text:
-            return clean_arabic_text(response.text.strip()), "Gemini"
-        return None, None
+            return clean_arabic_text(response.text.strip())
+        return None
     except Exception as e:
-        logging.error(f"❌ فشل Gemini: {e}")
-        return None, None
+        logging.error(f"❌ خطأ في التوليد: {e}")
+        return None
 
 def publish_tech_tweet():
-    """الدالة المركزية للنشر - تم تصحيح بلوك try/except هنا."""
-    logging.info("🚀 جاري البدء في مهمة النشر...")
+    """نشر التغريدة بالهيكل الجديد."""
     try:
-        content, source = generate_content_from_gemini()
-        
+        content = generate_content_from_gemini()
         if not content:
-            content = "هل أنتم مستعدون لمستقبل الذكاء الاصطناعي في 2026؟ شاركونا آراءكم! 🚀 #تقنية"
+            content = "نحن نعيش عصر التحول الرقمي الأكبر. المصدر: رؤية تقنية. #تقنية #AI"
 
-        # إعداد عميل X
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
@@ -79,9 +55,9 @@ def publish_tech_tweet():
         )
 
         client.create_tweet(text=content[:280])
-        logging.info("✅ تم النشر بنجاح!")
+        logging.info("✅ تم النشر بنجاح مع الوسوم والمصدر!")
     except Exception as e:
-        logging.error(f"❌ خطأ أثناء النشر: {e}")
+        logging.error(f"❌ خطأ في النشر: {e}")
 
 if __name__ == "__main__":
     publish_tech_tweet()
