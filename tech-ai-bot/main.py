@@ -5,19 +5,14 @@ import requests
 import logging
 import hashlib
 import random
-from datetime import datetime
 from dotenv import load_dotenv
 
-# 1. إعدادات النظام
+# 1. الإعدادات العامة
 load_dotenv()
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 LAST_HASH_FILE = "last_hash.txt"
 
-# 2. وظائف الحماية والتدقيق
 def get_content_hash(text: str) -> str:
     return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
 
@@ -27,61 +22,64 @@ def is_duplicate(content: str) -> bool:
         if os.path.exists(LAST_HASH_FILE):
             with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
                 if f.read().strip() == current_hash:
-                    logging.info("🚫 محتوى مكرر تم رصده — إلغاء النشر.")
+                    logging.info("🚫 محتوى مكرر — تم إلغاء الدورة.")
                     return True
         with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
             f.write(current_hash)
         return False
-    except Exception as e:
-        logging.warning(f"⚠️ تنبيه في ملف الهاش: {e}")
+    except:
         return False
 
-# 3. محرك توليد المحتوى الاحترافي
-def generate_tech_content():
-    trusted_sources = [
-        "The Verge", "TechCrunch", "GSMArena", "Wired", 
-        "Reuters Tech", "Bloomberg Technology", "9to5Mac"
+# 2. محرك التوليد الشامل (بدون حصر)
+def generate_broad_tech_content():
+    # توسيع المصادر لتشمل تخصصات متنوعة
+    sources = [
+        "MIT Technology Review", "IEEE Spectrum", "NASA Tech", "Scientific American",
+        "The Verge", "TechCrunch", "Ars Technica", "ZDNet", "Hacker News"
     ]
-    source = random.choice(trusted_sources)
+    
+    # اختيار تصنيف عشوائي في كل مرة لضمان التنوع
+    topics = ["الذكاء الاصطناعي", "الأمن السيبراني", "تقنيات الفضاء", "الحوسبة الكمية", "إنترنت الأشياء", "الهواتف والعتاد", "الطاقة المتجددة"]
+    selected_source = random.choice(sources)
+    selected_topic = random.choice(topics)
 
-    # تم تصحيح إغلاق علامات الاقتباس هنا
-    prompt = f"اكتب تغريدة تقنية احترافية جداً بالعربية الفصحى بناءً على أخبار موثوقة من ({source}). الهيكل: 🛡️ التقنية، 💡 الأهمية (بالأرقام)، 🛠️ التوظيف، 🌍 المصدر: [{source}]. الشروط: حقيقية، رصينة، وأقل من 260 حرفاً."
+    prompt = (
+        f"اكتب تغريدة احترافية عن جديد {selected_topic} بناءً على تقارير من {selected_source}.\n"
+        "الهيكل:\n"
+        "🛡️ التقنية: (اسم الابتكار)\n"
+        "💡 الأهمية: (لماذا يغير هذا الابتكار قواعد اللعبة؟ استخدم لغة الأرقام)\n"
+        "🛠️ التوظيف: (نصيحة عملية أو استشراف للمستقبل)\n"
+        "🌍 المصدر: [" + selected_source + "]\n"
+        "الشروط: لغة عربية فصحى، معلومات حقيقية 100%، وأقل من 270 حرفاً."
+    )
 
-    # المحاولة الأولى: OpenRouter (Llama 3.1 70B)
     try:
-        headers = {
-            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            "Content-Type": "application/json"
-        }
+        # المحاولة عبر كوين (Llama 3.1 70B) للرصانة العلمية
+        headers = {"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}", "Content-Type": "application/json"}
         payload = {
-            "model": "meta-llama/llama-3.1-70b-instruct",
-            "messages": [
-                {"role": "system", "content": "أنت محرر تقني عالمي يكتب حقائق موثقة فقط."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3
+            "model": "meta-llama/llama-3.1-70b-instruct", 
+            "messages": [{"role": "system", "content": "أنت موسوعة تقنية عالمية تنشر الأخبار الموثقة فقط."}, {"role": "user", "content": prompt}], 
+            "temperature": 0.4
         }
-        res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=20)
+        res = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=25)
         if res.status_code == 200:
-            logging.info(f"✅ تم التوليد عبر كوين (المصدر: {source})")
             return res.json()['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        logging.warning(f"⚠️ فشل كوين، محاولة جمناي: {e}")
+    except:
+        pass
 
-    # المحاولة الثانية: Gemini
     try:
+        # بديل جمناي
         client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        logging.info(f"✅ تم التوليد عبر جمناي")
         return response.text.strip()
-    except Exception as e:
-        logging.error(f"❌ فشل التوليد تماماً: {e}")
+    except:
         return None
 
-# 4. وظيفة النشر الأساسية
+# 3. وظيفة النشر (باستخدام OAuth 1.0a لضمان الصلاحيات)
 def publish_tweet():
-    logging.info("🚀 بدء مهمة النشر الموثق...")
-    content = generate_tech_content()
+    logging.info("🚀 بدء دورة الاستكشاف التقني الشامل...")
+    content = generate_broad_tech_content()
+    
     if not content or is_duplicate(content):
         return
 
@@ -93,7 +91,7 @@ def publish_tweet():
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
         client.create_tweet(text=content[:280])
-        logging.info("✅ تم النشر بنجاح على منصة X!")
+        logging.info("✅ تم النشر الشامل بنجاح!")
     except Exception as e:
         logging.error(f"❌ خطأ النشر: {e}")
 
