@@ -1,48 +1,26 @@
-name: Tech Bot Pro Operations
+name: Tech Bot Final
 
 on:
   schedule:
-    # تشغيل الردود كل 10 دقائق للبقاء على اتصال مع المتابعين
-    - cron: '*/10 * * * *'
-    # تشغيل النشر التلقائي (نمط LTPO) كل 6 ساعات
     - cron: '0 */6 * * *'
-  workflow_dispatch: # يتيح لك التشغيل اليدوي للتجربة الآن
+  workflow_dispatch:
 
 jobs:
-  run-bot-task:
+  run-bot:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          # تأكد أن ملف requirements.txt يحتوي على tweepy, google-genai, requests
-          pip install -r tech-ai-bot/requirements.txt
-
-      - name: Execute Bot Systems
+      - name: Install
+        run: pip install -r tech-ai-bot/requirements.txt
+      - name: Run
         env:
-          # مفاتيح تويتر (X API V2)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          
-          # مفاتيح الذكاء الاصطناعي (الأساسي والاحتياطي)
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          
-          # إعدادات إضافية
-          BOT_USERNAME: "X_TechNews_"
-        run: |
-          echo "🤖 بدء نظام الردود الذكية..."
-          python tech-ai-bot/src/reply_agent.py
-          
-          echo "🚀 بدء نظام النشر الاحترافي (نمط LTPO)..."
-          python tech-ai-bot/src/post_publisher.py
+        run: python tech-ai-bot/main.py
