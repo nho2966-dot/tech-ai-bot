@@ -4,11 +4,10 @@ import google.genai as genai
 import requests
 import logging
 
-# إعداد التسجيل
 logging.basicConfig(level=logging.INFO)
 
 def get_content_from_openrouter(prompt):
-    """الخيار الاحتياطي: كوين (OpenRouter) بنفس النمط الاحترافي."""
+    """استخدام كوين كخيار احتياطي لضمان جودة المحتوى."""
     try:
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -27,51 +26,35 @@ def get_content_from_openrouter(prompt):
         return None
 
 def generate_professional_content():
-    """توليد محتوى تقني دقيق (نمط LTPO: الأهمية، التوظيف، المصدر)."""
-    professional_prompt = (
-        "اكتب تغريدة تقنية احترافية جداً باللغة العربية عن موضوع تقني حديث ودقيق.\n"
-        "التزم بالتنسيق التالي حرفياً:\n"
-        "1. اسم التقنية (بعنوان واضح).\n"
-        "2. الأهمية: شرح الفائدة التقنية العميقة.\n"
-        "3. التوظيف: نصيحة عملية للمستخدم.\n"
-        "4. المصدر: اسم جهة تقنية موثوقة.\n\n"
-        "اجعل الأسلوب مقتضباً، مفيداً، وخالياً من الحشو."
+    """توليد محتوى بنمط تغريدة LTPO."""
+    prompt = (
+        "اكتب تغريدة تقنية احترافية باللغة العربية.\n"
+        "التنسيق: 1. التقنية، 2. الأهمية، 3. التوظيف، 4. المصدر.\n"
+        "اجعلها دقيقة تقنياً ومختصرة."
     )
-    
     try:
-        # المحاولة مع جمناي أولاً
         client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=professional_prompt
-        )
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text.strip()
-    except Exception as e:
-        logging.warning(f"⚠️ جمناي غير متاح حالياً ({e})، جاري الانتقال لـ كوين...")
-        return get_content_from_openrouter(professional_prompt)
+    except:
+        logging.warning("⚠️ جمناي مستنفد، جاري طلب المحتوى من كوين...")
+        return get_content_from_openrouter(prompt)
 
 def publish_tweet():
     try:
-        # استخدام Twitter API V2 (الوحيد الذي يعمل حالياً للنشر المجاني)
         client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            wait_on_rate_limit=False # لمنع التعليق الطويل
         )
-        
         content = generate_professional_content()
-        
         if content:
-            # التأكد من طول التغريدة لسياسة تويتر
             client.create_tweet(text=content[:280])
-            logging.info("✅ تم النشر بنجاح بالنمط الاحترافي!")
-        else:
-            logging.error("❌ لم يتم توليد محتوى للنشر.")
-            
+            logging.info("✅ تم النشر الاحترافي بنجاح!")
     except Exception as e:
-        logging.error(f"❌ خطأ في النشر: {e}")
+        logging.error(f"❌ خطأ النشر: {e}")
 
 if __name__ == "__main__":
     publish_tweet()
