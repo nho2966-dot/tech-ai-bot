@@ -1,8 +1,11 @@
-name: Tech Bot Final
+name: Tech Bot Managed Operations
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # المهمة الأولى: الردود (تعمل كل ساعة مثلاً لتخفيف الضغط)
+    - cron: '0 * * * *'
+    # المهمة الثانية: النشر الاحترافي (مرة كل 12 ساعة لضمان الجودة)
+    - cron: '0 0,12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,7 +18,8 @@ jobs:
           python-version: '3.11'
       - name: Install
         run: pip install -r tech-ai-bot/requirements.txt
-      - name: Run
+      
+      - name: Execute Logic
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
@@ -23,4 +27,7 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python tech-ai-bot/main.py
+        run: |
+          # نستخدم منطق بسيط: إذا كان التشغيل مجدولاً في ساعة النشر، ننشر.
+          # وإلا، نكتفي بالردود فقط. أو الأفضل تشغيل المدير الذكي:
+          python tech-ai-bot/main.py
