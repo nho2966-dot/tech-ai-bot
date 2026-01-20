@@ -1,7 +1,6 @@
 import os
 import tweepy
 import google.genai as genai
-from google.genai import types
 import logging
 from datetime import datetime, timezone
 
@@ -11,31 +10,24 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def get_twitter_clients():
-    """تهيئة V1.1 للقراءة و V2 للنشر باستخدام المفاتيح الأربعة فقط."""
-    auth = tweepy.OAuth1UserHandler(
-        os.getenv("X_API_KEY"),
-        os.getenv("X_API_SECRET"),
-        os.getenv("X_ACCESS_TOKEN"),
-        os.getenv("X_ACCESS_SECRET")
-    )
-    api = tweepy.API(auth)
-    
-    client = tweepy.Client(
+def get_twitter_client():
+    """التهيئة باستخدام V2 Client والمفاتيح الأربعة فقط."""
+    return tweepy.Client(
         consumer_key=os.getenv("X_API_KEY"),
         consumer_secret=os.getenv("X_API_SECRET"),
         access_token=os.getenv("X_ACCESS_TOKEN"),
-        access_token_secret=os.getenv("X_ACCESS_SECRET")
+        access_token_secret=os.getenv("X_ACCESS_SECRET"),
+        wait_on_rate_limit=True
     )
-    return api, client
 
 def generate_smart_reply(question: str) -> str:
     """توليد رد ذكي باستخدام Gemini 2.0 Flash."""
     try:
         client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         prompt = (
-            "أنت بوت تقني ذكي اسمه 'تيك بوت'. أجب عن السؤال التالي بإيجاز شديد (جملة واحدة)، "
-            "بالعربية الفصحى، بأسلوب محترف ومفيد.\n\n"
+            "أنت بوت تقني ذكي ومهذب اسمه 'تيك بوت'.\n"
+            "أجب عن السؤال التالي بإيجاز شديد (جملة واحدة فقط)، بالعربية الفصحى، "
+            "بأسلوب محترف، ولا تكرر السؤال.\n\n"
             f"السؤال: {question}"
         )
         response = client.models.generate_content(
@@ -45,39 +37,48 @@ def generate_smart_reply(question: str) -> str:
         reply = response.text.strip()
         return reply[:280]
     except Exception as e:
-        logging.error(f"فشل Gemini: {e}")
-        return "شكرًا لسؤالك! سأبحث في هذا الموضوع وأرد عليك لاحقاً. 🤖✨"
+        logging.error(f"فشل توليد الرد من Gemini: {e}")
+        return "شكرًا لسؤالك! سأبحث في هذا الموضوع وأرد عليك قريباً. 🤖"
 
 def run_reply_agent():
     bot_username = os.getenv("BOT_USERNAME", "TechAI_Bot")
-    api, client = get_twitter_clients()
+    client = get_twitter_client()
 
     try:
-        # جلب المنشن باستخدام V1.1 (أكثر استقراراً بالمفاتيح الأربعة)
-        mentions = api.mentions_timeline(count=10, tweet_mode='extended')
-        if not mentions:
-            logging.info("لا توجد تغريدات موجهة جديدة.")
+        # 1. التحقق من المصادقة وجلب ID البوت
+        me = client.get_me()
+        if not me.data:
+            logging.error("❌ فشل في جلب بيانات الحساب.")
+            return
+        
+        user_id = me.data.id
+        logging.info(f"✅ تم الاتصال بحساب: @{me.data.username}")
+
+        # 2. جلب المنشن (الإشارات) باستخدام V2
+        # ملاحظة: max_results يجب أن تكون بين 5 و 100
+        mentions = client.get_users_mentions(id=user_id, max_results=5)
+        
+        if not mentions.data:
+            logging.info("😴 لا توجد تغريدات موجهة جديدة.")
             return
 
-        for tweet in mentions:
-            # تجاهل التغريدات الأقدم من 15 دقيقة (لتجنب التكرار في الأكشن)
-            time_diff = datetime.now(timezone.utc) - tweet.created_at.replace(tzinfo=timezone.utc)
-            if time_diff.total_seconds() > 900: # 15 دقيقة
+        for tweet in mentions.data:
+            # تنظيف السؤال من اسم البوت
+            question = tweet.text.replace(f"@{bot_username}", "").strip()
+            if not question:
                 continue
 
-            question = tweet.full_text.replace(f"@{bot_username}", "").strip()
-            if not question: continue
-
-            logging.info(f"معالجة سؤال من @{tweet.user.screen_name}: {question}")
+            logging.info(f"🔍 معالجة منشن من {tweet.author_id}: {question}")
             
-            reply_text = f"@{tweet.user.screen_name} {generate_smart_reply(question)}"
+            # توليد الرد
+            reply_content = generate_smart_reply(question)
             
-            # الرد باستخدام V2 Client (الطريقة التي نجحت معك سابقاً)
+            # 3. نشر الرد (باستخدام الطريقة التي نجحت معك سابقاً)
             client.create_tweet(
-                text=reply_text[:280],
+                text=reply_content,
                 in_reply_to_tweet_id=tweet.id
             )
-            logging.info(f"✅ تم الرد على {tweet.id}")
+            logging.info(f"✅ تم الرد بنجاح على التغريدة ID: {tweet.id}")
 
     except Exception as e:
         logging.error(f"❌ خطأ في النظام: {e}")
