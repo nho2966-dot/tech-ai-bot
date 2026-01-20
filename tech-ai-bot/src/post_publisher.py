@@ -1,57 +1,58 @@
 import os
 import tweepy
 import google.genai as genai
+import requests
 import logging
 import random
 
-# إعداد نظام التسجيل
 logging.basicConfig(level=logging.INFO)
 
-def generate_tech_content():
-    """توليد محتوى تقني باستخدام Gemini 2.0 Flash."""
+def get_content_from_openrouter():
+    """الخيار الاحتياطي: كوين (OpenRouter) في حال نفاد حصة جمناي."""
     try:
-        gemini_key = os.getenv("GEMINI_KEY")
-        if not gemini_key:
-            raise ValueError("مفتاح GEMINI_KEY غير موجود في Secrets")
-            
-        client = genai.Client(api_key=gemini_key)
-        prompt = "اكتب تغريدة تقنية قصيرة ومفيدة عن الذكاء الاصطناعي باللغة العربية، مع هاشتاقات مناسبة."
-        
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "meta-llama/llama-3.1-8b-instruct",
+            "messages": [{"role": "user", "content": "اكتب تغريدة تقنية قصيرة ومفيدة عن الذكاء الاصطناعي بالعربية."}]
+        }
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        return response.json()['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        logging.error(f"❌ فشل كوين أيضاً: {e}")
+        return "الذكاء الاصطناعي يغير العالم يوماً بعد يوم. 🚀"
+
+def generate_content():
+    """المحاولة الأولى مع جمناي، وإذا فشل ننتقل لكوين."""
+    try:
+        client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         response = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt
+            contents="اكتب تغريدة تقنية قصيرة ومفيدة عن الذكاء الاصطناعي بالعربية."
         )
         return response.text.strip()
-    except Exception as e:
-        logging.error(f"❌ فشل توليد المحتوى: {e}")
-        # محتوى احتياطي في حال فشل Gemini
-        fallbacks = [
-            "الذكاء الاصطناعي ليس مجرد أدوات، بل هو نهج جديد لحل المشكلات المعقدة. #ذكاء_اصطناعي #تقنية",
-            "مستقبل التقنية يكمن في التناغم بين العقل البشري والذكاء الاصطناعي. 🚀 #Tech #AI"
-        ]
-        return random.choice(fallbacks)
+    except Exception:
+        logging.warning("⚠️ نفدت حصة جمناي.. الانتقال إلى كوين (OpenRouter)...")
+        return get_content_from_openrouter()
 
-def publish_tech_tweet():
-    """نشر التغريدة باستخدام الوضع السابق الموثوق (OAuth 1.0a)."""
+def publish_tweet():
     try:
-        # تهيئة تويتر بنظام V1.1 (المفاتيح الأربعة فقط)
-        auth = tweepy.OAuth1UserHandler(
-            os.getenv("X_API_KEY"),
-            os.getenv("X_API_SECRET"),
-            os.getenv("X_ACCESS_TOKEN"),
-            os.getenv("X_ACCESS_SECRET")
+        # استخدام V2 حصراً لتفادي خطأ 403
+        client = tweepy.Client(
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        api = tweepy.API(auth)
-
-        # توليد المحتوى
-        content = generate_tech_content()
-
-        # النشر الفعلي بالدالة التي نجحت معك سابقاً
-        api.update_status(status=content[:280])
-        logging.info("✅ تم النشر بنجاح باستخدام الوضع السابق الموثوق!")
-
+        
+        content = generate_content()
+        client.create_tweet(text=content[:280])
+        logging.info("✅ تم النشر بنجاح!")
     except Exception as e:
-        logging.error(f"❌ فشل النشر في الوضع السابق: {e}")
+        logging.error(f"❌ خطأ نهائي في النشر: {e}")
 
 if __name__ == "__main__":
-    publish_tech_tweet()
+    publish_tweet()
