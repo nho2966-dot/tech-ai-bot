@@ -1,36 +1,40 @@
-name: Tech AI Bot 2026
+name: Tech Bot Daily Operations
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # تفقد الردود كل 10 دقائق
-    - cron: '0 9,18 * * *' # النشر مرتين يومياً
-  workflow_dispatch:
+    # تشغيل الردود كل 10 دقائق
+    - cron: '*/10 * * * *'
+    # تشغيل النشر التلقائي كل 6 ساعات
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # للسماح لك بتشغيله يدوياً للتجربة
 
 jobs:
-  run-system:
+  run-bot-task:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Install
-        run: pip install -r tech-ai-bot/requirements.txt
 
-      - name: Run Reply Agent
+      - name: Install Dependencies
+        run: |
+          pip install -r tech-ai-bot/requirements.txt
+
+      - name: Execute Bot
         env:
+          # التأكد من تمرير كافة المفاتيح التي يحتاجها الكود
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
-        run: python tech-ai-bot/src/reply_agent.py
-
-      - name: Run Publisher
-        if: github.event_schedule == '0 9,18 * * *' || github.event_name == 'workflow_dispatch'
-        env:
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
-        run: python tech-ai-bot/main.py
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          BOT_USERNAME: "TechAI_Bot" # ضع يوزر حسابك هنا بدون @
+        run: |
+          # تشغيل نظام الردود
+          python tech-ai-bot/src/reply_agent.py
+          # تشغيل نظام النشر
+          python tech-ai-bot/src/post_publisher.py
