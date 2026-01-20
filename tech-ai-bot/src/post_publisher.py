@@ -1,83 +1,57 @@
 import os
-import requests
 import tweepy
-import random
 import google.genai as genai
 import logging
-import hashlib
+import random
 
 # إعداد نظام التسجيل
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 
-LAST_HASH_FILE = "last_hash.txt"
-
-def get_content_hash(text: str) -> str:
-    return hashlib.md5(text.encode('utf-8')).hexdigest()[:8]
-
-def is_duplicate(content: str) -> bool:
-    current_hash = get_content_hash(content)
-    if os.path.exists(LAST_HASH_FILE):
-        with open(LAST_HASH_FILE, "r", encoding="utf-8") as f:
-            last_hash = f.read().strip()
-        if current_hash == last_hash:
-            logging.info("تم اكتشاف محتوى مكرر.")
-            return True
-    with open(LAST_HASH_FILE, "w", encoding="utf-8") as f:
-        f.write(current_hash)
-    return False
-
-def generate_content_from_gemini():
+def generate_tech_content():
+    """توليد محتوى تقني باستخدام Gemini 2.0 Flash."""
     try:
-        # استخدام المكتبة الجديدة المتوافقة مع 2.0 Flash
-        client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-        prompt = "أجب عن السؤال التالي بإيجاز (لا تتجاوز جملتين)، بالعربية الفصحى، بأسلوب محترف: ما هو أحدث تطور في الذكاء الاصطناعي لعام 2026؟"
+        gemini_key = os.getenv("GEMINI_KEY")
+        if not gemini_key:
+            raise ValueError("مفتاح GEMINI_KEY غير موجود في Secrets")
+            
+        client = genai.Client(api_key=gemini_key)
+        prompt = "اكتب تغريدة تقنية قصيرة ومفيدة عن الذكاء الاصطناعي باللغة العربية، مع هاشتاقات مناسبة."
+        
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt
         )
-        return response.text.strip(), "https://gemini.google.com/"
+        return response.text.strip()
     except Exception as e:
-        logging.error(f"فشل Gemini: {e}")
-        return None, None
-
-def generate_tech_content():
-    content, source = generate_content_from_gemini()
-    if content: return content, source
-
-    # نص احتياطي في حال فشل الـ AI
-    fallback_content = [
-        "الذكاء الاصطناعي في 2026 يركز على الكفاءة والخصوصية بشكل أكبر 🛡️",
-        "تطور النماذج الصغيرة SLMs هو الصيحة الحالية في عالم التقنية 🚀",
-        "الاستدامة الرقمية أصبحت جزءاً لا يتجزأ من استراتيجيات الشركات التقنية 🔋"
-    ]
-    return random.choice(fallback_content), "https://tech-ai.bot"
+        logging.error(f"❌ فشل توليد المحتوى: {e}")
+        # محتوى احتياطي في حال فشل Gemini
+        fallbacks = [
+            "الذكاء الاصطناعي ليس مجرد أدوات، بل هو نهج جديد لحل المشكلات المعقدة. #ذكاء_اصطناعي #تقنية",
+            "مستقبل التقنية يكمن في التناغم بين العقل البشري والذكاء الاصطناعي. 🚀 #Tech #AI"
+        ]
+        return random.choice(fallbacks)
 
 def publish_tech_tweet():
-    logging.info("🚀 بدء مهمة النشر التلقائي...")
+    """نشر التغريدة باستخدام الوضع السابق الموثوق (OAuth 1.0a)."""
     try:
-        content, url = generate_tech_content()
-        if is_duplicate(content): return
-
-        # المصادقة بالمفاتيح الأربعة حصراً
-        client = tweepy.Client(
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
+        # تهيئة تويتر بنظام V1.1 (المفاتيح الأربعة فقط)
+        auth = tweepy.OAuth1UserHandler(
+            os.getenv("X_API_KEY"),
+            os.getenv("X_API_SECRET"),
+            os.getenv("X_ACCESS_TOKEN"),
+            os.getenv("X_ACCESS_SECRET")
         )
+        api = tweepy.API(auth)
 
-        tweet_text = f"🛡️ مـوثـوق | {content}\n\n🔗 {url}"
-        
-        # النشر
-        response = client.create_tweet(text=tweet_text[:280])
-        if response.data:
-            logging.info(f"✅ تم النشر بنجاح! ID: {response.data['id']}")
+        # توليد المحتوى
+        content = generate_tech_content()
+
+        # النشر الفعلي بالدالة التي نجحت معك سابقاً
+        api.update_status(status=content[:280])
+        logging.info("✅ تم النشر بنجاح باستخدام الوضع السابق الموثوق!")
 
     except Exception as e:
-        logging.error(f"❌ فشل النشر: {e}")
+        logging.error(f"❌ فشل النشر في الوضع السابق: {e}")
 
 if __name__ == "__main__":
     publish_tech_tweet()
