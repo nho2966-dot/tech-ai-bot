@@ -1,33 +1,51 @@
-name: Tech Bot Managed Operations
+name: Tech Bot Unified Deployment
 
 on:
   schedule:
-    # المهمة الأولى: الردود (تعمل كل ساعة مثلاً لتخفيف الضغط)
-    - cron: '0 * * * *'
-    # المهمة الثانية: النشر الاحترافي (مرة كل 12 ساعة لضمان الجودة)
-    - cron: '0 0,12 * * *'
-  workflow_dispatch:
+    # سيقوم الأكشن بتشغيل البوت أربع مرات يومياً (كل 6 ساعات)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يتيح لك زر "Run workflow" للتجربة الفورية
 
 jobs:
-  run-bot:
+  build-and-run:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install
-        run: pip install -r tech-ai-bot/requirements.txt
-      
-      - name: Execute Logic
+
+      - name: Install Dependencies
+        run: |
+          pip install -r tech-ai-bot/requirements.txt
+
+      - name: Run Tech Bot
         env:
+          # مفاتيح تويتر (X API)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          
+          # مفاتيح الذكاء الاصطناعي
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          
+          # اسم الحساب
+          BOT_USERNAME: "X_TechNews_"
         run: |
-          # نستخدم منطق بسيط: إذا كان التشغيل مجدولاً في ساعة النشر، ننشر.
-          # وإلا، نكتفي بالردود فقط. أو الأفضل تشغيل المدير الذكي:
+          # تشغيل الملف الرئيسي مرة واحدة (بدون Loop داخلي)
           python tech-ai-bot/main.py
+
+      - name: Commit Last Hash (Optional)
+        # هذه الخطوة لحفظ الهاش ومنع تكرار التغريدة في المرة القادمة
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add last_hash.txt || echo "No changes to hash file"
+          git commit -m "Update last tweet hash [skip ci]" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
