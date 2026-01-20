@@ -9,15 +9,13 @@ from dotenv import load_dotenv
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-def publish_tweet():
-    # المصادر الشاملة (التي طلبتها)
+def generate_tech_content():
+    # المصادر الشاملة
     sources = ["The Verge", "TechCrunch", "Wired", "GSMArena", "MIT Tech Review"]
     source = random.choice(sources)
     
-    # البرومبت الملتزم بكل اشتراطاتك (LTPO والموثوقية)
     prompt = f"اكتب تغريدة تقنية احترافية بالعربية الفصحى عن خبر حقيقي من {source}. الهيكل: 🛡️ التقنية، 💡 الأهمية، 🛠️ التوظيف، 🌍 المصدر: [{source}]. لا تتجاوز 260 حرفاً."
     
-    # التوليد (استخدام كوين لضمان جودة المحتوى)
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
             headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
@@ -27,28 +25,35 @@ def publish_tweet():
                 "temperature": 0.3
             }
         )
-        content = res.json()['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        logging.error(f"خطأ في التوليد: {e}")
+        return res.json()['choices'][0]['message']['content'].strip()
+    except:
+        return None
+
+def publish_tweet():
+    logging.info("🚀 محاولة النشر باستخدام نظام X API V2 (Free Tier)...")
+    content = generate_tech_content()
+    
+    if not content:
         return
 
-    # 2. هيكل النشر (الذي نجحنا به سابقاً - OAuth 1.0a)
     try:
-        # استخدام الطريقة التي نشرت بنجاح قبل قليل
-        auth = tweepy.OAuth1UserHandler(
-            os.getenv("X_API_KEY"), 
-            os.getenv("X_API_SECRET"),
-            os.getenv("X_ACCESS_TOKEN"), 
-            os.getenv("X_ACCESS_SECRET")
+        # الحل القاطع لمشكلة 453: استخدام Client (V2) مع تمرير كافة المفاتيح
+        # هذا هو النظام الوحيد المسموح به للحسابات المجانية الآن
+        client = tweepy.Client(
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        api = tweepy.API(auth)
         
-        # النشر الفعلي
-        api.update_status(status=content)
-        logging.info("✅ تم النشر بنجاح باستخدام الطريقة الموثوقة!")
+        # استخدام create_tweet حصراً (V2 endpoint)
+        response = client.create_tweet(text=content[:280])
         
+        if response:
+            logging.info(f"✅ تم النشر بنجاح! معرف التغريدة: {response.data['id']}")
+            
     except Exception as e:
-        logging.error(f"خطأ النشر: {e}")
+        logging.error(f"❌ فشل النشر النهائي: {e}")
 
 if __name__ == "__main__":
     publish_tweet()
