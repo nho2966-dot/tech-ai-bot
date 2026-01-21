@@ -1,17 +1,15 @@
-name: Tech Bot Unified Deployment
+name: Tech AI Bot Runner
 
 on:
   schedule:
-    # سيقوم الأكشن بتشغيل البوت أربع مرات يومياً (كل 6 ساعات)
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # يتيح لك زر "Run workflow" للتجربة الفورية
+    - cron: '0 */6 * * *' # يعمل تلقائياً كل 6 ساعات
+  workflow_dispatch:      # يتيح لك التشغيل اليدوي للتجربة
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -21,31 +19,15 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install -r tech-ai-bot/requirements.txt
+          python -m pip install --upgrade pip
+          pip install tweepy requests python-dotenv
 
-      - name: Run Tech Bot
+      - name: Run Python Script
         env:
-          # مفاتيح تويتر (X API)
+          # ربط أسرار GitHub بمتغيرات النظام لكي يراها الكود
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          
-          # مفاتيح الذكاء الاصطناعي
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          
-          # اسم الحساب
-          BOT_USERNAME: "X_TechNews_"
-        run: |
-          # تشغيل الملف الرئيسي مرة واحدة (بدون Loop داخلي)
-          python tech-ai-bot/main.py
-
-      - name: Commit Last Hash (Optional)
-        # هذه الخطوة لحفظ الهاش ومنع تكرار التغريدة في المرة القادمة
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add last_hash.txt || echo "No changes to hash file"
-          git commit -m "Update last tweet hash [skip ci]" || echo "Nothing to commit"
-          git push || echo "Nothing to push"
+        run: python main.py # تأكد أن ملفك اسمه main.py وموجود في المجلد الرئيسي
