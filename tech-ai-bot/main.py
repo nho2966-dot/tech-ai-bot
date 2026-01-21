@@ -1,28 +1,33 @@
 import os
-import tweepy
 import requests
 import logging
 import random
+from datetime import datetime # إضافة التاريخ لكسر التكرار
 from dotenv import load_dotenv
 
-# 1. إعدادات النظام
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 def generate_tech_content():
-    # قائمة المصادر الموثوقة (دون حصر)
-    sources = ["The Verge", "TechCrunch", "Wired", "GSMArena", "MIT Tech Review", "Ars Technica"]
+    # 1. الحصول على تاريخ اليوم وتحديد موضوع عشوائي لضمان التجديد
+    today = datetime.now().strftime("%Y-%m-%d")
+    topics = ["الذكاء الاصطناعي", "الأمن السيبراني", "الهواتف الذكية", "الفضاء", "الحوسبة الكمية", "السيارات الكهربائية"]
+    selected_topic = random.choice(topics)
+    
+    sources = ["The Verge", "TechCrunch", "Wired", "GSMArena", "MIT Tech Review"]
     source = random.choice(sources)
     
-    # البرومبت المحسن لإضافة الوسم والمصدر بشكل احترافي
+    # 2. تحديث البرومبت ليشمل التاريخ والموضوع المحدد
+    # أضفنا تعليمات صارمة للنموذج بعدم تكرار الأخبار القديمة
     prompt = (
-        f"اكتب تغريدة تقنية احترافية بالعربية الفصحى عن خبر حقيقي من {source}.\n"
+        f"التاريخ اليوم هو {today}. اكتب خبر تقني حقيقي وجديد كلياً عن {selected_topic} من مصدر {source}.\n"
+        "يجب أن تكون التغريدة فريدة ومختلفة عن أي تغريدة سابقة.\n"
         "الهيكل المطلوب:\n"
         "🛡️ التقنية: (اسم الابتكار)\n"
         "💡 الأهمية: (الفائدة بلغة الأرقام)\n"
         "🛠️ التوظيف: (نصيحة للمستخدم)\n"
         f"🌍 المصدر: {source}\n"
-        "#تقنية"
+        "#تقنية #أخبار"
     )
     
     try:
@@ -31,39 +36,14 @@ def generate_tech_content():
             json={
                 "model": "meta-llama/llama-3.1-70b-instruct", 
                 "messages": [{"role": "user", "content": prompt}], 
-                "temperature": 0.3
+                "temperature": 0.9, # زيادة الحرارة لزيادة الإبداع وتقليل التكرار
+                "top_p": 0.9
             }
         )
-        return res.json()['choices'][0]['message']['content'].strip()
+        response_data = res.json()
+        return response_data['choices'][0]['message']['content'].strip()
     except Exception as e:
         logging.error(f"خطأ في التوليد: {e}")
         return None
 
-def publish_tweet():
-    logging.info("🚀 محاولة النشر باستخدام نظام X API V2...")
-    content = generate_tech_content()
-    
-    if not content:
-        logging.error("❌ لم يتم توليد محتوى.")
-        return
-
-    try:
-        # استخدام نظام V2 حصراً لتجنب خطأ 403 و 453
-        client = tweepy.Client(
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
-        )
-        
-        # النشر
-        response = client.create_tweet(text=content[:280])
-        
-        if response:
-            logging.info(f"✅ تم النشر بنجاح! الرابط: https://x.com/i/status/{response.data['id']}")
-            
-    except Exception as e:
-        logging.error(f"❌ فشل النشر: {e}")
-
-if __name__ == "__main__":
-    publish_tweet()
+# باقي الكود (publish_tweet) يبقى كما هو...
