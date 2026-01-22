@@ -4,17 +4,22 @@ import requests
 import logging
 import random
 import re
-from datetime import datetime, timedelta
+import time
+from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 
-# إعدادات التسجيل والـوُضُـوح
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+# ✅ تحميل الإعدادات
 load_dotenv()
 
-ARCHIVE_FILE = "published_archive.txt"
+# إعداد نظام التسجيل الاحترافي
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler("agent.log", encoding='utf-8'), logging.StreamHandler()]
+)
 
-# 1. إعداد الاتصال بـ X
+# ✅ تهيئة عملاء X (V2 للنص و V1 للصور)
 client = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
@@ -28,82 +33,108 @@ auth = tweepy.OAuth1UserHandler(
 )
 api_v1 = tweepy.API(auth)
 
-# 2. نظام الذاكرة لمنع تكرار المـوُضـوُعات
-def is_duplicate(content_title):
+ARCHIVE_FILE = "published_archive.txt"
+
+# ---------------------------------------------------------
+# 1. نظام الذاكرة ومنع التكرار
+# ---------------------------------------------------------
+def is_duplicate(title):
     if not os.path.exists(ARCHIVE_FILE): return False
     with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
-        return content_title.lower()[:60] in f.read().lower()
+        return title.lower()[:60] in f.read().lower()
 
-def save_to_archive(content_title):
+def save_to_archive(title):
     with open(ARCHIVE_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d')}: {content_title}\n")
+        f.write(f"{datetime.now().strftime('%Y-%m-%d')}: {title}\n")
 
-# 3. محرك الذكاء الاصطناعي (ضبط النطاق الزمني 48-72 ساعة)
-def fetch_tech_scoop(category_desc):
+# ---------------------------------------------------------
+# 2. محرك توليد المحتوى (شخصية Cyber Hunter)
+# ---------------------------------------------------------
+def generate_cyber_content(topic_info):
+    prompt = (
+        f"أنت 'Cyber Hunter': خبير تقني شاب وصائد تسريبات. الخبر هو: {topic_info}\n\n"
+        "⚠️ طبق المعادلة التالية بدقة:\n"
+        "1. ابدأ بـ [TITLE: عنوان قصير].\n"
+        "2. النص: خطاف صادم (Hook) -> 3 نقاط مركزة (الزبدة) -> تلميحة حصرية -> رابط المصدر -> سؤال استفزازي ناري.\n"
+        "3. الأسلوب: عربية بيضاء، إيموجي ذكي، ممنوع الحشو، موجه للشباب (ستوري إكس).\n"
+        "4. النطاق الزمني: تعامل مع الخبر كأنه حدث في الـ 48 ساعة الماضية."
+    )
     try:
-        # تحديد النافذة الزمنية بدقة في البرومبت
-        system_persona = (
-            f"أنت خبير تقني عالمي. اليوم هو {datetime.now().strftime('%Y-%m-%d')}. "
-            "⚠️ تعليمات البحث والنشر:\n"
-            "1. النطاق الزمني: ابحث عن الأخبار والتسريبات التي حدثت خلال الـ 24 إلى 72 ساعة الماضية فقط.\n"
-            "2. المحتوى: ركز على الألعاب، الأمن السيبراني، ومنصات التواصل الاجتماعي، والذكاء الاصطناعي X بأسلوب حاد ومختصر جداً.\n"
-            "3. الفلترة: ممنوع الحشو، وممنوع الأخبار التي مضى عليها أكثر من 3 أيام.\n"
-            "4. الهيكل: [TITLE: عنوان الخبر] ثم (Hook صادم -> 3 تفاصيل تقنية -> رابط المصدر -> سؤال مستفز)."
-        )
-        
-        res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
             json={
-                "model": "meta-llama/llama-3.1-70b-instruct", 
-                "messages": [{"role": "system", "content": system_persona},
-                             {"role": "user", "content": f"ارصد سبقاً صحفياً في: {category_desc}"}],
-                "temperature": 0.7
+                "model": "meta-llama/llama-3.1-70b-instruct",
+                "messages": [{"role": "system", "content": "أنت خبير تقني عالمي ومستفز بذكاء."},
+                             {"role": "user", "content": prompt}],
+                "temperature": 0.8
             }
         )
-        return res.json()['choices'][0]['message']['content'].strip()
+        return res.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        logging.error(f"❌ خطأ AI: {e}")
+        logging.error(f"❌ فشل AI: {e}")
         return None
 
-# 4. وظيفة جلب الصورة ونشر التغريدة
-def publish_with_media(raw_output, category_key):
-    title_match = re.search(r"TITLE: (.*)\n", raw_output)
-    if not title_match: return
+# ---------------------------------------------------------
+# 3. الهوية البصرية (جلب صورة مدمجة آلياً)
+# ---------------------------------------------------------
+def get_visual_identity(category):
+    temp_file = "post_img.jpg"
+    keywords = f"{category},cyber,technology,dark"
+    img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=1200&auto=format&keywords={keywords}"
+    try:
+        res = requests.get(img_url, timeout=15)
+        if res.status_code == 200:
+            with open(temp_file, "wb") as f: f.write(res.content)
+            media = api_v1.media_upload(filename=temp_file)
+            return media.media_id, temp_file
+    except: return None, None
 
-    title = title_match.group(1).strip()
+# ---------------------------------------------------------
+# 4. وظيفة النشر الاحترافي
+# ---------------------------------------------------------
+def execute_scoop():
+    # مجالات الرصد الخاصة بك
+    scenarios = [
+        {"cat": "hacking", "q": "أحدث اختراق أمني عالمي أو ثغرة (Hacker News)"},
+        {"cat": "smartphone", "q": "تسريب هاتف آيفون أو سامسونج قادم (9to5Mac)"},
+        {"cat": "gaming", "q": "أحدث ميزة في بلايستيشن أو إكس بوكس (The Verge)"},
+        {"cat": "AI", "q": "أداة ذكاء اصطناعي جديدة تهم المصممين أو المبرمجين"}
+    ]
+    
+    selected = random.choice(scenarios)
+    logging.info(f"🔎 رصد مجال: {selected['cat']}")
+    
+    raw_content = generate_cyber_content(selected["q"])
+    if not raw_content or "TITLE:" not in raw_content: return
+
+    # استخراج العنوان وفحصه
+    title = re.search(r"TITLE: (.*)\n", raw_content).group(1).strip()
     if is_duplicate(title):
         logging.info(f"🚫 مكرر: {title}")
         return
 
-    clean_text = raw_output.replace(f"TITLE: {title}", "").strip()
-    
-    # جلب صورة احترافية آلياً في الخلفية
-    media_ids = []
-    temp_img = "vibrant_news.jpg"
-    try:
-        img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=1200&auto=format&keywords={category_key},technology"
-        img_data = requests.get(img_url).content
-        with open(temp_img, "wb") as f: f.write(img_data)
-        media = api_v1.media_upload(filename=temp_img)
-        media_ids = [media.media_id]
-    except: pass
+    clean_text = raw_content.replace(f"TITLE: {title}", "").strip()
+    media_id, img_path = get_visual_identity(selected["cat"])
 
     try:
-        client.create_tweet(text=clean_text, media_ids=media_ids)
+        client.create_tweet(text=clean_text[:280], media_ids=[media_id] if media_id else None)
         save_to_archive(title)
-        logging.info(f"✅ تم النشر: {title}")
+        logging.info(f"🔥 تم النشر بنجاح: {title}")
+    except Exception as e:
+        logging.error(f"❌ فشل النشر: {e}")
     finally:
-        if os.path.exists(temp_img): os.remove(temp_img)
+        if img_path and os.path.exists(img_path): os.remove(img_path)
 
-# 5. التشغيل
+# ---------------------------------------------------------
+# 5. الجدولة الذكية (وقت ذروة عُمان)
+# ---------------------------------------------------------
 if __name__ == "__main__":
-    scenarios = [
-        {"key": "cybersecurity", "desc": "أحدث اختراق أو ثغرة أمنية في آخر 72 ساعة"},
-        {"key": "gaming", "desc": "أحدث تسريب أو إطلاق في عالم الألعاب خلال يومين"},
-        {"key": "X_platform", "desc": "ميزات جديدة تم رصدها في X مؤخراً"}
-    ]
-    
-    selected = random.choice(scenarios)
-    output = fetch_tech_scoop(selected["desc"])
-    if output:
-        publish_with_media(output, selected["key"])
+    oman_tz = pytz.timezone('Asia/Muscat')
+    while True:
+        now = datetime.now(oman_tz)
+        # النشر في أوقات الذروة (صباحاً، عصراً، ومساءً)
+        if now.hour in [9, 13, 17, 21, 23] and now.minute == 0:
+            execute_scoop()
+            time.sleep(65) # تجنب التكرار في نفس الدقيقة
+        time.sleep(30)
