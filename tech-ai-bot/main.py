@@ -66,7 +66,6 @@ def generate_ai_content(prompt_type, context_data=""):
         return None
 
 def post_scoop():
-    # تم تصحيح الفواصل هنا لتصبح إنجليزية (,) بدلاً من العربية (،)
     topic = random.choice(["ثغرات أمنية حرجة", "تسريبات هواتف", "ذكاء اصطناعي"])
     content = generate_ai_content("post", topic)
     if not content or "TITLE:" not in content or "http" not in content: return
@@ -74,4 +73,28 @@ def post_scoop():
     title = re.search(r"TITLE: (.*)\n", content).group(1).strip()
     if is_duplicate(title): return
     
-    client.create_tweet(text=content
+    client.create_tweet(text=content.replace(f"TITLE: {title}", "").strip()[:280])
+    save_to_archive(title)
+    logging.info(f"✅ تم النشر: {title}")
+
+def auto_reply():
+    try:
+        me = client.get_me().data
+        mentions = client.get_users_mentions(id=me.id, max_results=5)
+        if not mentions.data: return
+        for tweet in mentions.data:
+            if is_duplicate(f"reply_{tweet.id}"): continue
+            reply = generate_ai_content("reply", tweet.text)
+            if reply:
+                client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                save_to_archive(f"reply_{tweet.id}")
+                logging.info(f"💬 تم الرد على: {tweet.id}")
+    except Exception as e:
+        logging.error(f"❌ Reply Error: {e}")
+
+if __name__ == "__main__":
+    oman_tz = pytz.timezone('Asia/Muscat')
+    now = datetime.now(oman_tz)
+    if now.hour in [9, 12, 16, 20, 23]:
+        post_scoop()
+    auto_reply()
