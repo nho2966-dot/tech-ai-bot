@@ -2,8 +2,8 @@ name: Tech Scoop Bot 2026
 
 on:
   schedule:
-    - cron: '0 * * * *'  # يعمل كل ساعة للردود
-  workflow_dispatch:      # للتشغيل اليدوي
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   build-and-run:
@@ -29,5 +29,9 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        # استخدام السطر المباشر لضمان الوصول للملف في المجلد الرئيسي
-        run: python main.py
+        # هذا السطر سيبحث عن المجلد ويدخله ثم يشغل الملف
+        run: |
+          if [ -d "tech-ai-bot" ]; then
+            cd tech-ai-bot
+          fi
+          python main.py
