@@ -2,18 +2,15 @@ name: Tech Scoop Bot 2026
 
 on:
   schedule:
-    - cron: '0 * * * *'  # يعمل كل ساعة
-  workflow_dispatch:      # تشغيل يدوي
+    - cron: '0 * * * *'  # يعمل كل ساعة للردود
+  workflow_dispatch:      # للتشغيل اليدوي
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    concurrency:
-      group: tech-bot-group
-      cancel-in-progress: true
-
+    
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -25,11 +22,12 @@ jobs:
         run: |
           pip install tweepy requests python-dotenv pytz
 
-      - name: Run Bot
+      - name: Run Bot Script
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: python -u main.py
+        # استخدام السطر المباشر لضمان الوصول للملف في المجلد الرئيسي
+        run: python main.py
