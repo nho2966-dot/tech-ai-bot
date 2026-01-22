@@ -9,17 +9,15 @@ from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 
-# ✅ تحميل الإعدادات
+# ✅ إعدادات النخبة والـوُضُـوح
 load_dotenv()
-
-# إعداد نظام التسجيل الاحترافي
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("agent.log", encoding='utf-8'), logging.StreamHandler()]
+    level=logging.INFO, 
+    format='%(asctime)s - [MASTER-AI] - %(message)s',
+    handlers=[logging.FileHandler("cyber_hunter.log"), logging.StreamHandler()]
 )
 
-# ✅ تهيئة عملاء X (V2 للنص و V1 للصور)
+# ✅ تهيئة الوصول لمنصة X
 client = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
@@ -36,7 +34,39 @@ api_v1 = tweepy.API(auth)
 ARCHIVE_FILE = "published_archive.txt"
 
 # ---------------------------------------------------------
-# 1. نظام الذاكرة ومنع التكرار
+# 1. بروتوكولات الذكاء الاصطناعي المتعددة (Multi-Protocol AI)
+# ---------------------------------------------------------
+def generate_master_content(scenario):
+    try:
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # حقن الشخصية والصرامة والمصادر النخبوية
+        system_instructions = (
+            f"أنت 'Cyber Hunter' - خبير استخبارات تقنية عالمي. الوقت: {current_time}.\n"
+            "⚠️ بروتوكول العمل:\n"
+            "1. المصادر: أبحاث (Mandiant, Gartner)، حسابات موثقة، تسريبات GitHub، ومؤتمرات (Black Hat).\n"
+            "2. الصرامة: ممنوع الكلام العائم. اذكر أسماء، أرقام إصدارات، CVEs، أو مواصفات تقنية دقيقة.\n"
+            f"3. المهمة الحالية: {scenario['instruction']}\n"
+            "4. الهيكل: [TITLE: ناري] -> الخطاف (3 ثواني) -> الزبدة (3 نقاط) -> تلميحة للمحترفين -> 🔗 المصدر -> #هاشتاج."
+        )
+
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
+            json={
+                "model": "meta-llama/llama-3.1-70b-instruct",
+                "messages": [{"role": "system", "content": system_instructions},
+                             {"role": "user", "content": "حلل وانشر أحدث سبق صحفي مـوُثـوُق."}],
+                "temperature": 0.4
+            }
+        )
+        return res.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logging.error(f"❌ فشل المحرك: {e}")
+        return None
+
+# ---------------------------------------------------------
+# 2. نظام الفلترة والأرشفة (منع التكرار والحشو)
 # ---------------------------------------------------------
 def is_duplicate(title):
     if not os.path.exists(ARCHIVE_FILE): return False
@@ -45,96 +75,67 @@ def is_duplicate(title):
 
 def save_to_archive(title):
     with open(ARCHIVE_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d')}: {title}\n")
+        f.write(f"{datetime.now().date()}: {title}\n")
 
 # ---------------------------------------------------------
-# 2. محرك توليد المحتوى (شخصية Cyber Hunter)
+# 3. مـوُلد الهوية البصرية (Visual Engine)
 # ---------------------------------------------------------
-def generate_cyber_content(topic_info):
-    prompt = (
-        f"أنت 'Cyber Hunter': خبير تقني شاب وصائد تسريبات. الخبر هو: {topic_info}\n\n"
-        "⚠️ طبق المعادلة التالية بدقة:\n"
-        "1. ابدأ بـ [TITLE: عنوان قصير].\n"
-        "2. النص: خطاف صادم (Hook) -> 3 نقاط مركزة (الزبدة) -> تلميحة حصرية -> رابط المصدر -> سؤال استفزازي ناري.\n"
-        "3. الأسلوب: عربية بيضاء، إيموجي ذكي، ممنوع الحشو، موجه للشباب (ستوري إكس).\n"
-        "4. النطاق الزمني: تعامل مع الخبر كأنه حدث في الـ 48 ساعة الماضية."
-    )
+def get_visual(keyword):
+    path = "v_id.jpg"
     try:
-        res = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
-            json={
-                "model": "meta-llama/llama-3.1-70b-instruct",
-                "messages": [{"role": "system", "content": "أنت خبير تقني عالمي ومستفز بذكاء."},
-                             {"role": "user", "content": prompt}],
-                "temperature": 0.8
-            }
-        )
-        return res.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        logging.error(f"❌ فشل AI: {e}")
-        return None
-
-# ---------------------------------------------------------
-# 3. الهوية البصرية (جلب صورة مدمجة آلياً)
-# ---------------------------------------------------------
-def get_visual_identity(category):
-    temp_file = "post_img.jpg"
-    keywords = f"{category},cyber,technology,dark"
-    img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=1200&auto=format&keywords={keywords}"
-    try:
-        res = requests.get(img_url, timeout=15)
-        if res.status_code == 200:
-            with open(temp_file, "wb") as f: f.write(res.content)
-            media = api_v1.media_upload(filename=temp_file)
-            return media.media_id, temp_file
+        # البحث عن صور تقنية داكنة واحترافية
+        url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200&q=80&keywords={keyword},cyberpunk"
+        img_res = requests.get(url, timeout=10)
+        with open(path, "wb") as f: f.write(img_res.content)
+        media = api_v1.media_upload(filename=path)
+        return media.media_id, path
     except: return None, None
 
 # ---------------------------------------------------------
-# 4. وظيفة النشر الاحترافي
+# 4. معالج النشر والتحقق (The Publisher)
 # ---------------------------------------------------------
-def execute_scoop():
-    # مجالات الرصد الخاصة بك
+def run_agent():
+    oman_tz = pytz.timezone('Asia/Muscat')
+    now = datetime.now(oman_tz)
+    
+    # قائمة السيناريوهات النخبوية المدمجة
     scenarios = [
-        {"cat": "hacking", "q": "أحدث اختراق أمني عالمي أو ثغرة (Hacker News)"},
-        {"cat": "smartphone", "q": "تسريب هاتف آيفون أو سامسونج قادم (9to5Mac)"},
-        {"cat": "gaming", "q": "أحدث ميزة في بلايستيشن أو إكس بوكس (The Verge)"},
-        {"cat": "AI", "q": "أداة ذكاء اصطناعي جديدة تهم المصممين أو المبرمجين"}
+        {"cat": "cyber", "instruction": "رصد اختراق نشط أو ثغرة Zero-day مع خطوات حماية فورية 🚨"},
+        {"cat": "leaks", "instruction": "تحليل كود مسرب أو ميزة مخفية في بيتا (WhatsApp, X, iOS)"},
+        {"cat": "hardware", "instruction": "مقارنة معالجات قادمة (NVIDIA, Apple M-series) بلغة الأداء الفعلي"},
+        {"cat": "fact-check", "instruction": "كشف حقيقة إشاعة تقنية منتشرة بناءً على تقارير Bloomberg/Reuters"}
     ]
     
     selected = random.choice(scenarios)
-    logging.info(f"🔎 رصد مجال: {selected['cat']}")
+    content = generate_master_content(selected)
     
-    raw_content = generate_cyber_content(selected["q"])
-    if not raw_content or "TITLE:" not in raw_content: return
+    if not content or "TITLE:" not in content: return
 
-    # استخراج العنوان وفحصه
-    title = re.search(r"TITLE: (.*)\n", raw_content).group(1).strip()
-    if is_duplicate(title):
-        logging.info(f"🚫 مكرر: {title}")
+    # استخراج العنوان والتحقق من الصرامة والتوثيق
+    title = re.search(r"TITLE: (.*)\n", content).group(1).strip()
+    if is_duplicate(title) or "http" not in content:
+        logging.warning(f"🚫 تم الرفض: خبر مكرر أو غير مـوُثـوُق برابط.")
         return
 
-    clean_text = raw_content.replace(f"TITLE: {title}", "").strip()
-    media_id, img_path = get_visual_identity(selected["cat"])
+    post_text = content.replace(f"TITLE: {title}", "").strip()
+    media_id, img_path = get_visual(selected["cat"])
 
     try:
-        client.create_tweet(text=clean_text[:280], media_ids=[media_id] if media_id else None)
+        client.create_tweet(text=post_text[:280], media_ids=[media_id] if media_id else None)
         save_to_archive(title)
-        logging.info(f"🔥 تم النشر بنجاح: {title}")
-    except Exception as e:
-        logging.error(f"❌ فشل النشر: {e}")
+        logging.info(f"✅ تم نشر مـوُضـوُع نخبة: {title}")
     finally:
         if img_path and os.path.exists(img_path): os.remove(img_path)
 
 # ---------------------------------------------------------
-# 5. الجدولة الذكية (وقت ذروة عُمان)
+# 5. التوقيت الذكي المستمر (24/7 Monitoring)
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    oman_tz = pytz.timezone('Asia/Muscat')
+    logging.info("🤖 Cyber Hunter Master Agent is LIVE...")
     while True:
-        now = datetime.now(oman_tz)
-        # النشر في أوقات الذروة (صباحاً، عصراً، ومساءً)
-        if now.hour in [9, 13, 17, 21, 23] and now.minute == 0:
-            execute_scoop()
-            time.sleep(65) # تجنب التكرار في نفس الدقيقة
+        oman_now = datetime.now(pytz.timezone('Asia/Muscat'))
+        # النشر في ساعات الذروة التقنية لضمان التفاعل
+        if oman_now.hour in [9, 12, 16, 20, 22] and oman_now.minute == 0:
+            run_agent()
+            time.sleep(65)
         time.sleep(30)
