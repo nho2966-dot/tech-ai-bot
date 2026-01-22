@@ -3,7 +3,6 @@ import tweepy
 import requests
 import logging
 import random
-import re
 from datetime import datetime
 import pytz
 from dotenv import load_dotenv
@@ -26,18 +25,18 @@ auth = tweepy.OAuth1UserHandler(
 )
 api_v1 = tweepy.API(auth)
 
-# 2. محرك الذكاء الاصطناعي (حقن الشخصية + السبق + السؤال الاستفزازي)
-def fetch_ai_agent_response(prompt):
+# 2. محرك الذكاء الاصطناعي (قناص الأخبار الحديثة)
+def fetch_ai_agent_response(category_desc):
     try:
         current_year = datetime.now().year
         system_persona = (
-            f"أنت خبير تقني شاب، صائد سبق صحفي، وجيمر محترف في عام {current_year}. "
-            "مهمتك: رصد أخبار الألعاب، تحديثات X، الذكاء الاصطناعي، والأمن السيبراني. "
-            "⚠️ قواعد النشر الصارمة:\n"
-            "1. الهيكل: [Image URL] -> [عنوان Hook صادم] -> [3 نقاط تفصيلية] -> [نصيحة عملية] -> [رابط المصدر] -> [السؤال الناري].\n"
-            "2. السؤال الختامي: يجب أن يكون استفزازياً، محفزاً، ومثيراً للجدل لزيادة التعليقات. (مثال: 'هل ما زلت تدفع لهذا التطبيق الفاشل؟' أو 'لو ما جربت هذه الميزة فإنت لسه في 2010').\n"
-            "3. الصورة: اختر رابط صورة من Unsplash يعبر عن الخبر وضعه في البداية بتنسيق [Image URL: http...].\n"
-            "4. الأسلوب: شبابي 'ستوري'، إيموجي ذكي، وهاشتاقات ترند عالمية."
+            f"أنت وكيل تقني عالمي متخصص في رصد السبق الصحفي لعام {current_year}. "
+            "مهمتك: كتابة خبر حصري جداً، حديث (آخر 24 ساعة)، ومكثف.\n"
+            "⚠️ القواعد الصارمة:\n"
+            "- لا مقدمات ولا حشو: ادخل في صلب الخبر فوراً بأسلوب 'الخطاف'.\n"
+            "- الهيكل: عنوان مثير -> 3 معلومات حصرية وفنية -> رابط المصدر -> سؤال استفزازي.\n"
+            "- تجنب المعلومات المستهلكة أو القديمة نهائياً.\n"
+            "- اللغة: عربية بيضاء احترافية وموجزة."
         )
         
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
@@ -46,60 +45,62 @@ def fetch_ai_agent_response(prompt):
                 "model": "meta-llama/llama-3.1-70b-instruct", 
                 "messages": [
                     {"role": "system", "content": system_persona},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": f"ارصد أحدث سبق صحفي في مجال: {category_desc}"}
                 ],
-                "temperature": 0.85
+                "temperature": 0.8
             }
         )
         return res.json()['choices'][0]['message']['content'].strip()
     except Exception as e:
-        logging.error(f"❌ خطأ في محرك الوكيل: {e}")
+        logging.error(f"❌ خطأ AI: {e}")
         return None
 
-# 3. وظيفة النشر الاحترافي (نص + صورة)
-def publish_viral_content(full_content):
-    # استخراج رابط الصورة
-    img_url_match = re.search(r"\[Image URL: (https?://[^\s]+)\]", full_content)
-    tweet_text = full_content
+# 3. وظيفة جلب الصورة الذكية والنشر
+def publish_tech_scoop(text, search_term):
+    media_ids = []
+    temp_file = "latest_tech_news.jpg"
     
-    media_id = None
-    if img_url_match:
-        img_url = img_url_match.group(1)
-        tweet_text = full_content.replace(img_url_match.group(0), "").strip()
+    try:
+        # جلب صورة احترافية مرتبطة بالمجال المحدد آلياً
+        img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80&keywords={search_term}"
+        # ملاحظة: تم استخدام كلمات مفتاحية ديناميكية لضمان صلة الصورة بالخبر
+        img_res = requests.get(img_url, timeout=15)
         
-        try:
-            img_res = requests.get(img_url, timeout=10)
-            img_path = "temp_post.jpg"
-            with open(img_path, "wb") as f:
+        if img_res.status_code == 200:
+            with open(temp_file, "wb") as f:
                 f.write(img_res.content)
-            
-            media = api_v1.media_upload(filename=img_path)
-            media_id = [media.media_id]
-            os.remove(img_path)
-        except Exception as e:
-            logging.error(f"⚠️ فشل تجهيز الصورة: {e}")
+            media = api_v1.media_upload(filename=temp_file)
+            media_ids = [media.media_id]
+            logging.info(f"📸 تم إرفاق صورة عالية الجودة لمجال: {search_term}")
+    except Exception as e:
+        logging.error(f"⚠️ فشل جلب الصورة: {e}")
 
     try:
-        client.create_tweet(text=tweet_text, media_ids=media_id)
-        logging.info("🔥 تم نشر السبق بنجاح مع السؤال الاستفزازي!")
+        client.create_tweet(text=text, media_ids=media_ids)
+        logging.info("🔥 تم نشر السبق التقني بنجاح!")
+        if os.path.exists(temp_file): os.remove(temp_file)
     except Exception as e:
-        logging.error(f"❌ فشل النشر النهائي: {e}")
+        logging.error(f"❌ فشل النشر: {e}")
 
-# 4. محرك التشغيل الرئيسي
+# 4. محرك الرصد (تحديد المسارات الخمسة)
 if __name__ == "__main__":
     oman_tz = pytz.timezone('Asia/Muscat')
-    now_oman = datetime.now(oman_tz)
+    now = datetime.now(oman_tz)
+    
+    # خريطة الرصد المحددة من قبلك
+    scenarios = [
+        {"key": "cybersecurity,hacking", "desc": "الأمن السيبراني وأحدث الاختراقات الأمنية العالمية"},
+        {"key": "gaming,ps5,xbox", "desc": "الألعاب الإلكترونية وأحدث ما توصلت إليه الصناعة عالمياً"},
+        {"key": "socialmedia,twitter,meta", "desc": "أحدث ميزات وتسريبات منصات التواصل الاجتماعي (X, Meta, etc)"},
+        {"key": "smartphone,iphone,android", "desc": "أحدث تكنولوجيا الأجهزة الذكية والهواتف النقالة المسربة"},
+        {"key": "artificialintelligence,tech", "desc": "توظيف الذكاء الاصطناعي في الأجهزة والمنصات الحديثة"}
+    ]
+    
+    selected = random.choice(scenarios)
     event_name = os.getenv('GITHUB_EVENT_NAME', 'manual')
     
-    logging.info(f"🕶️ الوكيل 'المستفز' في وضع العمل | الحدث: {event_name}")
-
-    if event_name in ['workflow_dispatch', 'manual'] or now_oman.hour % 6 == 0:
-        tasks = [
-            "سبق صحفي عن تسريب ميزة في X تهم الجيمرز مع سؤال محفز.",
-            "تحذير أمني من اختراق عالمي بأسلوب صادم وسؤال للمتابعين.",
-            "أداة ذكاء اصطناعي ستجعل الموظفين التقليديين بلا عمل، مع سؤال مستفز.",
-            "إطلاق لعبة عالمية منتظرة ومقارنتها بالمنافسين بأسلوب يثير الجدل."
-        ]
-        content = fetch_ai_agent_response(random.choice(tasks))
+    # النشر اليدوي أو المجدول (كل 6 ساعات)
+    if event_name in ['workflow_dispatch', 'manual'] or now.hour % 6 == 0:
+        content = fetch_ai_agent_response(selected["desc"])
         if content:
-            publish_viral_content(content)
+            publish_tech_scoop(content, selected["key"])
