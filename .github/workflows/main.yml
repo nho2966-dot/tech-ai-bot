@@ -1,19 +1,13 @@
-name: Tech Scoop Bot 2026 - Hourly Logic
+name: Tech Scoop Bot 2026
 
 on:
   schedule:
-    # يعمل البوت رأس كل ساعة (00, 01, 02... إلخ)
-    # هذا يضمن الرد السريع على المتابعين
-    - cron: '0 * * * *'
-  
-  # يتيح لك تشغيل البوت يدوياً في أي وقت من تبويب Actions
-  workflow_dispatch:
+    - cron: '0 * * * *'  # يعمل كل ساعة
+  workflow_dispatch:      # تشغيل يدوي
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    
-    # منع تشغيل عدة نسخ في نفس الوقت لتجنب تداخل الردود
     concurrency:
       group: tech-bot-group
       cancel-in-progress: true
@@ -22,25 +16,20 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' # تسريع التشغيل عبر تخزين المكتبات
 
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install tweepy requests python-dotenv pytz
 
-      - name: Execute Tech Bot
+      - name: Run Bot
         env:
-          # تأكد من مطابقة هذه الأسماء تماماً لما وضعته في GitHub Secrets
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: |
-          echo "📡 جاري بدء دورة العمل (الردود + فحص وقت النشر)..."
-          python -u main.py
+        run: python -u main.py
