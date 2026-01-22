@@ -17,19 +17,26 @@ logging.basicConfig(
     handlers=[logging.FileHandler("agent.log", encoding='utf-8'), logging.StreamHandler()]
 )
 
-# ✅ تهيئة الوصول لمنصة X
-client = tweepy.Client(
-    consumer_key=os.getenv("X_API_KEY"),
-    consumer_secret=os.getenv("X_API_SECRET"),
-    access_token=os.getenv("X_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("X_ACCESS_SECRET")
-)
+# ✅ تهيئة الوصول الموحد (V2 + Bearer) لضمان تجاوز خطأ 401
+try:
+    client = tweepy.Client(
+        bearer_token=os.getenv("X_BEARER_TOKEN"),
+        consumer_key=os.getenv("X_API_KEY"),
+        consumer_secret=os.getenv("X_API_SECRET"),
+        access_token=os.getenv("X_ACCESS_TOKEN"),
+        access_token_secret=os.getenv("X_ACCESS_SECRET"),
+        wait_on_rate_limit=True
+    )
 
-auth = tweepy.OAuth1UserHandler(
-    os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
-    os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
-)
-api_v1 = tweepy.API(auth)
+    # للوسائط والعمليات المتوافقة مع V1.1
+    auth = tweepy.OAuth1UserHandler(
+        os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
+        os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
+    )
+    api_v1 = tweepy.API(auth)
+    logging.info("🔐 تم إعداد بروتوكول الاتصال بـوُضُـوح.")
+except Exception as e:
+    logging.error(f"❌ خطأ في مفاتيح الاتصال: {e}")
 
 ARCHIVE_FILE = "published_archive.txt"
 
@@ -73,28 +80,37 @@ def post_scoop():
     title = re.search(r"TITLE: (.*)\n", content).group(1).strip()
     if is_duplicate(title): return
     
-    client.create_tweet(text=content.replace(f"TITLE: {title}", "").strip()[:280])
-    save_to_archive(title)
-    logging.info(f"✅ تم النشر: {title}")
+    try:
+        client.create_tweet(text=content.replace(f"TITLE: {title}", "").strip()[:280])
+        save_to_archive(title)
+        logging.info(f"🔥 تم النشر بنجاح: {title}")
+    except Exception as e:
+        logging.error(f"❌ فشل النشر: {e}")
 
 def auto_reply():
     try:
         me = client.get_me().data
         mentions = client.get_users_mentions(id=me.id, max_results=5)
-        if not mentions.data: return
+        if not mentions or not mentions.data: 
+            logging.info("🔎 لا توجد إشارات (Mentions) جديدة.")
+            return
+
         for tweet in mentions.data:
-            if is_duplicate(f"reply_{tweet.id}"): continue
-            reply = generate_ai_content("reply", tweet.text)
-            if reply:
-                client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                save_to_archive(f"reply_{tweet.id}")
-                logging.info(f"💬 تم الرد على: {tweet.id}")
+            reply_id = f"reply_{tweet.id}"
+            if is_duplicate(reply_id): continue
+            
+            reply_text = generate_ai_content("reply", tweet.text)
+            if reply_text:
+                client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
+                save_to_archive(reply_id)
+                logging.info(f"💬 تم الرد على المستخدم في التغريدة: {tweet.id}")
     except Exception as e:
-        logging.error(f"❌ Reply Error: {e}")
+        logging.error(f"❌ فشل محرك الردود: {e}")
 
 if __name__ == "__main__":
     oman_tz = pytz.timezone('Asia/Muscat')
     now = datetime.now(oman_tz)
-    if now.hour in [9, 12, 16, 20, 23]:
-        post_scoop()
+    
+    # محاولة النشر والرد
+    post_scoop()
     auto_reply()
