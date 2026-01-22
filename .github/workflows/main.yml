@@ -1,37 +1,33 @@
-name: Tech Scoop Bot 2026
+name: Cyber Hunter Master System
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '*/15 * * * *' # يعمل كل 15 دقيقة لفحص الردود والنشر في مواعيده
+  workflow_dispatch: # يتيح لك تشغيله يدوياً في أي وقت
 
 jobs:
-  build-and-run:
+  run-agent:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.9'
 
       - name: Install Dependencies
         run: |
-          pip install tweepy requests python-dotenv pytz
+          pip install -r requirements.txt
 
-      - name: Run Bot Script
+      - name: Run Master Agent
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # ربط الأسرار (Secrets) من إعدادات GitHub بالبيئة البرمجية
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        # هذا السطر سيبحث عن المجلد ويدخله ثم يشغل الملف
-        run: |
-          if [ -d "tech-ai-bot" ]; then
-            cd tech-ai-bot
-          fi
-          python main.py
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python main.py
