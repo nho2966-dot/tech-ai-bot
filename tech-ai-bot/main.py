@@ -5,65 +5,67 @@ import logging
 import random
 from dotenv import load_dotenv
 
-# إعداد التسجيل لضمان الـوُضُـوح الاحترافي
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 load_dotenv()
 
-def generate_premium_analysis():
-    sources = ["MIT Tech Review", "Bloomberg Technology", "Wired", "The Verge"]
-    source = random.choice(sources)
-    
-    # برومبت مصمم لإنتاج محتوى طويل وعميق (Premium Style)
+# إعداد Client لـ X API V2
+client = tweepy.Client(
+    consumer_key=os.getenv("X_API_KEY"),
+    consumer_secret=os.getenv("X_API_SECRET"),
+    access_token=os.getenv("X_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("X_ACCESS_SECRET"),
+    wait_on_rate_limit=True
+)
+
+def get_ai_reply(user_name, user_text):
+    """توليد رد ذكي وفصيح باستخدام الذكاء الاصطناعي"""
     prompt = (
-        f"بناءً على تقارير {source} الأخيرة، اكتب مقالاً تقنياً قصيراً ومكثفاً بالعربية الفصحى (حوالي 800 حرف).\n"
-        "الهيكل المطلوب:\n"
-        "🔹 العنوان: (عنوان مثير وجذاب)\n\n"
-        "📍 المشهد التقني: (شرح عميق للابتكار الحالي)\n\n"
-        "📈 التأثير الاستراتيجي: (كيف سيغير هذا العالم أو السوق بلغة الأرقام)\n\n"
-        "💡 وجهة نظر: (نصيحة تحليلية للمهتمين بالمستقبل التقني)\n\n"
-        "استخدم لغة قوية وفصيحة.\n"
-        f"🌍 المصدر المرجعي: {source}\n"
-        "#تقنية #تحليل_استراتيجي #X_Premium"
+        f"أنت خبير تقني ودود. وصلك منشن من المستخدم {user_name} يقول فيه: '{user_text}'.\n"
+        "اكتب رداً ذكياً، قصيراً، وبالعربية الفصحى.\n"
+        "شجع المستخدم، أجب على سؤاله إذا وجد، وأضف لمسة من الخبرة التقنية.\n"
+        "لا تزد عن 200 حرف."
     )
-    
     try:
-        logging.info(f"🌐 جاري طلب تحليل معمق لمصدر: {source}")
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
             headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
             json={
                 "model": "meta-llama/llama-3.1-70b-instruct", 
-                "messages": [{"role": "user", "content": prompt}], 
-                "temperature": 0.85 # زيادة الإبداع للمحتوى الطويل
+                "messages": [{"role": "user", "content": prompt}]
             }
         )
         return res.json()['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        logging.error(f"❌ خطأ في توليد المحتوى: {e}")
-        return None
+    except:
+        return f"أهلاً بك يا {user_name}! يسعدني تواصلك التقني. دعنا نستمر في استكشاف آفاق الابتكار معاً. 🚀"
 
-def publish_long_tweet():
-    logging.info("🚀 بدء تحضير المقال التقني الطويل...")
-    content = generate_premium_analysis()
-    
-    if not content: return
-
+def reply_to_mentions():
+    """البحث عن المنشنز والرد عليها"""
     try:
-        # الاتصال بـ API V2 لدعم التغريدات الطويلة للمشتركين
-        client = tweepy.Client(
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
-        )
+        # الحصول على ID الحساب الخاص بك أولاً
+        me = client.get_me()
+        my_id = me.data.id
         
-        # في حسابات بريميوم، سيقوم نظام X بمعالجة هذا النص كـ Long Tweet تلقائياً
-        response = client.create_tweet(text=content)
+        # جلب آخر المنشنز (آخر 5 لتجنب استهلاك الكوتا)
+        mentions = client.get_users_mentions(id=my_id, max_results=5)
         
-        if response:
-            logging.info(f"✅ تم نشر المقال بنجاح! الرابط: https://x.com/i/status/{response.data['id']}")
+        if not mentions.data:
+            logging.info("ℹ️ لا توجد منشنز جديدة حالياً.")
+            return
+
+        for tweet in mentions.data:
+            logging.info(f"💬 معالجة المنشن من ID: {tweet.id}")
             
+            # توليد الرد
+            reply_text = get_ai_reply("صديقي المبدع", tweet.text)
+            
+            # النشر كرد
+            client.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
+            logging.info(f"✅ تم الرد بنجاح على: {tweet.id}")
+
     except Exception as e:
-        logging.error(f"❌ فشل النشر (تحقق من صلاحيات Write): {e}")
+        logging.error(f"❌ خطأ في نظام الردود: {e}")
 
 if __name__ == "__main__":
-    publish_long_tweet()
+    # تشغيل نظام النشر الرئيسي (الذي صممناه سابقاً)
+    # ثم تشغيل نظام الردود
+    logging.info("🤖 بدء عمل البوت المتكامل (نشر + ردود)...")
+    reply_to_mentions()
