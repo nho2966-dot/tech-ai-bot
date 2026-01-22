@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 load_dotenv()
 
-# 1. إعداد الاتصال (X Premium Access)
+# 1. إعداد الاتصال بـ X
 client = tweepy.Client(
     consumer_key=os.getenv("X_API_KEY"),
     consumer_secret=os.getenv("X_API_SECRET"),
@@ -26,7 +26,7 @@ auth = tweepy.OAuth1UserHandler(
 )
 api_v1 = tweepy.API(auth)
 
-# 2. محرك الذكاء الاصطناعي (OpenRouter - 2026 Model)
+# 2. محرك الذكاء الاصطناعي (OpenRouter)
 def fetch_ai_response(prompt, temp=0.9):
     try:
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
@@ -42,61 +42,70 @@ def fetch_ai_response(prompt, temp=0.9):
         logging.error(f"❌ خطأ AI: {e}")
         return None
 
-# 3. توليد السبق الصحفي (Exclusive Scoop)
+# 3. توليد السبق الصحفي الرئيسي
 def generate_exclusive_scoop():
     scoops = [
-        "تسريبات حصرية: معالج Snapdragon 8 Gen 5 سيعتمد دقة 2nm لأول مرة في تاريخ الهواتف.",
-        "خاص: أبل تختبر نظام تبريد سائل ثوري لـ iPhone 17 Pro لمواجهة متطلبات الذكاء الاصطناعي.",
-        "تقرير: سوني تعمل على جهاز PlayStation Handheld يدعم تشغيل ألعاب PS5 سحابياً بـ 0 تأخير.",
-        "براءة اختراع: سامسونج تطور شاشات قابلة للتمدد (Stretchable) ستغير مفهوم الأجهزة اللوحية.",
-        "ثورة 2026: أول بطارية تعمل بتقنية الاندماج الكمي الصغير بدأت مرحلة الاختبار في اليابان."
+        "تسريبات من مختبرات أبل: نظارات Vision Air القادمة ستدعم الترجمة الفورية للهجات المحلية العربية.",
+        "تقرير حصري: معالجات سامسونج 2026 ستستخدم تكنولوجيا 'الغرافين' لتقليل الحرارة بنسبة 50%.",
+        "مشروع سري: إيلون ماسك يلمح لدمج Starlink مباشرة في هواتف X القادمة لإنهاء عصر أبراج الاتصال.",
+        "خاص: تسريب مواصفات كاميرا Galaxy S26 Ultra - زووم بصري يصل لـ 200x بذكاء اصطناعي هجين."
     ]
     topic = random.choice(scoops)
     prompt = (
-        f"أنت مراسل تقني عالمي لعام 2026. اكتب مقالاً لـ X Premium عن: {topic}.\n"
-        "القواعد: ابدأ بـ [خاص وحصري]، استخدم لغة أرقام صادمة، أسلوب فصيح شبابي، رابط مصدر عالمي، وسؤال تفاعلي.\n"
-        "#سبق_تقني #عُمان #Tech2026 #حصري"
+        f"اكتب سبقاً صحفياً لـ X Premium عن: {topic}.\n"
+        "ابدأ بـ [خاص وحصري]، استخدم أرقاماً، لغة فصيحة شبابية، رابط مصدر، وسؤال ناري.\n"
+        "#سبق_تقني #عُمان #Tech2026"
     )
     return fetch_ai_response(prompt)
 
-# 4. نظام الردود الذكية (Engagement)
+# 4. نظام الردود الذكية (كل ساعة)
 def handle_mentions():
     try:
         me = client.get_me()
         mentions = client.get_users_mentions(id=me.data.id, max_results=5)
-        if not mentions.data: return
+        if not mentions.data:
+            logging.info("ℹ️ لا توجد تعليقات جديدة للرد عليها.")
+            return
 
         for tweet in mentions.data:
-            logging.info(f"💬 جاري الرد على: {tweet.id}")
-            reply_prompt = f"رد بذكاء وفصاحة وإثارة على هذا التعليق التقني: {tweet.text}."
+            reply_prompt = f"رد بذكاء وفصاحة على هذا التعليق التقني: {tweet.text}"
             reply_text = fetch_ai_response(reply_prompt, temp=0.7)
             if reply_text:
                 client.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
+                logging.info(f"✅ تم الرد على {tweet.id}")
     except Exception as e:
-        logging.info(f"ℹ️ نظام الردود: {e}")
+        logging.info(f"ℹ️ تنبيه في الردود: {e}")
 
-# 5. محرك النشر الرئيسي (وسائط + نص)
+# 5. محرك النشر الرئيسي (كل 6 ساعات)
 def publish_content():
     content = generate_exclusive_scoop()
     if not content: return
     try:
-        img_url = "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1000"
+        # صورة تقنية عشوائية
+        img_url = "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?q=80&w=1000"
         img_res = requests.get(img_url)
-        with open('scoop.jpg', 'wb') as f: f.write(img_res.content)
-        media = api_v1.media_upload(filename='scoop.jpg')
+        img_path = os.path.join(os.getcwd(), 'scoop_img.jpg') # مسار ديناميكي
+        with open(img_path, 'wb') as f: f.write(img_res.content)
+
+        media = api_v1.media_upload(filename=img_path)
         client.create_tweet(text=content, media_ids=[media.media_id])
-        logging.info("🔥 تم نشر السبق بنجاح!")
-        os.remove('scoop.jpg')
+        logging.info("🔥 تم نشر السبق الصحفي بنجاح!")
+        if os.path.exists(img_path): os.remove(img_path)
     except Exception as e:
-        logging.error(f"❌ فشل الوسائط: {e}")
+        logging.error(f"❌ فشل النشر: {e}")
         client.create_tweet(text=content)
 
-# 6. التشغيل الذكي
-def run_bot():
-    try:
-        me = client.get_me()
-        if me.data:
-            logging.info(f"✅ متصل كـ: @{me.data.username}")
-            handle_mentions() # يحدث كل ساعة
+# 6. التشغيل الرئيسي
+if __name__ == "__main__":
+    oman_tz = pytz.timezone('Asia/Muscat')
+    now = datetime.now(oman_tz)
+    logging.info(f"🕒 الوقت الحالي في عُمان: {now.strftime('%H:%M')}")
 
-            oman_tz = pyt
+    # الردود دائماً (كل ساعة)
+    handle_mentions()
+
+    # النشر الرئيسي (كل 6 ساعات: 0, 6, 12, 18)
+    if now.hour % 6 == 0:
+        publish_content()
+    else:
+        logging.info("ℹ️ الردود تمت، النشر الرئيسي في الدورة القادمة.")
