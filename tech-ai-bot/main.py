@@ -3,13 +3,16 @@ import tweepy
 import requests
 import logging
 import random
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 import pytz
 from dotenv import load_dotenv
 
 # إعدادات التسجيل والـوُضُـوح
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 load_dotenv()
+
+ARCHIVE_FILE = "published_archive.txt"
 
 # 1. إعداد الاتصال بـ X
 client = tweepy.Client(
@@ -25,29 +28,36 @@ auth = tweepy.OAuth1UserHandler(
 )
 api_v1 = tweepy.API(auth)
 
-# 2. محرك الذكاء الاصطناعي (قناص الأخبار الحديثة)
-def fetch_ai_agent_response(category_desc):
+# 2. نظام الذاكرة لمنع تكرار المـوُضـوُعات
+def is_duplicate(content_title):
+    if not os.path.exists(ARCHIVE_FILE): return False
+    with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
+        return content_title.lower()[:60] in f.read().lower()
+
+def save_to_archive(content_title):
+    with open(ARCHIVE_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().strftime('%Y-%m-%d')}: {content_title}\n")
+
+# 3. محرك الذكاء الاصطناعي (ضبط النطاق الزمني 48-72 ساعة)
+def fetch_tech_scoop(category_desc):
     try:
-        current_year = datetime.now().year
+        # تحديد النافذة الزمنية بدقة في البرومبت
         system_persona = (
-            f"أنت وكيل تقني عالمي متخصص في رصد السبق الصحفي لعام {current_year}. "
-            "مهمتك: كتابة خبر حصري جداً، حديث (آخر 24 ساعة)، ومكثف.\n"
-            "⚠️ القواعد الصارمة:\n"
-            "- لا مقدمات ولا حشو: ادخل في صلب الخبر فوراً بأسلوب 'الخطاف'.\n"
-            "- الهيكل: عنوان مثير -> 3 معلومات حصرية وفنية -> رابط المصدر -> سؤال استفزازي.\n"
-            "- تجنب المعلومات المستهلكة أو القديمة نهائياً.\n"
-            "- اللغة: عربية بيضاء احترافية وموجزة."
+            f"أنت خبير تقني عالمي. اليوم هو {datetime.now().strftime('%Y-%m-%d')}. "
+            "⚠️ تعليمات البحث والنشر:\n"
+            "1. النطاق الزمني: ابحث عن الأخبار والتسريبات التي حدثت خلال الـ 24 إلى 72 ساعة الماضية فقط.\n"
+            "2. المحتوى: ركز على الألعاب، الأمن السيبراني، ومنصات التواصل الاجتماعي، والذكاء الاصطناعي X بأسلوب حاد ومختصر جداً.\n"
+            "3. الفلترة: ممنوع الحشو، وممنوع الأخبار التي مضى عليها أكثر من 3 أيام.\n"
+            "4. الهيكل: [TITLE: عنوان الخبر] ثم (Hook صادم -> 3 تفاصيل تقنية -> رابط المصدر -> سؤال مستفز)."
         )
         
         res = requests.post("https://openrouter.ai/api/v1/chat/completions", 
             headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
             json={
                 "model": "meta-llama/llama-3.1-70b-instruct", 
-                "messages": [
-                    {"role": "system", "content": system_persona},
-                    {"role": "user", "content": f"ارصد أحدث سبق صحفي في مجال: {category_desc}"}
-                ],
-                "temperature": 0.8
+                "messages": [{"role": "system", "content": system_persona},
+                             {"role": "user", "content": f"ارصد سبقاً صحفياً في: {category_desc}"}],
+                "temperature": 0.7
             }
         )
         return res.json()['choices'][0]['message']['content'].strip()
@@ -55,52 +65,45 @@ def fetch_ai_agent_response(category_desc):
         logging.error(f"❌ خطأ AI: {e}")
         return None
 
-# 3. وظيفة جلب الصورة الذكية والنشر
-def publish_tech_scoop(text, search_term):
+# 4. وظيفة جلب الصورة ونشر التغريدة
+def publish_with_media(raw_output, category_key):
+    title_match = re.search(r"TITLE: (.*)\n", raw_output)
+    if not title_match: return
+
+    title = title_match.group(1).strip()
+    if is_duplicate(title):
+        logging.info(f"🚫 مكرر: {title}")
+        return
+
+    clean_text = raw_output.replace(f"TITLE: {title}", "").strip()
+    
+    # جلب صورة احترافية آلياً في الخلفية
     media_ids = []
-    temp_file = "latest_tech_news.jpg"
-    
+    temp_img = "vibrant_news.jpg"
     try:
-        # جلب صورة احترافية مرتبطة بالمجال المحدد آلياً
-        img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80&keywords={search_term}"
-        # ملاحظة: تم استخدام كلمات مفتاحية ديناميكية لضمان صلة الصورة بالخبر
-        img_res = requests.get(img_url, timeout=15)
-        
-        if img_res.status_code == 200:
-            with open(temp_file, "wb") as f:
-                f.write(img_res.content)
-            media = api_v1.media_upload(filename=temp_file)
-            media_ids = [media.media_id]
-            logging.info(f"📸 تم إرفاق صورة عالية الجودة لمجال: {search_term}")
-    except Exception as e:
-        logging.error(f"⚠️ فشل جلب الصورة: {e}")
+        img_url = f"https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=1200&auto=format&keywords={category_key},technology"
+        img_data = requests.get(img_url).content
+        with open(temp_img, "wb") as f: f.write(img_data)
+        media = api_v1.media_upload(filename=temp_img)
+        media_ids = [media.media_id]
+    except: pass
 
     try:
-        client.create_tweet(text=text, media_ids=media_ids)
-        logging.info("🔥 تم نشر السبق التقني بنجاح!")
-        if os.path.exists(temp_file): os.remove(temp_file)
-    except Exception as e:
-        logging.error(f"❌ فشل النشر: {e}")
+        client.create_tweet(text=clean_text, media_ids=media_ids)
+        save_to_archive(title)
+        logging.info(f"✅ تم النشر: {title}")
+    finally:
+        if os.path.exists(temp_img): os.remove(temp_img)
 
-# 4. محرك الرصد (تحديد المسارات الخمسة)
+# 5. التشغيل
 if __name__ == "__main__":
-    oman_tz = pytz.timezone('Asia/Muscat')
-    now = datetime.now(oman_tz)
-    
-    # خريطة الرصد المحددة من قبلك
     scenarios = [
-        {"key": "cybersecurity,hacking", "desc": "الأمن السيبراني وأحدث الاختراقات الأمنية العالمية"},
-        {"key": "gaming,ps5,xbox", "desc": "الألعاب الإلكترونية وأحدث ما توصلت إليه الصناعة عالمياً"},
-        {"key": "socialmedia,twitter,meta", "desc": "أحدث ميزات وتسريبات منصات التواصل الاجتماعي (X, Meta, etc)"},
-        {"key": "smartphone,iphone,android", "desc": "أحدث تكنولوجيا الأجهزة الذكية والهواتف النقالة المسربة"},
-        {"key": "artificialintelligence,tech", "desc": "توظيف الذكاء الاصطناعي في الأجهزة والمنصات الحديثة"}
+        {"key": "cybersecurity", "desc": "أحدث اختراق أو ثغرة أمنية في آخر 72 ساعة"},
+        {"key": "gaming", "desc": "أحدث تسريب أو إطلاق في عالم الألعاب خلال يومين"},
+        {"key": "X_platform", "desc": "ميزات جديدة تم رصدها في X مؤخراً"}
     ]
     
     selected = random.choice(scenarios)
-    event_name = os.getenv('GITHUB_EVENT_NAME', 'manual')
-    
-    # النشر اليدوي أو المجدول (كل 6 ساعات)
-    if event_name in ['workflow_dispatch', 'manual'] or now.hour % 6 == 0:
-        content = fetch_ai_agent_response(selected["desc"])
-        if content:
-            publish_tech_scoop(content, selected["key"])
+    output = fetch_tech_scoop(selected["desc"])
+    if output:
+        publish_with_media(output, selected["key"])
