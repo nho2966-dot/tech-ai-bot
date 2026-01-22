@@ -2,12 +2,13 @@ name: Cyber Hunter Master Bot
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # يعمل كل 30 دقيقة
-  workflow_dispatch:
+    - cron: '*/30 * * * *' # يتم التشغيل تلقائياً كل 30 دقيقة لفحص الردود والنشر
+  workflow_dispatch:      # يسمح لك بتشغيل البوت يدوياً من تبويب Actions
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -20,10 +21,13 @@ jobs:
       - name: Install Dependencies
         run: |
           cd tech-ai-bot
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Agent
+      - name: Run Master Agent
         env:
+          # تأكد من إضافة هذه الأسرار الستة في GitHub Settings
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
