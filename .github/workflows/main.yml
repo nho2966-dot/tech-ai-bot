@@ -1,4 +1,131 @@
-name: Cyber Hunter Master Bot
+# config.yaml
+# تكوين الوكيل التلقائي TechAgent Pro - Global Edition
+# تاريخ الإنشاء/التحديث: 2026-01
+
+agent:
+  name: "TechAgent Pro Global"
+  version: "2.1.0"
+  username: "@YourTechAgentHandle"   # ← غيّر إلى اسم حسابك الحقيقي
+  primary_language: "ar"
+  supported_languages:
+    - ar
+    - en
+    - fr
+    - es
+
+api:
+  openai:
+    model: "gpt-4o"                    # أو gpt-4o-mini لتوفير التكلفة
+    temperature_reply: 0.58
+    temperature_content: 0.72
+    max_tokens_reply: 150
+    max_tokens_content: 180
+
+  x_twitter:
+    # هذه القيم حساسة → يُفضل وضعها في .env وليس هنا
+    # bearer_token:    "xxxxxxxx"
+    # consumer_key:    "xxxxxxxx"
+    # consumer_secret: "xxxxxxxx"
+    # access_token:    "xxxxxxxx"
+    # access_secret:   "xxxxxxxx"
+
+behavior:
+  max_replies_per_hour: 15
+  min_followers_to_reply: 100          # تجاهل الحسابات الصغيرة جداً
+  reply_cooldown_seconds: 30
+  max_reply_length: 270
+
+scheduling:
+  content_post_interval_hours: 3
+  trend_search_interval_minutes: 8
+  mention_check_interval_seconds: 60
+
+topics:
+  enabled: true
+  keywords:
+    الذكاء الاصطناعي:
+      - ذكاء اصطناعي
+      - AI
+      - gpt
+      - grok
+      - llm
+      - تعلم آلي
+      - deep learning
+
+    منصات التواصل:
+      - x
+      - تويتر
+      - تيك توك
+      - انستغرام
+      - خوارزمية
+      - تريند
+      - engagement
+
+    الألعاب:
+      - العاب
+      - gaming
+      - playstation
+      - xbox
+      - fortnite
+      - gta
+      - esports
+
+    التسريبات:
+      - تسريب
+      - leak
+      - iphone 17
+      - galaxy s25
+      - ming-chi kuo
+
+    الأجهزة الذكية:
+      - iphone
+      - سامسونج
+      - pixel
+      - ساعة ذكية
+      - airpods
+      - snapdragon
+
+    السبق الصحفي:
+      - إطلاق
+      - مؤتمر
+      - ces
+      - wwdc
+      - google i/o
+      - unpacked
+
+sources:
+  trusted_domains:
+    - techcrunch.com
+    - theverge.com
+    - wired.com
+    - arstechnica.com
+    - cnet.com
+    - engadget.com
+    - bloomberg.com/tech
+    - reuters.com/technology
+    - apple.com/newsroom
+    - blog.google
+    - blogs.microsoft.com
+    - nvidia.com/blog
+    - news.samsung.com
+    - blog.playstation.com
+    - x.ai/blog
+
+  require_source_in_reply: true
+  auto_search_sources: true
+  fallback_message: "لا توجد معلومات موثوقة حديثة متاحة حاليًا من المصادر المعتمدة."
+
+logging:
+  level: INFO
+  file: agent_logs.log
+  stats_db: agent_db.sqlite
+
+advanced:
+  use_multithreading: true
+  reply_queue_maxsize: 50
+  enable_content_generation: true
+  enable_trend_replying: true
+  enable_source_validation: truename: Cyber Hunter Master Bot
 
 on:
   schedule:
