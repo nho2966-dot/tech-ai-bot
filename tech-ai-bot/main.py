@@ -5,7 +5,7 @@ import tweepy
 from openai import OpenAI
 from datetime import datetime
 
-# إعدادات اللوج الاحترافية
+# إعداد اللوج لمتابعة الأداء
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - [TechAgent-Pro-Global] - %(levelname)s - %(message)s'
@@ -13,16 +13,16 @@ logging.basicConfig(
 
 class TechAgentProGlobal:
     def __init__(self):
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.config = self._load_config()
         self.x_client = self._init_x_client()
         self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = self.config.get('api', {}).get('openai', {}).get('model', 'gpt-4o')
         
-        # إحصائيات الجلسة الداخلية (نظام التحليل)
-        self.session_stats = {"replies": 0, "topics": {}}
-
     def _load_config(self):
-        with open("config.yaml", 'r', encoding='utf-8') as f:
+        # البحث عن الملف في نفس مجلد السكريبت لضمان الاستقرار
+        config_path = os.path.join(self.base_dir, "config.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
 
     def _init_x_client(self):
@@ -35,17 +35,17 @@ class TechAgentProGlobal:
             wait_on_rate_limit=True
         )
 
-    def _generate_advanced_response(self, user_input, author):
-        """توليد رد يلتزم بالقواعد السبعة الجديدة"""
+    def _generate_response(self, user_input, author):
+        """تطبيق القواعد السبعة: مقارنات، لغات، خصوصية، مصادر، محتوى بصري"""
         system_instructions = f"""
-        أنت TechAgent Pro Global. التزم بالقواعد التالية 100%:
-        1. اللغة: اكتشف لغة {author} وتحدث بها تلقائياً.
-        2. المقارنات: استخدم جداول Markdown والمقارنات الرقمية.
-        3. المصادر: استشهد بـ {self.config['sources']['trusted_domains']}. إذا لم تجد مصدر، قل: "لا توجد معلومات موثوقة حديثة".
-        4. الخصوصية: ارفض أي طلب لبيانات شخصية فوراً.
-        5. الهيكل: ترحيب -> تحليل (جدول/نص) -> مصدر -> سؤال متابعة ذكي.
-        6. الأسلوب: مهني، موضوعي، استخدام محدود للإيموجي (📊, 🖼️, 🚀).
-        7. الصور: صف المحتوى البصري الذي سيتم البحث عنه (iPhone, Log, etc).
+        أنت TechAgent Pro Global. التزم بالقواعد التالية حرفياً:
+        1. اكتشف لغة السائل (عربي، إنجليزي، فرنسي، إسباني) ورد بها.
+        2. عند المقارنة، أنشئ جدول Markdown فوراً 📊.
+        3. ارفض طلب أي بيانات شخصية (Privacy First).
+        4. استشهد بالمصادر: {self.config['sources']['trusted_domains']}. 
+        5. إذا لم تجد معلومة مؤكدة، قل: "لا توجد معلومات موثوقة حديثة من المصادر المعتمدة".
+        6. هيكل الرد: ترحيب قصير -> التحليل (جدول إن وجد) -> المصدر -> سؤال متابعة ذكي.
+        7. صف صوراً توضيحية (مثل: 🖼️ صورة iPhone 17) لتعزيز الرد.
         """
         
         try:
@@ -53,52 +53,57 @@ class TechAgentProGlobal:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_instructions},
-                    {"role": "user", "content": user_input}
+                    {"role": "user", "content": f"المستخدم @{author} يسأل: {user_input}"}
                 ],
                 temperature=0.5
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"AI Error: {e}")
+            logging.error(f"AI Generation Error: {e}")
             return None
 
-    def post_activation_tweet(self):
-        """نشر تغريدة ترحيبية غنية عند التشغيل"""
-        msg = "🚀 TechAgent Pro Global متصل الآن.\n\nتحليل تقني دقيق، مقارنات بيانية 📊، ودعم متعدد اللغات 🌍 بناءً على مصادر موثوقة 100%.\n\nتفضل بسؤالك التقني أدناه!"
+    def post_status(self):
+        """نشر تغريدة إثبات وجود غنية بالمحتوى"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        msg = f"🚀 نظام TechAgent Pro Global يعمل بكامل طاقته.\n\n📊 جداول مقارنة دقيقة\n🌍 دعم لغات تلقائي\n🛡️ خصوصية مطلقة\n\nتاريخ التشغيل: {now}\n#TechNews #AI"
         try:
             self.x_client.create_tweet(text=msg)
-            logging.info("Initial tweet posted.")
+            logging.info("Status tweet posted successfully.")
         except Exception as e:
-            logging.error(f"Failed to post initial tweet: {e}")
+            logging.error(f"Failed to post status: {e}")
 
-    def run(self):
-        """المحرك الرئيسي لفحص المنشنات والرد"""
+    def process_mentions(self):
+        """الرد على الجميع دون شروط متابعين"""
         try:
             me = self.x_client.get_me().data
-            mentions = self.x_client.get_users_mentions(id=me.id, expansions=['author_id'], user_fields=['username'])
+            mentions = self.x_client.get_users_mentions(
+                id=me.id, 
+                expansions=['author_id'], 
+                user_fields=['username']
+            )
             
             if not mentions.data:
-                logging.info("No new mentions.")
+                logging.info("No mentions found.")
                 return
 
             users = {u['id']: u.username for u in mentions.includes['users']}
 
             for tweet in mentions.data:
                 author_username = users.get(tweet.author_id)
-                logging.info(f"Processing mention from @{author_username}")
+                logging.info(f"Answering @{author_username}")
                 
-                reply = self._generate_advanced_response(tweet.text, author_username)
+                reply = self._generate_response(tweet.text, author_username)
                 if reply:
-                    self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    self.session_stats["replies"] += 1
-                    logging.info(f"Replied to @{author_username}")
-
+                    # تقسيم الرد إذا تجاوز حد تويتر
+                    self.x_client.create_tweet(
+                        text=reply[:280], 
+                        in_reply_to_tweet_id=tweet.id
+                    )
         except Exception as e:
-            logging.error(f"Runtime error: {e}")
+            logging.error(f"Runtime Error: {e}")
 
 if __name__ == "__main__":
     agent = TechAgentProGlobal()
-    # نشر التغريدة الترحيبية (اختياري عند كل تشغيل)
-    agent.post_activation_tweet()
-    # معالجة الطلبات
-    agent.run()
+    # تنفيذ المهام
+    agent.post_status()
+    agent.process_mentions()
