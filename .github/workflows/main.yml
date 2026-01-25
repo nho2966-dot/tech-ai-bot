@@ -1,4 +1,4 @@
-name: TechAgent_Pro_Global_Final_Fixed
+name: TechAgent_Pro_Global_Deployment
 
 on:
   schedule:
@@ -29,6 +29,6 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # العثور على السكريبت أينما كان وتشغيله
-          SCRIPT_PATH=$(find . -name "main.py" | head -n 1)
-          python "$SCRIPT_PATH"
+          # البحث عن main.py وتشغيله من مكانه الأساسي
+          MAIN_FILE=$(find . -name "main.py" | head -n 1)
+          python "$MAIN_FILE"
