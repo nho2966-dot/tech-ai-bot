@@ -1,37 +1,18 @@
-# TechAgent Pro - Global Edition Configuration
 agent:
   name: "TechAgent Pro Global"
-  version: "2.5.0"
   primary_language: "ar"
-  supported_languages: ["ar", "en", "fr", "es"]
 
 api:
   openai:
     model: "gpt-4o"
-    temperature_reply: 0.5
-    max_tokens_reply: 800  # مساحة كافية للجداول والمقارنات
 
 behavior:
-  max_replies_per_hour: 20
-  min_followers_to_reply: 0 # تم الإلغاء بناءً على طلبك
-  reply_cooldown_seconds: 30
-
-topics:
-  enabled: true
-  keywords: ["ذكاء اصطناعي", "AI", "gaming", "تسريبات", "cybersecurity"]
+  min_followers_to_reply: 0
 
 sources:
   trusted_domains:
     - "techcrunch.com"
     - "theverge.com"
     - "wired.com"
-    - "arstechnica.com"
-    - "bloomberg.com/tech"
     - "apple.com/newsroom"
-    - "blog.google"
-  require_source_in_reply: true
   fallback_message: "لا توجد معلومات موثوقة حديثة متاحة حاليًا من المصادر المعتمدة حول هذا الجانب."
-
-logging:
-  level: "INFO"
-  file: "agent_logs.log"
