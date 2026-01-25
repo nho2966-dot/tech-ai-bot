@@ -4,10 +4,8 @@ import logging
 import tweepy
 from openai import OpenAI
 from datetime import datetime
-import random
-import time
 
-# ─── إعداد السجل ────────────────────────────────────────────────────────
+# ─── إعداد السجلات (للمراقبة الاحترافية عبر GitHub) ──────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)-5s | %(message)s',
@@ -16,34 +14,13 @@ logging.basicConfig(
 
 class TechAgentPro:
     def __init__(self):
-        logging.info("=== بدء تشغيل TechAgent Pro ===")
-        logging.info(f"المسار الحالي: {os.getcwd()}")
-        logging.info(f"GITHUB_WORKSPACE: {os.getenv('GITHUB_WORKSPACE')}")
-        logging.info(f"الملفات في المجلد: {os.listdir('.')[:15]}")
-
+        logging.info("🚀 بدء تشغيل TechAgent Pro (النسخة المحدثة)")
+        
+        # تحميل الإعدادات
         self.config = self._load_config()
 
-        # ─── دعم OPENROUTER أو OpenAI ───────────────────────────────────────
-        router_key = os.getenv("OPENROUTER_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-
-        if router_key:
-            logging.info("استخدام OpenRouter")
-            self.ai_client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=router_key
-            )
-            self.model = self.config.get("api", {}).get("openrouter", {}).get("model", "anthropic/claude-3.5-sonnet")
-        elif openai_key:
-            logging.info("استخدام OpenAI")
-            self.ai_client = OpenAI(api_key=openai_key)
-            self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
-        else:
-            raise ValueError("يجب توفير OPENROUTER_API_KEY أو OPENAI_API_KEY")
-
-        logging.info(f"النموذج المستخدم: {self.model}")
-
-        # ─── اتصال X ────────────────────────────────────────────────────────
+        # إعداد عميل X (باستخدام v2 API)
+        # ملاحظة: تأكد أن المفاتيح في GitHub Secrets هي التي ولّدتها "بعد" الاشتراك
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -53,186 +30,102 @@ class TechAgentPro:
             wait_on_rate_limit=True
         )
 
-        me = self.x_client.get_me().data
-        self.my_id = me.id
-        self.my_username = me.username.lower()
-        logging.info(f"حساب البوت: @{self.my_username}")
-
-        # إعدادات لتجنب الخوارزمية / الحظر
-        self.max_replies_per_run = self.config["behavior"].get("max_replies_per_run", 5)
-        self.min_followers_to_reply = self.config["behavior"].get("min_followers_to_reply", 30)
-        self.reply_delay_min_sec = self.config["behavior"].get("reply_delay_min_sec", 25)
-        self.reply_delay_max_sec = self.config["behavior"].get("reply_delay_max_sec", 90)
+        # إعداد OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("❌ OPENAI_API_KEY مفقود في الإعدادات")
+        
+        self.ai_client = OpenAI(api_key=api_key)
+        self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
 
     def _load_config(self):
-        secret = os.getenv("CONFIG_YAML")
-        if secret:
-            logging.info("تحميل من Secret CONFIG_YAML")
+        """تحميل config.yaml مع دعم GitHub Secrets كبديل"""
+        secret_yaml = os.getenv("CONFIG_YAML")
+        if secret_yaml:
             try:
-                return yaml.safe_load(secret)
-            except Exception as e:
-                logging.error(f"خطأ تحليل Secret: {e}")
+                return yaml.safe_load(secret_yaml)
+            except Exception: pass
 
-        logging.warning("استخدام إعدادات افتراضية")
-        return {
-            "api": {
-                "openai": {"model": "gpt-4o-mini"},
-                "openrouter": {"model": "anthropic/claude-3.5-sonnet"}
-            },
-            "behavior": {
-                "max_replies_per_run": 5,
-                "min_followers_to_reply": 30,
-                "reply_delay_min_sec": 25,
-                "reply_delay_max_sec": 90,
-                "publish_status_tweet": False,  # تعطيل مؤقت لتجنب التكرار
-                "spam_keywords": ["crypto", "airdrop", "giveaway", "claim", "free", "bot", "earn", "token"]
-            },
-            "sources": {
-                "trusted_domains": [
-                    "techcrunch.com", "theverge.com", "wired.com", "arstechnica.com",
-                    "cnet.com", "engadget.com", "bloomberg.com", "reuters.com"
-                ]
-            }
-        }
-
-    def _should_skip_tweet(self, tweet, author_followers: int) -> bool:
-        """تصفية المنشنات لتجنب السبام والحظر"""
-        text_lower = tweet.text.lower()
-
-        # تجاهل المنشنات من الحساب نفسه
-        if tweet.author_id == self.my_id:
-            logging.debug("تخطي: منشن من الحساب نفسه")
-            return True
-
-        # تجاهل الحسابات الصغيرة جدًا
-        if author_followers < self.min_followers_to_reply:
-            logging.info(f"تخطي @{tweet.author_id} – متابعون قليلون: {author_followers}")
-            return True
-
-        # تجاهل المنشنات التي تحتوي كلمات سبام شائعة
-        if any(kw in text_lower for kw in self.config["behavior"]["spam_keywords"]):
-            logging.info(f"تخطي منشن محتمل سبام: {text_lower[:60]}...")
-            return True
-
-        return False
+        target = "config.yaml"
+        workspace = os.getenv("GITHUB_WORKSPACE", os.getcwd())
+        for root, _, files in os.walk(workspace):
+            if target in files:
+                with open(os.path.join(root, target), encoding="utf-8") as f:
+                    return yaml.safe_load(f)
+        
+        # إعدادات افتراضية في حال فقدان الملف
+        return {"sources": {"trusted_domains": ["techcrunch.com", "theverge.com"]}}
 
     def _generate_response(self, tweet_text: str, username: str) -> str:
-        trusted = self.config.get("sources", {}).get("trusted_domains", [])
-
+        """توليد الرد التقني بناءً على القواعد الـ 7"""
         system_prompt = f"""
-        أنت TechAgent Pro – خبير تقني محايد ومهني متخصص في:
-        • الذكاء الاصطناعي وتطبيقاته
-        • منصات التواصل الاجتماعي واستراتيجيات التفاعل
-        • الألعاب الإلكترونية وتحديثاتها
-        • التسريبات التقنية الموثوقة
-        • الأجهزة الذكية ومقارناتها
-        • السبق الصحفي التقني
-
-        القواعد الصارمة:
-        1. الرد بلغة التغريدة (@{username}).
-        2. لا تقدم معلومة تقنية محددة إلا مدعومة بمصدر من: {', '.join(trusted)}
-        3. إذا لم يكن هناك مصدر موثوق حديث → قل: 'لا توجد معلومات موثوقة حديثة متاحة حالياً'
-        4. الرد أقل من 270 حرف، مهني، يفتح نقاشًا ذكيًا، ينتهي بسؤال مفتوح.
-        5. لا تطلب أي بيانات شخصية أبدًا.
-        6. استخدم إيموجي بحذر واحترافية فقط (مثل 📱، 🚀، 📊).
+        أنت TechAgent Pro – خبير تقني محايد.
+        القواعد:
+        1. رد بلغة المستخدم {username}.
+        2. استخدم جداول Markdown للمقارنات 📊.
+        3. المصادر المعتمدة: {', '.join(self.config.get('sources', {}).get('trusted_domains', []))}.
+        4. إذا لم تجد معلومة حديثة: قل 'لا توجد معلومات موثوقة حديثة'.
+        5. الرد قصير (< 280 حرف) وينتهي بسؤال متابعة ذكي.
+        6. لا تطلب بيانات شخصية.
+        7. استخدم الإيموجي (🚀, 📊, 🖼️) بذكاء.
         """
-
         try:
             resp = self.ai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"@{username} كتب: {tweet_text}\nرد احترافي موجز فقط."}
+                    {"role": "user", "content": f"السؤال من {username}: {tweet_text}"}
                 ],
-                temperature=0.58,
-                max_tokens=140
+                max_tokens=150,
+                temperature=0.5
             )
-            reply = resp.choices[0].message.content.strip()
-            return reply[:267] + "…" if len(reply) > 270 else reply
-
+            return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"خطأ توليد رد: {e}")
-            return f"@{username} مرحبًا! واجهت مشكلة مؤقتة، حاول لاحقًا 🚀"
+            logging.error(f"AI Error: {e}")
+            return f"عذراً @{username}، أواجه ضغطاً في العمل. سأعود للرد قريباً! 🚀"
 
     def run(self):
         try:
+            # التحقق من هوية البوت
             me = self.x_client.get_me().data
-            logging.info(f"متصل → @{me.username}")
+            if not me:
+                raise Exception("فشل الاتصال بالحساب. تأكد من صحة الـ Tokens.")
+            logging.info(f"✅ متصل كـ @{me.username}")
 
-            # نشر حالة (معطل مؤقتًا لتجنب التكرار)
-            if self.config["behavior"].get("publish_status_tweet", False):
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                status = f"🚀 TechAgent Pro جاهز (بـ {self.model})\nتحليل تقني + ردود ذكية 📊\n🕒 {now}"
-                self.x_client.create_tweet(text=status)
-                logging.info("تم نشر تغريدة الحالة")
-            else:
-                logging.info("نشر الحالة معطل من الإعدادات")
-
-            # جلب المنشنات
+            # 1. نشر تغريدة الحالة (فريدة لمنع خطأ التكرار 403)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            status = f"🚀 TechAgent Pro: متصل وبكامل طاقته!\nنظام التحليل التقني والمقارنات المحدث جاهز 📊\n\n🕒 تحديث: {now}"
+            
+            logging.info("جاري محاولة نشر التغريدة...")
+            post_resp = self.x_client.create_tweet(text=status)
+            
+            if post_resp.data:
+                logging.info(f"✨ نجح النشر! معرف التغريدة: {post_resp.data['id']}")
+            
+            # 2. فحص والرد على المنشنات
             mentions = self.x_client.get_users_mentions(
                 id=me.id,
-                max_results=20,
+                max_results=10,
                 expansions=["author_id"],
-                user_fields=["username", "public_metrics"]
+                user_fields=["username"]
             )
 
-            if not mentions.data:
-                logging.info("لا منشنات جديدة")
-                return
+            if mentions.data:
+                users = {u.id: u.username for u in mentions.includes.get("users", [])}
+                for tweet in mentions.data:
+                    author = users.get(tweet.author_id, "user")
+                    logging.info(f"جاري الرد على منشن من @{author}")
+                    
+                    reply = self._generate_response(tweet.text, author)
+                    self.x_client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                    logging.info(f"✅ تم الإرسال إلى @{author}")
+            else:
+                logging.info("لا توجد منشنات جديدة للرد عليها.")
 
-            users = {}
-            for u in mentions.includes.get("users", []):
-                users[u.id] = {
-                    "username": u.username,
-                    "followers": u.public_metrics.get("followers_count", 0)
-                }
-
-            replied_count = 0
-            max_replies = self.config["behavior"].get("max_replies_per_run", 8)
-
-            for tweet in mentions.data:
-                if replied_count >= max_replies:
-                    logging.info("وصل الحد الأقصى للردود في هذه الدورة")
-                    break
-
-                author_data = users.get(tweet.author_id, {"username": "مستخدم", "followers": 0})
-                author = author_data["username"]
-                followers = author_data["followers"]
-
-                if self._should_skip_tweet(tweet, followers):
-                    continue
-
-                logging.info(f"معالجة منشن من @{author} ({followers} متابع)")
-
-                reply_text = self._generate_response(tweet.text, author)
-
-                try:
-                    self.x_client.create_tweet(
-                        text=reply_text,
-                        in_reply_to_tweet_id=tweet.id
-                    )
-                    logging.info(f"تم الرد على @{author}")
-                    replied_count += 1
-
-                    # تأخير عشوائي ليبدو طبيعيًا
-                    delay = random.randint(
-                        self.config["behavior"]["reply_delay_min_sec"],
-                        self.config["behavior"]["reply_delay_max_sec"]
-                    )
-                    logging.info(f"انتظار {delay} ثانية قبل الرد التالي...")
-                    time.sleep(delay)
-
-                except tweepy.TooManyRequests:
-                    logging.warning("Rate limit – انتظار تلقائي")
-                    break
-                except tweepy.TweepyException as te:
-                    logging.error(f"فشل إرسال رد لـ @{author}: {te}")
-
+        except tweepy.Forbidden as e:
+            logging.error(f"❌ خطأ 403 (Forbidden): تأكد من عمل Regenerate للمفاتيح بعد تفعيل اشتراكك وتغيير الصلاحيات لـ Read/Write.")
         except Exception as e:
-            logging.error(f"خطأ عام في run(): {e}", exc_info=True)
+            logging.error(f"❌ خطأ غير متوقع: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    try:
-        TechAgentPro().run()
-    except Exception as e:
-        logging.critical(f"فشل التشغيل الكلي: {e}", exc_info=True)
+    TechAgentPro().run()
