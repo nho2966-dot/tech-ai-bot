@@ -1,4 +1,4 @@
-name: TechAgent_Pro_Global_Final
+name: TechAgent_Pro_Global_Final_Fixed
 
 on:
   schedule:
@@ -8,7 +8,6 @@ on:
 jobs:
   build_and_run:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -19,10 +18,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install Dependencies
-        run: |
-          # التثبيت من المجلد الذي يحتوي على السكريبت فعلياً
-          find . -name "main.py" -exec dirname {} \; | xargs -I {} pip install --upgrade pip
-          pip install tweepy openai python-dotenv pyyaml requests
+        run: pip install tweepy openai python-dotenv pyyaml requests
 
       - name: Execute TechAgent Pro
         env:
@@ -33,7 +29,6 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # البحث عن مكان الملف وتشغيله أينما كان في المستودع
+          # العثور على السكريبت وتشغيله من مكانه الأصلي
           SCRIPT_PATH=$(find . -name "main.py" | head -n 1)
-          cd $(dirname "$SCRIPT_PATH")
-          python main.py
+          python "$SCRIPT_PATH"
