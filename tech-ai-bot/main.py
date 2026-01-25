@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class TechAgentPro:
     def __init__(self):
-        self.config = self._find_and_load_config()
+        self.config = self._ultra_smart_search()
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -18,41 +18,38 @@ class TechAgentPro:
         )
         self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    def _find_and_load_config(self):
-        """يبحث عن config.yaml في المجلد الحالي وكل المجلدات المحيطة به صعوداً ونزولاً"""
-        filename = "config.yaml"
-        # البحث في المجلد الحالي وما فوقه
-        current_search = os.path.dirname(os.path.abspath(__file__))
-        for _ in range(5):  # الصعود لـ 5 مستويات
-            potential_path = os.path.join(current_search, filename)
-            if os.path.exists(potential_path):
-                logging.info(f"✅ تم العثور على الإعدادات في: {potential_path}")
-                with open(potential_path, 'r', encoding='utf-8') as f:
+    def _ultra_smart_search(self):
+        """البحث في كل مكان ممكن داخل المستودع عن ملف الإعدادات"""
+        target = "config.yaml"
+        # 1. البحث في مجلد العمل الحالي
+        for root, dirs, files in os.walk(os.getcwd()):
+            if target in files:
+                config_path = os.path.join(root, target)
+                logging.info(f"✅ تم العثور على الملف في: {config_path}")
+                with open(config_path, 'r', encoding='utf-8') as f:
                     return yaml.safe_load(f)
-            current_search = os.path.dirname(current_search)
         
-        # إذا لم يجد، يبحث في كامل بيئة العمل (لـ GitHub Actions)
-        workspace = os.getenv("GITHUB_WORKSPACE", ".")
-        for root, dirs, files in os.walk(workspace):
-            if filename in files:
-                path = os.path.join(root, filename)
-                logging.info(f"✅ تم العثور على الإعدادات عبر البحث الشامل: {path}")
-                with open(path, 'r', encoding='utf-8') as f:
+        # 2. إذا فشل، البحث في المجلد الأب (لحل مشكلة التكرار)
+        parent_dir = os.path.dirname(os.getcwd())
+        for root, dirs, files in os.walk(parent_dir):
+            if target in files:
+                config_path = os.path.join(root, target)
+                with open(config_path, 'r', encoding='utf-8') as f:
                     return yaml.safe_load(f)
 
-        raise FileNotFoundError("❌ فشل العثور على config.yaml في كامل المستودع.")
+        raise FileNotFoundError("❌ تعذر العثور على config.yaml في أي مكان داخل المستودع!")
 
     def _generate_response(self, text, user):
-        # القواعد السبعة الأساسية
+        # تطبيق القواعد السبعة
         system_prompt = f"""
-        أنت TechAgent Pro Global. التزم بالقواعد الـ 7:
-        1. اللغة: رد بنفس لغة {user}.
-        2. المقارنات: جداول Markdown 📊.
-        3. الخصوصية: ارفض أي طلب لبيانات شخصية.
+        أنت TechAgent Pro Global.
+        1. اللغة: رد بلغة السائل {user}.
+        2. المقارنات: استخدم جداول Markdown 📊.
+        3. الخصوصية: ارفض البيانات الشخصية.
         4. المصادر: {self.config.get('sources', {}).get('trusted_domains', [])}.
-        5. عدم توفر معلومة: قل "لا توجد معلومات موثوقة حديثة".
+        5. الغياب: قل 'لا توجد معلومات موثوقة حديثة' إذا لزم الأمر.
         6. الهيكل: ترحيب -> تحليل -> مصدر -> سؤال متابعة.
-        7. الإيموجي: باعتدال (📊, 🖼️, 🚀).
+        7. البصريات: استخدم إيموجي (📊, 🖼️, 🚀) لوصف الصور.
         """
         response = self.ai_client.chat.completions.create(
             model=self.config.get('api', {}).get('openai', {}).get('model', 'gpt-4o'),
@@ -63,17 +60,19 @@ class TechAgentPro:
     def run(self):
         try:
             me = self.x_client.get_me().data
-            self.x_client.create_tweet(text="🚀 TechAgent Pro Global متصل الآن.\nجاهز لتحليل طلباتكم التقنية ومقارنتها بدقة 📊.")
+            logging.info(f"Connected as @{me.username}")
+            # نشر إثبات التشغيل
+            self.x_client.create_tweet(text="🚀 نظام TechAgent Pro متصل الآن وبكامل طاقته التحليلية 📊.")
             
+            # فحص الردود
             mentions = self.x_client.get_users_mentions(id=me.id, expansions=['author_id'], user_fields=['username'])
             if mentions.data:
                 users = {u['id']: u.username for u in mentions.includes['users']}
                 for tweet in mentions.data:
-                    author = users.get(tweet.author_id)
-                    reply = self._generate_response(tweet.text, author)
+                    reply = self._generate_response(tweet.text, users.get(tweet.author_id))
                     self.x_client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Runtime Error: {e}")
 
 if __name__ == "__main__":
     TechAgentPro().run()
