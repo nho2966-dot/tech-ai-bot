@@ -29,6 +29,6 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # العثور على السكريبت وتشغيله من مكانه الأصلي
+          # العثور على السكريبت أينما كان وتشغيله
           SCRIPT_PATH=$(find . -name "main.py" | head -n 1)
           python "$SCRIPT_PATH"
