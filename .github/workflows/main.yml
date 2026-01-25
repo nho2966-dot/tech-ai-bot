@@ -1,9 +1,9 @@
-name: TechAgent_Pro_Workflow
+name: TechAgent_Pro_Automation
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # تشغيل آلي كل 30 دقيقة
-  workflow_dispatch:      # تشغيل يدوي
+    - cron: '*/30 * * * *' # تشغيل آلي كل 30 دقيقة بـوُضُـوح
+  workflow_dispatch:      # تشغيل يدوي من لوحة تحكم GitHub
 
 jobs:
   build_and_run:
@@ -20,15 +20,20 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          # الدخول للمجلد الصحيح وتثبيت المكتبات بـوُضُـوح
+          cd tech-ai-bot
           python -m pip install --upgrade pip
           pip install tweepy openai python-dotenv pyyaml requests
 
       - name: Execute Cyber Hunter Bot
         env:
+          # تأكد من إضافة هذه المفاتيح في GitHub Secrets
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python main.py
+        run: |
+          cd tech-ai-bot
+          python main.py
