@@ -3,107 +3,59 @@ import yaml
 import logging
 import tweepy
 from openai import OpenAI
-from datetime import datetime
 
-# إعداد اللوج لمتابعة الأداء
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - [TechAgent-Pro-Global] - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class TechAgentProGlobal:
+class TechAgentPro:
     def __init__(self):
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config = self._load_config()
-        self.x_client = self._init_x_client()
-        self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = self.config.get('api', {}).get('openai', {}).get('model', 'gpt-4o')
-        
-    def _load_config(self):
-        # البحث عن الملف في نفس مجلد السكريبت لضمان الاستقرار
-        config_path = os.path.join(self.base_dir, "config.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
+        # تحميل الإعدادات من نفس المجلد
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(base_path, "config.yaml"), 'r', encoding='utf-8') as f:
+            self.config = yaml.safe_load(f)
 
-    def _init_x_client(self):
-        return tweepy.Client(
+        self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
+        self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    def _generate_response(self, user_input, author):
-        """تطبيق القواعد السبعة: مقارنات، لغات، خصوصية، مصادر، محتوى بصري"""
-        system_instructions = f"""
-        أنت TechAgent Pro Global. التزم بالقواعد التالية حرفياً:
-        1. اكتشف لغة السائل (عربي، إنجليزي، فرنسي، إسباني) ورد بها.
-        2. عند المقارنة، أنشئ جدول Markdown فوراً 📊.
-        3. ارفض طلب أي بيانات شخصية (Privacy First).
-        4. استشهد بالمصادر: {self.config['sources']['trusted_domains']}. 
-        5. إذا لم تجد معلومة مؤكدة، قل: "لا توجد معلومات موثوقة حديثة من المصادر المعتمدة".
-        6. هيكل الرد: ترحيب قصير -> التحليل (جدول إن وجد) -> المصدر -> سؤال متابعة ذكي.
-        7. صف صوراً توضيحية (مثل: 🖼️ صورة iPhone 17) لتعزيز الرد.
+    def _generate_response(self, text, user):
+        system_prompt = f"""
+        أنت TechAgent Pro Global. التزم بالقواعد الـ 7:
+        1. اكتشف لغة {user} ورد بها تلقائياً.
+        2. عند المقارنة، استخدم جداول Markdown 📊.
+        3. ارفض طلب البيانات الشخصية (الخصوصية أولاً).
+        4. المصادر المعتمدة: {self.config['sources']['trusted_domains']}.
+        5. إذا لم تجد مصدر، استخدم جملة الـ fallback المحددة.
+        6. الهيكل: ترحيب -> تحليل -> مصدر -> سؤال متابعة.
+        7. استخدم إيموجي باعتدال (📊, 🖼️, 🚀).
         """
-        
-        try:
-            response = self.ai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_instructions},
-                    {"role": "user", "content": f"المستخدم @{author} يسأل: {user_input}"}
-                ],
-                temperature=0.5
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logging.error(f"AI Generation Error: {e}")
-            return None
+        response = self.ai_client.chat.completions.create(
+            model=self.config['api']['openai']['model'],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": text}]
+        )
+        return response.choices[0].message.content.strip()
 
-    def post_status(self):
-        """نشر تغريدة إثبات وجود غنية بالمحتوى"""
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        msg = f"🚀 نظام TechAgent Pro Global يعمل بكامل طاقته.\n\n📊 جداول مقارنة دقيقة\n🌍 دعم لغات تلقائي\n🛡️ خصوصية مطلقة\n\nتاريخ التشغيل: {now}\n#TechNews #AI"
-        try:
-            self.x_client.create_tweet(text=msg)
-            logging.info("Status tweet posted successfully.")
-        except Exception as e:
-            logging.error(f"Failed to post status: {e}")
-
-    def process_mentions(self):
-        """الرد على الجميع دون شروط متابعين"""
+    def run(self):
         try:
             me = self.x_client.get_me().data
-            mentions = self.x_client.get_users_mentions(
-                id=me.id, 
-                expansions=['author_id'], 
-                user_fields=['username']
-            )
+            # نشر تغريدة الحالة
+            self.x_client.create_tweet(text="🚀 TechAgent Pro Global متصل الآن وجاهز للتحليل التقني 📊.")
             
-            if not mentions.data:
-                logging.info("No mentions found.")
-                return
-
-            users = {u['id']: u.username for u in mentions.includes['users']}
-
-            for tweet in mentions.data:
-                author_username = users.get(tweet.author_id)
-                logging.info(f"Answering @{author_username}")
-                
-                reply = self._generate_response(tweet.text, author_username)
-                if reply:
-                    # تقسيم الرد إذا تجاوز حد تويتر
-                    self.x_client.create_tweet(
-                        text=reply[:280], 
-                        in_reply_to_tweet_id=tweet.id
-                    )
+            # فحص المنشنات
+            mentions = self.x_client.get_users_mentions(id=me.id, expansions=['author_id'], user_fields=['username'])
+            if mentions.data:
+                users = {u['id']: u.username for u in mentions.includes['users']}
+                for tweet in mentions.data:
+                    author = users.get(tweet.author_id)
+                    reply = self._generate_response(tweet.text, author)
+                    self.x_client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                    logging.info(f"Replied to @{author}")
         except Exception as e:
-            logging.error(f"Runtime Error: {e}")
+            logging.error(f"Error: {e}")
 
 if __name__ == "__main__":
-    agent = TechAgentProGlobal()
-    # تنفيذ المهام
-    agent.post_status()
-    agent.process_mentions()
+    TechAgentPro().run()
