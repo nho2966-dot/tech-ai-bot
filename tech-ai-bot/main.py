@@ -5,7 +5,7 @@ import tweepy
 from openai import OpenAI
 from datetime import datetime
 
-# ─── إعداد السجلات (للمراقبة الاحترافية عبر GitHub) ──────────────────────
+# ─── إعداد السجلات (للمراقبة الدقيقة) ──────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)-5s | %(message)s',
@@ -14,13 +14,16 @@ logging.basicConfig(
 
 class TechAgentPro:
     def __init__(self):
-        logging.info("🚀 بدء تشغيل TechAgent Pro (النسخة المحدثة)")
-        
-        # تحميل الإعدادات
+        logging.info("🚀 تشغيل النسخة الاحترافية (v1.1 + v2) مع منع الرد الذاتي")
         self.config = self._load_config()
 
-        # إعداد عميل X (باستخدام v2 API)
-        # ملاحظة: تأكد أن المفاتيح في GitHub Secrets هي التي ولّدتها "بعد" الاشتراك
+        # إعداد الاتصال الهجين
+        auth = tweepy.OAuth1UserHandler(
+            os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
+            os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
+        )
+        self.api_v1 = tweepy.API(auth)
+
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -30,102 +33,94 @@ class TechAgentPro:
             wait_on_rate_limit=True
         )
 
-        # إعداد OpenAI
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("❌ OPENAI_API_KEY مفقود في الإعدادات")
-        
-        self.ai_client = OpenAI(api_key=api_key)
+        self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
 
     def _load_config(self):
-        """تحميل config.yaml مع دعم GitHub Secrets كبديل"""
-        secret_yaml = os.getenv("CONFIG_YAML")
-        if secret_yaml:
-            try:
-                return yaml.safe_load(secret_yaml)
-            except Exception: pass
-
         target = "config.yaml"
         workspace = os.getenv("GITHUB_WORKSPACE", os.getcwd())
         for root, _, files in os.walk(workspace):
             if target in files:
                 with open(os.path.join(root, target), encoding="utf-8") as f:
                     return yaml.safe_load(f)
-        
-        # إعدادات افتراضية في حال فقدان الملف
         return {"sources": {"trusted_domains": ["techcrunch.com", "theverge.com"]}}
 
     def _generate_response(self, tweet_text: str, username: str) -> str:
-        """توليد الرد التقني بناءً على القواعد الـ 7"""
+        """توليد محتوى جديد وحقيقي (جداول وتحليلات) بناءً على طلب المستخدم"""
         system_prompt = f"""
-        أنت TechAgent Pro – خبير تقني محايد.
+        أنت TechAgent Pro – خبير تقني عالمي.
+        المهمة: قم بإنشاء محتوى تقني أصلي (Original Content) رداً على {username}.
         القواعد:
-        1. رد بلغة المستخدم {username}.
-        2. استخدم جداول Markdown للمقارنات 📊.
-        3. المصادر المعتمدة: {', '.join(self.config.get('sources', {}).get('trusted_domains', []))}.
-        4. إذا لم تجد معلومة حديثة: قل 'لا توجد معلومات موثوقة حديثة'.
-        5. الرد قصير (< 280 حرف) وينتهي بسؤال متابعة ذكي.
-        6. لا تطلب بيانات شخصية.
-        7. استخدم الإيموجي (🚀, 📊, 🖼️) بذكاء.
+        1. إذا طلب مقارنة: أنشئ جدول Markdown صغير جداً (3 صفوف كحد أقصى) 📊.
+        2. المصادر: اذكر اسم مصدر موثوق واحد من {self.config.get('sources', {}).get('trusted_domains', [])}.
+        3. الطول: يجب أن يكون الرد كاملاً وأقل من 260 حرفاً لضمان القبول.
+        4. المحتوى: لا تستخدم ردوداً جاهزة، حلل النص وأجب بدقة.
         """
         try:
             resp = self.ai_client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"السؤال من {username}: {tweet_text}"}
+                    {"role": "user", "content": tweet_text}
                 ],
-                max_tokens=150,
-                temperature=0.5
+                max_tokens=180,
+                temperature=0.7 # لزيادة الإبداع وضمان عدم التكرار
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"AI Error: {e}")
-            return f"عذراً @{username}، أواجه ضغطاً في العمل. سأعود للرد قريباً! 🚀"
+            logging.error(f"AI Generation Error: {e}")
+            return None
 
     def run(self):
         try:
-            # التحقق من هوية البوت
+            # الحصول على بيانات البوت
             me = self.x_client.get_me().data
-            if not me:
-                raise Exception("فشل الاتصال بالحساب. تأكد من صحة الـ Tokens.")
-            logging.info(f"✅ متصل كـ @{me.username}")
+            bot_id = me.id
+            bot_username = me.username.lower()
+            logging.info(f"✅ متصل كـ @{bot_username}")
 
-            # 1. نشر تغريدة الحالة (فريدة لمنع خطأ التكرار 403)
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            status = f"🚀 TechAgent Pro: متصل وبكامل طاقته!\nنظام التحليل التقني والمقارنات المحدث جاهز 📊\n\n🕒 تحديث: {now}"
-            
-            logging.info("جاري محاولة نشر التغريدة...")
-            post_resp = self.x_client.create_tweet(text=status)
-            
-            if post_resp.data:
-                logging.info(f"✨ نجح النشر! معرف التغريدة: {post_resp.data['id']}")
-            
-            # 2. فحص والرد على المنشنات
+            # 1. نشر تغريدة الحالة (Timestamp) لضمان عمل API
+            now = datetime.now().strftime("%H:%M:%S")
+            self.api_v1.update_status(status=f"🚀 TechAgent Pro: متصل.\nالأنظمة جاهزة لتحليل المنشنات 📊\n🕒 تحديث: {now}")
+
+            # 2. جلب المنشنات
             mentions = self.x_client.get_users_mentions(
-                id=me.id,
+                id=bot_id,
                 max_results=10,
                 expansions=["author_id"],
                 user_fields=["username"]
             )
 
             if mentions.data:
-                users = {u.id: u.username for u in mentions.includes.get("users", [])}
+                users_map = {u.id: u.username for u in mentions.includes.get("users", [])}
+                
                 for tweet in mentions.data:
-                    author = users.get(tweet.author_id, "user")
-                    logging.info(f"جاري الرد على منشن من @{author}")
+                    author_username = users_map.get(tweet.author_id, "").lower()
                     
-                    reply = self._generate_response(tweet.text, author)
-                    self.x_client.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                    logging.info(f"✅ تم الإرسال إلى @{author}")
-            else:
-                logging.info("لا توجد منشنات جديدة للرد عليها.")
+                    # ⚠️ القاعدة: منع الرد على حساب البوت نفسه لتجنب الـ Loop
+                    if author_username == bot_username:
+                        logging.info(f"⏭️ تخطي المنشن: المصدر هو حساب البوت نفسه (@{author_username})")
+                        continue
 
-        except tweepy.Forbidden as e:
-            logging.error(f"❌ خطأ 403 (Forbidden): تأكد من عمل Regenerate للمفاتيح بعد تفعيل اشتراكك وتغيير الصلاحيات لـ Read/Write.")
+                    logging.info(f"📩 جاري إنشاء محتوى رداً على @{author_username}...")
+                    
+                    reply_content = self._generate_response(tweet.text, author_username)
+                    
+                    if reply_content:
+                        try:
+                            # إرسال الرد الفعلي الذي تم إنشاؤه
+                            self.api_v1.update_status(
+                                status=f"@{author_username} {reply_content}"[:280],
+                                in_reply_to_status_id=tweet.id
+                            )
+                            logging.info(f"✅ تم نشر الرد المخصص لـ @{author_username}")
+                        except Exception as post_err:
+                            logging.error(f"❌ فشل نشر الرد: {post_err}")
+            else:
+                logging.info("😴 لا توجد منشنات جديدة من مستخدمين آخرين.")
+
         except Exception as e:
-            logging.error(f"❌ خطأ غير متوقع: {e}", exc_info=True)
+            logging.error(f"❌ خطأ عام في الدورة: {e}")
 
 if __name__ == "__main__":
     TechAgentPro().run()
