@@ -18,11 +18,12 @@ class TechAgentPro:
     def __init__(self):
         logging.info("=== بدء تشغيل TechAgent Pro ===")
         logging.info(f"المسار الحالي: {os.getcwd()}")
-        logging.info(f"الملفات في المجلد: {os.listdir('.')[:10]}")
+        logging.info(f"GITHUB_WORKSPACE: {os.getenv('GITHUB_WORKSPACE')}")
+        logging.info(f"الملفات في المجلد: {os.listdir('.')[:15]}")
 
         self.config = self._load_config()
 
-        # ─── اتصال OpenRouter أو OpenAI ───────────────────────────────────
+        # ─── دعم OPENROUTER أو OpenAI ───────────────────────────────────────
         router_key = os.getenv("OPENROUTER_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
 
@@ -53,27 +54,38 @@ class TechAgentPro:
         )
 
         me = self.x_client.get_me().data
+        self.my_id = me.id
         self.my_username = me.username.lower()
-        logging.info(f"اسم البوت: @{self.my_username}")
+        logging.info(f"حساب البوت: @{self.my_username}")
+
+        # إعدادات لتجنب الخوارزمية / الحظر
+        self.max_replies_per_run = self.config["behavior"].get("max_replies_per_run", 5)
+        self.min_followers_to_reply = self.config["behavior"].get("min_followers_to_reply", 30)
+        self.reply_delay_min_sec = self.config["behavior"].get("reply_delay_min_sec", 25)
+        self.reply_delay_max_sec = self.config["behavior"].get("reply_delay_max_sec", 90)
 
     def _load_config(self):
         secret = os.getenv("CONFIG_YAML")
         if secret:
             logging.info("تحميل من Secret CONFIG_YAML")
-            return yaml.safe_load(secret)
+            try:
+                return yaml.safe_load(secret)
+            except Exception as e:
+                logging.error(f"خطأ تحليل Secret: {e}")
 
-        logging.warning("لم يتم العثور على CONFIG_YAML → إعدادات افتراضية")
+        logging.warning("استخدام إعدادات افتراضية")
         return {
             "api": {
                 "openai": {"model": "gpt-4o-mini"},
                 "openrouter": {"model": "anthropic/claude-3.5-sonnet"}
             },
             "behavior": {
-                "max_replies_per_run": 8,
-                "min_followers_to_reply": 20,
-                "reply_delay_min_sec": 10,
-                "reply_delay_max_sec": 45,
-                "publish_status_tweet": True
+                "max_replies_per_run": 5,
+                "min_followers_to_reply": 30,
+                "reply_delay_min_sec": 25,
+                "reply_delay_max_sec": 90,
+                "publish_status_tweet": False,  # تعطيل مؤقت لتجنب التكرار
+                "spam_keywords": ["crypto", "airdrop", "giveaway", "claim", "free", "bot", "earn", "token"]
             },
             "sources": {
                 "trusted_domains": [
@@ -84,22 +96,22 @@ class TechAgentPro:
         }
 
     def _should_skip_tweet(self, tweet, author_followers: int) -> bool:
-        """قرارات التصفية لتجنب السبام والحظر"""
+        """تصفية المنشنات لتجنب السبام والحظر"""
         text_lower = tweet.text.lower()
 
-        # تخطي إذا كان من الحساب نفسه
-        if tweet.author_id == self.x_client.get_me().data.id:
+        # تجاهل المنشنات من الحساب نفسه
+        if tweet.author_id == self.my_id:
+            logging.debug("تخطي: منشن من الحساب نفسه")
             return True
 
-        # تخطي الحسابات الصغيرة جدًا
-        if author_followers < self.config["behavior"]["min_followers_to_reply"]:
+        # تجاهل الحسابات الصغيرة جدًا
+        if author_followers < self.min_followers_to_reply:
             logging.info(f"تخطي @{tweet.author_id} – متابعون قليلون: {author_followers}")
             return True
 
-        # تخطي إذا كان يبدو بوتًا (كلمات مفتاحية شائعة)
-        bot_indicators = ["bot", "b0t", "crypto", "airdrop", "giveaway", "claim", "free"]
-        if any(ind in text_lower for ind in bot_indicators):
-            logging.info(f"تخطي منشن محتمل بوت: {text_lower[:60]}...")
+        # تجاهل المنشنات التي تحتوي كلمات سبام شائعة
+        if any(kw in text_lower for kw in self.config["behavior"]["spam_keywords"]):
+            logging.info(f"تخطي منشن محتمل سبام: {text_lower[:60]}...")
             return True
 
         return False
@@ -108,14 +120,21 @@ class TechAgentPro:
         trusted = self.config.get("sources", {}).get("trusted_domains", [])
 
         system_prompt = f"""
-        أنت TechAgent Pro – خبير تقني محايد ومهني.
+        أنت TechAgent Pro – خبير تقني محايد ومهني متخصص في:
+        • الذكاء الاصطناعي وتطبيقاته
+        • منصات التواصل الاجتماعي واستراتيجيات التفاعل
+        • الألعاب الإلكترونية وتحديثاتها
+        • التسريبات التقنية الموثوقة
+        • الأجهزة الذكية ومقارناتها
+        • السبق الصحفي التقني
+
         القواعد الصارمة:
         1. الرد بلغة التغريدة (@{username}).
-        2. لا معلومة تقنية بدون مصدر من: {', '.join(trusted)}
-        3. بدون مصدر موثوق → قل: 'لا توجد معلومات موثوقة حديثة متاحة حالياً'
-        4. الرد أقل من 270 حرف، مهني، ينتهي بسؤال ذكي.
+        2. لا تقدم معلومة تقنية محددة إلا مدعومة بمصدر من: {', '.join(trusted)}
+        3. إذا لم يكن هناك مصدر موثوق حديث → قل: 'لا توجد معلومات موثوقة حديثة متاحة حالياً'
+        4. الرد أقل من 270 حرف، مهني، يفتح نقاشًا ذكيًا، ينتهي بسؤال مفتوح.
         5. لا تطلب أي بيانات شخصية أبدًا.
-        6. استخدم إيموجي بحذر واحترافية فقط.
+        6. استخدم إيموجي بحذر واحترافية فقط (مثل 📱، 🚀، 📊).
         """
 
         try:
@@ -123,9 +142,9 @@ class TechAgentPro:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"@{username}: {tweet_text}\nرد احترافي موجز فقط."}
+                    {"role": "user", "content": f"@{username} كتب: {tweet_text}\nرد احترافي موجز فقط."}
                 ],
-                temperature=0.55,
+                temperature=0.58,
                 max_tokens=140
             )
             reply = resp.choices[0].message.content.strip()
@@ -138,10 +157,10 @@ class TechAgentPro:
     def run(self):
         try:
             me = self.x_client.get_me().data
-            logging.info(f"متصل بنجاح → @{me.username}")
+            logging.info(f"متصل → @{me.username}")
 
-            # نشر حالة (مع شرط لتجنب التكرار الزائد)
-            if self.config["behavior"].get("publish_status_tweet", True):
+            # نشر حالة (معطل مؤقتًا لتجنب التكرار)
+            if self.config["behavior"].get("publish_status_tweet", False):
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 status = f"🚀 TechAgent Pro جاهز (بـ {self.model})\nتحليل تقني + ردود ذكية 📊\n🕒 {now}"
                 self.x_client.create_tweet(text=status)
@@ -162,10 +181,10 @@ class TechAgentPro:
                 return
 
             users = {}
-            for user in mentions.includes.get("users", []):
-                users[user.id] = {
-                    "username": user.username,
-                    "followers": user.public_metrics.get("followers_count", 0)
+            for u in mentions.includes.get("users", []):
+                users[u.id] = {
+                    "username": u.username,
+                    "followers": u.public_metrics.get("followers_count", 0)
                 }
 
             replied_count = 0
@@ -195,7 +214,7 @@ class TechAgentPro:
                     logging.info(f"تم الرد على @{author}")
                     replied_count += 1
 
-                    # تأخير عشوائي طبيعي بين الردود
+                    # تأخير عشوائي ليبدو طبيعيًا
                     delay = random.randint(
                         self.config["behavior"]["reply_delay_min_sec"],
                         self.config["behavior"]["reply_delay_max_sec"]
@@ -204,10 +223,10 @@ class TechAgentPro:
                     time.sleep(delay)
 
                 except tweepy.TooManyRequests:
-                    logging.warning("Rate limit – سيتم الانتظار تلقائيًا")
+                    logging.warning("Rate limit – انتظار تلقائي")
                     break
-                except Exception as e:
-                    logging.error(f"فشل إرسال رد لـ @{author}: {e}")
+                except tweepy.TweepyException as te:
+                    logging.error(f"فشل إرسال رد لـ @{author}: {te}")
 
         except Exception as e:
             logging.error(f"خطأ عام في run(): {e}", exc_info=True)
