@@ -5,7 +5,7 @@
 agent:
   name: "TechAgent Pro Global"
   version: "2.1.0"
-  username: "@YourTechAgentHandle"   # ← غيّر إلى اسم حسابك الحقيقي
+  username: "@X_TechNews_"   # ← غيّر إلى اسم حسابك الحقيقي
   primary_language: "ar"
   supported_languages:
     - ar
