@@ -1,6 +1,13 @@
-tweepy==4.14.0
-requests==2.31.0
-python-dotenv==1.0.0
-pytz==2023.3
-pandas==2.1.1
-schedule==1.2.1
+openai>=1.0.0               # أو grok-api إذا كان متاحاً
+tweepy>=4.14.0              # Twitter API v2
+python-dotenv>=1.0.0
+langchain>=0.2.0            # اختياري – إذا أردت بناء chains أكثر تعقيداً
+langchain-openai>=0.1.0     # إذا تستخدم langchain + openai
+pydantic>=2.0
+pytest>=7.0                 # للاختباراتopenai>=1.0.0               # أو grok-api إذا كان متاحاً
+tweepy>=4.14.0              # Twitter API v2
+python-dotenv>=1.0.0
+langchain>=0.2.0            # اختياري – إذا أردت بناء chains أكثر تعقيداً
+langchain-openai>=0.1.0     # إذا تستخدم langchain + openai
+pydantic>=2.0
+pytest>=7.0                 # للاختبارات
