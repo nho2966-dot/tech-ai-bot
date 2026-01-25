@@ -1,9 +1,9 @@
-name: TechAgent_Pro_Global_Workflow
+name: TechAgent_Pro_Global_Fixed
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # تشغيل تلقائي كل 30 دقيقة
-  workflow_dispatch:      # تشغيل يدوي
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   build_and_run:
@@ -13,21 +13,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install Dependencies
         run: |
-          # الدخول للمجلد المتداخل لتثبيت المكتبات
-          cd tech-ai-bot/tech-ai-bot
+          cd tech-ai-bot
           python -m pip install --upgrade pip
           pip install tweepy openai python-dotenv pyyaml requests
 
       - name: Execute TechAgent Pro
         env:
-          # تأكد من مطابقة هذه الأسماء في GitHub Secrets
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
@@ -35,6 +33,5 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # الدخول للمجلد المتداخل لتشغيل البوت
-          cd tech-ai-bot/tech-ai-bot
+          cd tech-ai-bot
           python main.py
