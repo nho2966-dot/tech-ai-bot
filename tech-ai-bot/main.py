@@ -14,7 +14,6 @@ logging.basicConfig(
 
 class TechAgentPro:
     def __init__(self):
-        # معلومات تشخيصية لتتبع المشكلات
         logging.info("=== بدء تشغيل TechAgent Pro ===")
         logging.info(f"المسار الحالي: {os.getcwd()}")
         logging.info(f"GITHUB_WORKSPACE: {os.getenv('GITHUB_WORKSPACE')}")
@@ -23,13 +22,33 @@ class TechAgentPro:
         # تحميل التكوين
         self.config = self._load_config()
 
+        # ─── دعم OPENROUTER_API_KEY أولوية + fallback إلى OpenAI ──────
+        router_key = os.getenv("OPENROUTER_API_KEY")
+        openai_key = os.getenv("OPENAI_API_KEY")
+
+        if router_key:
+            logging.info("استخدام OPENROUTER_API_KEY (أولوية)")
+            self.ai_client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=router_key
+            )
+            # نموذج افتراضي من OpenRouter (يمكن تغييره من config)
+            self.model = self.config.get("api", {}).get("openrouter", {}).get("model", "anthropic/claude-3.5-sonnet")
+        elif openai_key:
+            logging.info("استخدام OPENAI_API_KEY (fallback)")
+            self.ai_client = OpenAI(api_key=openai_key)
+            self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
+        else:
+            raise ValueError("يجب توفير واحد على الأقل من: OPENROUTER_API_KEY أو OPENAI_API_KEY في Secrets")
+
+        logging.info(f"النموذج المستخدم: {self.model}")
+
         # التحقق من مفاتيح X
         x_keys = ["X_BEARER_TOKEN", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]
-        missing_x = [k for k in x_keys if not os.getenv(k)]
-        if missing_x:
-            raise ValueError(f"مفاتيح X مفقودة: {', '.join(missing_x)}")
+        missing = [k for k in x_keys if not os.getenv(k)]
+        if missing:
+            raise ValueError(f"مفاتيح X مفقودة: {', '.join(missing)}")
 
-        # اتصال X
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -39,29 +58,15 @@ class TechAgentPro:
             wait_on_rate_limit=True
         )
 
-        # OpenAI
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY مفقود في Secrets")
-        self.ai_client = OpenAI(api_key=api_key)
-        self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
-
-        logging.info(f"النموذج المستخدم: {self.model}")
-
     def _load_config(self):
-        """تحميل التكوين بأولوية: Secret → ملف → افتراضي"""
-        # الأولوية 1: GitHub Secret
         secret = os.getenv("CONFIG_YAML")
         if secret:
-            logging.info("تحميل من GitHub Secret → CONFIG_YAML")
+            logging.info("تحميل من Secret: CONFIG_YAML")
             try:
-                parsed = yaml.safe_load(secret)
-                logging.info("تم تحليل CONFIG_YAML بنجاح")
-                return parsed
+                return yaml.safe_load(secret)
             except Exception as e:
-                logging.error(f"خطأ في تحليل Secret: {e}")
+                logging.error(f"خطأ تحليل Secret: {e}")
 
-        # الأولوية 2: ملف config.yaml (للتطوير المحلي)
         target = "config.yaml"
         base = os.getenv("GITHUB_WORKSPACE", os.getcwd())
         logging.info(f"البحث عن {target} في: {base}")
@@ -76,10 +81,12 @@ class TechAgentPro:
                 except Exception as e:
                     logging.error(f"خطأ قراءة {path}: {e}")
 
-        # الأولوية 3: افتراضي آمن
         logging.warning("استخدام إعدادات افتراضية")
         return {
-            "api": {"openai": {"model": "gpt-4o-mini"}},
+            "api": {
+                "openai": {"model": "gpt-4o-mini"},
+                "openrouter": {"model": "anthropic/claude-3.5-sonnet"}
+            },
             "sources": {"trusted_domains": ["techcrunch.com", "theverge.com", "wired.com"]},
             "behavior": {"max_replies_per_hour": 10}
         }
@@ -88,7 +95,7 @@ class TechAgentPro:
         trusted = self.config.get("sources", {}).get("trusted_domains", [])
 
         system_prompt = f"""
-        أنت TechAgent Pro – خبير تقني محايد.
+        أنت TechAgent Pro – خبير تقني محايد ومهني.
         القواعد:
         1. رد بلغة التغريدة (@{username}).
         2. لا معلومة بدون مصدر من: {', '.join(trusted)}
@@ -119,13 +126,11 @@ class TechAgentPro:
             me = self.x_client.get_me().data
             logging.info(f"متصل → @{me.username}")
 
-            # نشر حالة فريدة
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            status = f"🚀 TechAgent Pro جاهز\nتحليل + ردود ذكية 📊\n🕒 {now}"
+            status = f"🚀 TechAgent Pro جاهز (بـ {self.model})\nتحليل تقني + ردود ذكية 📊\n🕒 {now}"
             self.x_client.create_tweet(text=status)
             logging.info("تم نشر الحالة")
 
-            # منشنات
             mentions = self.x_client.get_users_mentions(
                 id=me.id,
                 max_results=15,
@@ -149,7 +154,7 @@ class TechAgentPro:
                     text=reply,
                     in_reply_to_tweet_id=tweet.id
                 )
-                logging.info(f"رد على @{author}")
+                logging.info(f"تم الرد على @{author}")
 
         except tweepy.TooManyRequests:
             logging.warning("Rate limit → انتظر")
