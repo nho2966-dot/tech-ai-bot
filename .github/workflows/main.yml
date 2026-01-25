@@ -1,4 +1,4 @@
-name: TechAgent_Pro_Global_Fixed
+name: TechAgent_Pro_Global_Final
 
 on:
   schedule:
@@ -20,8 +20,8 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          cd tech-ai-bot
-          python -m pip install --upgrade pip
+          # التثبيت من المجلد الذي يحتوي على السكريبت فعلياً
+          find . -name "main.py" -exec dirname {} \; | xargs -I {} pip install --upgrade pip
           pip install tweepy openai python-dotenv pyyaml requests
 
       - name: Execute TechAgent Pro
@@ -33,5 +33,7 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          cd tech-ai-bot
+          # البحث عن مكان الملف وتشغيله أينما كان في المستودع
+          SCRIPT_PATH=$(find . -name "main.py" | head -n 1)
+          cd $(dirname "$SCRIPT_PATH")
           python main.py
