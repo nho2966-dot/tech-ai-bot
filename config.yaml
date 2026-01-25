@@ -9,11 +9,16 @@ behavior:
   reply_cooldown_seconds: 45
 
 topics:
-  ai: ["ذكاء اصطناعي", "AI", "GPT"]
-  gaming: ["جيمنج", "PlayStation", "Xbox"]
-  security: ["ثغرة", "الأمن السيبراني"]
-  leaks: ["تسريبات", "iPhone 17"]
+  ai: ["ذكاء اصطناعي", "AI", "GPT", "Grok"]
+  gaming: ["جيمنج", "PlayStation", "Xbox", "Fortnite"]
+  security: ["ثغرة", "الأمن السيبراني", "Cybersecurity"]
+  leaks: ["تسريبات", "iPhone 17", "Galaxy S25"]
 
 sources:
-  trusted_domains: ["techcrunch.com", "theverge.com", "wired.com"]
+  trusted_domains: 
+    - "techcrunch.com"
+    - "theverge.com"
+    - "wired.com"
+    - "apple.com/newsroom"
   require_source_in_reply: true
+  fallback_msg: "لا توجد معلومات مـوُثـوُقة حالياً من المصادر المعتمدة بـوُضُـوح."
