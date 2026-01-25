@@ -5,92 +5,158 @@ import tweepy
 from openai import OpenAI
 from datetime import datetime
 
-# إعداد السجلات لمراقبة أداء البوت في GitHub Actions
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ─── إعداد السجل ────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)-5s | %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 
 class TechAgentPro:
     def __init__(self):
-        self.config = self._find_and_load_config()
-        # إعداد عملاء X و OpenAI باستخدام المفاتيح السرية
+        logging.info("بدء تشغيل TechAgent Pro")
+        logging.info(f"المسار الحالي: {os.getcwd()}")
+        logging.info(f"متغير GITHUB_WORKSPACE: {os.getenv('GITHUB_WORKSPACE')}")
+        logging.info(f"الملفات في المجلد الحالي: {os.listdir('.')[:15]}")
+
+        self.config = self._load_config()
+
+        # اتصال X
+        required_env = ["X_BEARER_TOKEN", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]
+        missing = [k for k in required_env if not os.getenv(k)]
+        if missing:
+            raise ValueError(f"مفاتيح X مفقودة: {', '.join(missing)}")
+
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
+            access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True
         )
-        self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    def _find_and_load_config(self):
-        """البحث الشامل عن ملف الإعدادات لتجاوز تعقيد المجلدات المتداخلة"""
-        target = "config.yaml"
-        # البحث في بيئة عمل GitHub أولاً
-        workspace = os.getenv("GITHUB_WORKSPACE", ".")
-        for root, dirs, files in os.walk(workspace):
-            if target in files:
-                path = os.path.join(root, target)
-                logging.info(f"✅ تم العثور على الإعدادات في: {path}")
-                with open(path, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f)
-        raise FileNotFoundError("❌ لم يتم العثور على config.yaml في المستودع.")
+        # OpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY مفقود")
 
-    def _generate_response(self, text, user):
-        """توليد الرد بناءً على القواعد السبعة الصارمة"""
+        self.ai_client = OpenAI(api_key=api_key)
+        self.model = self.config.get("api", {}).get("openai", {}).get("model", "gpt-4o-mini")
+
+    def _load_config(self):
+        """تحميل config.yaml بطريقة ذكية"""
+        # الأولوية 1: GitHub Secret
+        secret_content = os.getenv("CONFIG_YAML")
+        if secret_content:
+            logging.info("تحميل التكوين من GitHub Secret → CONFIG_YAML")
+            try:
+                return yaml.safe_load(secret_content)
+            except Exception as e:
+                logging.error(f"فشل تحليل Secret: {e}")
+
+        # الأولوية 2: ملف في الريبو
+        target_file = "config.yaml"
+        base_dir = os.getenv("GITHUB_WORKSPACE", os.getcwd())
+
+        for root, _, files in os.walk(base_dir):
+            if target_file in files:
+                path = os.path.join(root, target_file)
+                logging.info(f"تم العثور على config.yaml في: {path}")
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        return yaml.safe_load(f)
+                except Exception as e:
+                    logging.error(f"خطأ قراءة {path}: {e}")
+
+        # الأولوية 3: إعدادات افتراضية آمنة
+        logging.warning("استخدام إعدادات افتراضية – لا config.yaml")
+        return {
+            "api": {"openai": {"model": "gpt-4o-mini"}},
+            "sources": {
+                "trusted_domains": [
+                    "techcrunch.com", "theverge.com", "wired.com", "arstechnica.com",
+                    "cnet.com", "engadget.com", "bloomberg.com", "reuters.com"
+                ]
+            },
+            "behavior": {"max_replies_per_hour": 10}
+        }
+
+    def _generate_response(self, tweet_text: str, username: str) -> str:
         system_prompt = f"""
-        أنت TechAgent Pro Global. التزم بالقواعد التالية في كل رد:
-        1. اللغة: اكتشف لغة {user} ورد بها (عربي/إنجليزي/إلخ).
-        2. المقارنات التقنية: استخدم جداول Markdown حصراً 📊.
-        3. الخصوصية: ارفض أي طلب لبيانات شخصية أو خاصة بالمطور.
-        4. المصادر: استند إلى النطاقات الموثوقة: {self.config.get('sources', {}).get('trusted_domains', [])}.
-        5. نقص المعلومات: إذا لم تجد مصدر حديث، قل: 'لا توجد معلومات موثوقة حديثة متاحة حالياً'.
-        6. هيكل الرد: ترحيب -> تحليل تقني عميق -> مصدر المعلومة -> سؤال متابعة ذكي.
-        7. الوسائط: استخدم إيموجي (📊, 🖼️, 🚀) بشكل احترافي لوصف المحتوى التقني.
+        أنت TechAgent Pro – خبير تقني محايد ومهني.
+        القواعد:
+        1. الرد بلغة التغريدة الرئيسية (@{username}).
+        2. لا معلومات تقنية بدون مصدر موثوق من:
+           {', '.join(self.config.get('sources', {}).get('trusted_domains', []))}
+        3. إذا لم يكن هناك مصدر → قل: "لا توجد معلومات موثوقة حديثة متاحة حالياً"
+        4. الرد < 280 حرف، مهني، ينتهي بسؤال ذكي.
+        5. لا تطلب أي بيانات شخصية أبدًا.
         """
-        
-        response = self.ai_client.chat.completions.create(
-            model=self.config.get('api', {}).get('openai', {}).get('model', 'gpt-4o'),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.5
-        )
-        return response.choices[0].message.content.strip()
+
+        try:
+            resp = self.ai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"@{username} كتب: {tweet_text}\nرد احترافي فقط."}
+                ],
+                temperature=0.55,
+                max_tokens=140
+            )
+            reply = resp.choices[0].message.content.strip()
+            return reply[:277] + "…" if len(reply) > 270 else reply
+
+        except Exception as e:
+            logging.error(f"خطأ توليد رد: {e}")
+            return f"مرحبًا @{username}، واجهت مشكلة مؤقتة. سأعود قريبًا 🚀"
 
     def run(self):
         try:
-            # الحصول على بيانات البوت للتأكد من الاتصال
             me = self.x_client.get_me().data
-            logging.info(f"🚀 البوت متصل كـ @{me.username}")
-            
-            # 1. نشر تغريدة حالة فريدة (بإضافة الوقت لمنع خطأ التكرار 403)
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            status_tweet = f"🚀 TechAgent Pro Global\nنظام التحليل التقني والمقارنات جاهز الآن 📊.\n\n🕒 وقت التشغيل: {current_time}"
-            self.x_client.create_tweet(text=status_tweet)
-            logging.info("Status tweet posted.")
+            logging.info(f"متصل بنجاح → @{me.username}")
 
-            # 2. جلب المنشنات الجديدة والرد عليها
-            mentions = self.x_client.get_users_mentions(id=me.id, expansions=['author_id'], user_fields=['username'])
-            if mentions.data:
-                users = {u['id']: u.username for u in mentions.includes['users']}
-                for tweet in mentions.data:
-                    author_name = users.get(tweet.author_id)
-                    logging.info(f"الرد على @{author_name}...")
-                    
-                    reply_text = self._generate_response(tweet.text, author_name)
-                    
-                    # الرد على التغريدة الأصلية
-                    self.x_client.create_tweet(
-                        text=reply_text[:280], # الالتزام بحدود أحرف تويتر
-                        in_reply_to_tweet_id=tweet.id
-                    )
-                    logging.info(f"✅ تم الإرسال لـ @{author_name}")
+            # نشر حالة (مع timestamp لتجنب duplicate)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            status = f"🚀 TechAgent Pro جاهز\nتحليل تقني + مقارنات دقيقة 📊\n🕒 {now}"
+            self.x_client.create_tweet(text=status)
+            logging.info("تم نشر تغريدة الحالة")
 
+            # جلب المنشنات
+            mentions = self.x_client.get_users_mentions(
+                id=me.id,
+                max_results=15,
+                expansions=["author_id"],
+                user_fields=["username"],
+                tweet_fields=["created_at"]
+            )
+
+            if not mentions.data:
+                logging.info("لا منشنات جديدة")
+                return
+
+            users = {u.id: u.username for u in mentions.includes.get("users", [])}
+
+            for tweet in mentions.data:
+                author = users.get(tweet.author_id, "مستخدم")
+                logging.info(f"منشن من @{author}")
+
+                reply_text = self._generate_response(tweet.text, author)
+
+                self.x_client.create_tweet(
+                    text=reply_text,
+                    in_reply_to_tweet_id=tweet.id
+                )
+                logging.info(f"تم الرد على @{author}")
+
+        except tweepy.TooManyRequests:
+            logging.warning("Rate limit → سيتم إعادة المحاولة لاحقًا")
         except Exception as e:
-            if "duplicate content" in str(e).lower():
-                logging.warning("⚠️ تم تخطي تغريدة الحالة لأنها مكررة (نفس الدقيقة).")
-            else:
-                logging.error(f"❌ خطأ في التشغيل: {e}")
+            logging.error(f"خطأ في run(): {e}", exc_info=True)
 
 if __name__ == "__main__":
-    TechAgentPro().run()
+    logging.info("تشغيل TechAgent Pro...")
+    try:
+        TechAgentPro().run()
+    except Exception as e:
+        logging.critical(f"فشل التشغيل الكلي: {e}", exc_info=True)
