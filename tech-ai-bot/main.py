@@ -7,22 +7,22 @@ import textwrap
 import random
 import time
 
-# نظام حماية استيراد المكتبات لضمان التشغيل المستمر
+# نظام حماية واستيراد مكتبات اللغة العربية (RTL)
 try:
     from bidi.algorithm import get_display
     import arabic_reshaper
     AR_SUPPORT = True
 except ImportError:
     AR_SUPPORT = False
-    logging.warning("⚠️ مكتبات RTL مفقودة! سيتم استخدام النص الخام.")
+    logging.warning("⚠️ مكتبات RTL مفقودة! سيتم عرض النص بشكل مبسط.")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v72.0 [Fixed Syntax] ===")
+        logging.info("=== TechAgent Pro v73.0 [Marketing & Engagement Mode] ===")
         
-        # إعداد المحرك الذكي والاتصال بـ X
+        # إعداد الاتصال بـ OpenRouter و X API
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
@@ -41,50 +41,54 @@ class TechAgentUltimate:
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
-        # ضبط نبرة الصوت: خبير، سلس، ويدمج المصطلحات الإنجليزية
+        # التعليمات البرمجية لنبرة الصوت (سلسة، تسويقية، وجدلية)
         self.system_instr = (
-            "أنت TechAgent. وكيل تقني محترف بأسلوب سلس وممتع. "
-            "قاعدتك: استخدم المصطلحات التقنية بالإنجليزية (Technical Terms) "
-            "مع ذكر تعريبها أو شرحها العربي في السياق. "
-            "مثال: 'خوارزميات التعلم العميق (Deep Learning)'. "
-            "الأسلوب: تفاعلي، ذكي، غير جاف. الختم دائماً بـ +#. "
-            "المحتوى: تقنيات 2026، AI، هاردوير، وسيو المنصات."
+            "أنت TechAgent، خبير تقني وصانع محتوى مؤثر (Influencer). "
+            "أسلوبك: ابدأ بـ Hook خاطف، استخدم المصطلحات التقنية بالإنجليزية مع تعريبها، "
+            "واختم دائماً بسؤال جدلي يثير النقاش ويقسم الآراء. "
+            "تحدث بلهجة بيضاء سلسة ومحفزة للتفاعل. الختم دائماً بـ +#."
         )
 
     def _fix_text(self, text):
-        """معالجة النص العربي لليمين إلى اليسار"""
+        """تجهيز النص العربي للعرض الصحيح في الصور"""
         if AR_SUPPORT:
             return get_display(arabic_reshaper.reshape(text))
         return text
 
     def _create_visual(self, content):
-        """توليد صورة احترافية مع هوامش أمان 100px ومحاذاة يمين"""
+        """إنشاء صورة احترافية مع إضافة المصدر"""
         try:
-            width, height = 1200, 1000
+            width, height = 1200, 1100
             padding = 100
-            img = Image.new('RGB', (width, height), color=(15, 23, 42))
+            img = Image.new('RGB', (width, height), color=(10, 15, 30))
             d = ImageDraw.Draw(img)
             
             font_path = os.path.join(os.path.dirname(__file__), "font.ttf")
             font = ImageFont.truetype(font_path, 38) if os.path.exists(font_path) else ImageFont.load_default()
             font_bold = ImageFont.truetype(font_path, 55) if os.path.exists(font_path) else ImageFont.load_default()
+            font_small = ImageFont.truetype(font_path, 28) if os.path.exists(font_path) else ImageFont.load_default()
 
-            title = self._fix_text("تقرير TechAgent التقني")
-            d.text((width - padding, 60), title, fill=(56, 189, 248), font=font_bold, anchor="ra")
+            # رسم العنوان
+            d.text((width - padding, 70), self._fix_text("تحليل TechAgent الحصري"), fill=(56, 189, 248), font=font_bold, anchor="ra")
             
+            # رسم المحتوى
             y_pos = 220
             for line in content.split('\n'):
                 if not line.strip(): continue
                 wrapped = textwrap.wrap(line, width=50)
                 for w_line in wrapped:
-                    d.text((width - padding, y_pos), self._fix_text(w_line.strip()), fill=(241, 245, 249), font=font, anchor="ra")
+                    d.text((width - padding, y_pos), self._fix_text(w_line.strip()), fill=(240, 240, 240), font=font, anchor="ra")
                     y_pos += 65
             
+            # إضافة المصدر في أسفل الصورة
+            source_tag = self._fix_text("المصدر: وحدة ذكاء TechAgent v73.0")
+            d.text((width - padding, y_pos + 100), source_tag, fill=(100, 116, 139), font=font_small, anchor="ra")
+            
             path = "tech_output.png"
-            img.crop((0, 0, width, min(y_pos + 100, height))).save(path)
+            img.crop((0, 0, width, min(y_pos + 200, height))).save(path)
             return path
         except Exception as e:
-            logging.error(f"Image Visual Error: {e}")
+            logging.error(f"Visual Creation Error: {e}")
             return None
 
     def _get_ai_text(self, prompt):
@@ -92,7 +96,7 @@ class TechAgentUltimate:
             resp = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-                temperature=0.6
+                temperature=0.7
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
@@ -100,57 +104,48 @@ class TechAgentUltimate:
             return None
 
     def _interact(self):
-        """الردود الذكية وصيد الكلمات المفتاحية"""
+        """نظام الردود الذكية وتتبع الكلمات المفتاحية"""
         try:
             me = self.client_v2.get_me().data
             mentions = self.client_v2.get_users_mentions(id=me.id, max_results=5)
             if mentions and mentions.data:
                 for tweet in mentions.data:
-                    reply = self._get_ai_text(f"رد بأسلوب خبير وسلس ومصطلحات مزدوجة على: {tweet.text}")
+                    reply = self._get_ai_text(f"رد بأسلوب خبير وجدلي ومختصر على: {tweet.text}")
                     if reply:
                         self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
-            
-            keywords = ["أفضل معالج 2026", "مستقبل الذكاء الاصطناعي"]
-            query = f"({ ' OR '.join(keywords) }) -is:retweet lang:ar"
-            search = self.client_v2.search_recent_tweets(query=query, max_results=2)
-            if search and search.data:
-                for tweet in search.data:
-                    reply = self._get_ai_text(f"شارك نصيحة تقنية سلسة جداً مع هذا الشخص: {tweet.text}")
-                    if reply:
-                        self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
-                        time.sleep(15)
         except Exception as e:
             logging.error(f"Interaction Task Error: {e}")
 
     def _post(self):
-        """دورة النشر الآلي"""
-        try:
-            scenarios = [
-                ("أهمية وحدات المعالجة العصبية (NPUs) في جوالات 2026", False),
-                ("مقارنة بين RTX 5090 و RTX 4090 من حيث كفاءة الطاقة (Power Efficiency)", True),
-                ("كيف تختار مزود الطاقة (PSU) المناسب لتجميعتك؟", False)
-            ]
-            topic, is_img = random.choice(scenarios)
-            content = self._get_ai_text(f"اكتب محتوى ممتع عن {topic}")
-            
-            if content:
-                tags = "#تقنية #ذكاء_اصطناعي #TechAgent"
-                if is_img:
-                    path = self._create_visual(content)
-                    if path:
-                        media = self.api_v1.media_upload(path)
-                        self.client_v2.create_tweet(
-                            text=f"🚀 {topic}\n\nتحليلنا الكامل في الصورة! 👇\n\n{tags}\n\n+#",
-                            media_ids=[media.media_id]
-                        )
-                else:
-                    self.client_v2.create_tweet(text=f"💡 {topic}\n\n{content}\n\n{tags}\n\n+#")
-        except Exception as e:
-            logging.error(f"Posting Error: {e}")
+        """نظام النشر التسويقي بالمواضيع المعتمدة"""
+        topics = [
+            "وحدات المعالجة العصبية (NPUs) وهل بتنهي عصر الـ CPU؟",
+            "مستقبل RTX 5090 وكفاءة الطاقة (Power Efficiency).",
+            "صراع النظارات الذكية ضد الهواتف التقليدية في 2026.",
+            "أدوات البرمجة بالذكاء الاصطناعي (AI Coding Tools) وهل بيفقد المبرمج وظيفته؟"
+        ]
+        topic = random.choice(topics)
+        is_img = random.choice([True, False]) # تنويع بين النص والصور
+        
+        prompt = f"اكتب تغريدة تسويقية مثيرة ومحفزة جداً عن {topic}. استخدم مصطلحات إنجليزية وتعريبها، واختم بسؤال جدلي يثير النقاش بشدة."
+        content = self._get_ai_text(prompt)
+        
+        if content:
+            tags = "#تقنية #مستقبل #ذكاء_اصطناعي #TechAgent"
+            if is_img:
+                path = self._create_visual(content)
+                if path:
+                    media = self.api_v1.media_upload(path)
+                    self.client_v2.create_tweet(
+                        text=f"🔥 تحليل جديد من TechAgent\n\n(التفاصيل كاملة في الصورة المرفقة) 👇\n\n{tags}\n\n+#",
+                        media_ids=[media.media_id]
+                    )
+            else:
+                self.client_v2.create_tweet(text=f"{content}\n\n{tags}")
 
     def run(self):
         self._post()
-        time.sleep(30)
+        time.sleep(40) # انتظار بسيط قبل التفاعل
         self._interact()
 
 if __name__ == "__main__":
