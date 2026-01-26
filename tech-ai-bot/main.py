@@ -6,20 +6,28 @@ from PIL import Image, ImageDraw, ImageFont
 import textwrap
 import random
 import time
-from bidi.algorithm import get_display
-import arabic_reshaper
+
+# استيراد مكتبات اللغة العربية مع معالجة استباقية للأخطاء
+try:
+    from bidi.algorithm import get_display
+    import arabic_reshaper
+    HAS_RTL = True
+except ImportError:
+    HAS_RTL = False
+    logging.warning("RTL libraries missing. Arabic text in images might appear fragmented.")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v65.0 [The Smooth & Friendly Edition] ===")
+        logging.info("=== TechAgent Pro v66.0 [Stability Edition] ===")
         
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
         
+        # إعداد X API
         auth = tweepy.OAuth1UserHandler(
             os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
             os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
@@ -33,25 +41,23 @@ class TechAgentUltimate:
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
-        # تغيير التعليمات لتصبح "سلسة" و"ودودة"
         self.system_instr = (
-            "أنت TechAgent. صديق تقني خبير وسلس جداً في أسلوبك. "
-            "تحدث ببساطة واحترافية (لغة بيضاء تقنية). ابتعد عن الجمود والجفاف. "
-            "اجعل القارئ يشعر بالحماس للمعلومة. الختم دائماً بـ +#. "
-            "المحتوى: AI، سيو المنصات، عتاد، وتسريبات."
+            "أنت TechAgent. خبير تقني سلس وممتع. "
+            "أسلوبك ذكي، غير جاف، ويحمس القارئ للمعلومة. "
+            "الختم دائماً بـ +#. ركز على AI، العتاد، وأسرار المنصات."
         )
 
     def _prepare_arabic_text(self, text):
-        reshaped_text = arabic_reshaper.reshape(text)
-        return get_display(reshaped_text)
+        if HAS_RTL:
+            reshaped_text = arabic_reshaper.reshape(text)
+            return get_display(reshaped_text)
+        return text
 
     def _create_safe_visual_table(self, content):
-        """صورة مقارنة بلمسة بصرية ناعمة ومحاذاة RTL"""
         try:
             width, height = 1200, 1000
             padding = 100
             line_height = 65
-            # تغيير لون الخلفية ليكون أكثر عصرية (Dark Blue-Grey)
             img = Image.new('RGB', (width, height), color=(15, 23, 42))
             d = ImageDraw.Draw(img)
             
@@ -59,7 +65,6 @@ class TechAgentUltimate:
             font = ImageFont.truetype(font_path, 38) if os.path.exists(font_path) else ImageFont.load_default()
             font_bold = ImageFont.truetype(font_path, 55) if os.path.exists(font_path) else ImageFont.load_default()
 
-            # عنوان جذاب
             title = self._prepare_arabic_text("نظرة تقنية: مقارنة شاملة")
             d.text((width - padding, 60), title, fill=(56, 189, 248), font=font_bold, anchor="ra")
             d.line([(padding, 145), (width - padding, 145)], fill=(51, 65, 85), width=3)
@@ -81,7 +86,7 @@ class TechAgentUltimate:
             final_img.save(path)
             return path
         except Exception as e:
-            logging.error(f"Image Error: {e}")
+            logging.error(f"Visual Error: {e}")
             return None
 
     def _generate_ai_response(self, prompt):
@@ -89,59 +94,56 @@ class TechAgentUltimate:
             resp = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-                temperature=0.7 # رفع الحرارة قليلاً ليكون الكلام أكثر إبداعاً وسلاسة
+                temperature=0.7
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"AI Error: {e}")
+            logging.error(f"AI Fetch Error: {e}")
             return None
 
     def _handle_interactions(self):
         try:
             me = self.client_v2.get_me().data
             mentions = self.client_v2.get_users_mentions(id=me.id, max_results=5)
-            if mentions.data:
+            if mentions and mentions.data:
                 for tweet in mentions.data:
-                    reply = self._generate_ai_response(f"رد بأسلوب صديق تقني ذكي وسلس على: {tweet.text}")
+                    reply = self._generate_ai_response(f"رد بأسلوب سلس على: {tweet.text}")
                     if reply:
                         self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
-                        logging.info(f"✅ تم الرد بسلاسة على: {tweet.id}")
-
-            keywords = ["أفضل جوال 2026", "تعلم الذكاء الاصطناعي", "مشكلة في الويندوز"]
+            
+            # صيد الكلمات المفتاحية للتريند
+            keywords = ["أفضل جوال 2026", "تعلم البرمجة بالذكاء"]
             query = f"({ ' OR '.join(keywords) }) -is:retweet lang:ar"
-            search = self.client_v2.search_recent_tweets(query=query, max_results=3)
-            if search.data:
+            search = self.client_v2.search_recent_tweets(query=query, max_results=2)
+            if search and search.data:
                 for tweet in search.data:
-                    reply = self._generate_ai_response(f"قدم نصيحة تقنية ذكية وسلسة لصاحب هذه التغريدة: {tweet.text}")
+                    reply = self._generate_ai_response(f"شارك نصيحة تقنية سلسة حول: {tweet.text}")
                     if reply:
                         self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
-                        logging.info(f"🎯 دردشة تقنية سلسة مع: {tweet.id}")
                         time.sleep(10)
         except Exception as e:
-            logging.error(f"Interaction Error: {e}")
+            logging.error(f"Interaction Task Error: {e}")
 
     def _publish_content(self):
         scenarios = [
-            ("أدوات AI هتغير حياتك العملية في 2026", False),
-            ("مقارنة سريعة: RTX 5090 و RTX 4090.. مين يستاهل؟", True),
-            ("سر صغير في خوارزمية X يخلي تغريداتك تطير!", False),
-            ("ليش معالج Apple القادم رح يكون ثورة؟", False)
+            ("أدوات AI هتغير روتينك في 2026", False),
+            ("مقارنة عتادية: RTX 5090 و RTX 4090", True),
+            ("ليش خوارزمية X تختار تغريدات معينة؟", False)
         ]
         topic, is_comp = random.choice(scenarios)
-        content = self._generate_ai_response(f"اكتب محتوى تقني سلس وممتع حول: {topic}")
+        content = self._generate_ai_response(f"اكتب محتوى تقني سلس حول: {topic}")
         
         if content:
-            hashtags = "#تقنية_ببساطة #ذكاء_اصطناعي #TechAgent"
+            hashtags = "#تقنية #ذكاء_اصطناعي #TechAgent"
             if is_comp:
                 path = self._create_safe_visual_table(content)
                 if path:
                     media = self.api_v1.media_upload(path)
-                    text = f"🚨 {topic}\n\nجهّزت لك هالمقارنة عشان تختار الأنسب لك! 🚀\n\n{hashtags}\n\n+#"
+                    text = f"🚨 {topic}\n\nشوف هالمقارنة وخبرني إيش رأيك! 🚀\n\n{hashtags}\n\n+#"
                     self.client_v2.create_tweet(text=text, media_ids=[media.media_id])
             else:
-                text = f"🚀 {topic}\n\n{content}\n\n💡 لو عندك أي استفسار، أنا موجود بالتعليقات! 👇\n\n{hashtags}"
+                text = f"🚀 {topic}\n\n{content}\n\n💡 لو عندك سؤال أنا هنا! 👇\n\n{hashtags}"
                 self.client_v2.create_tweet(text=text)
-            logging.info(f"🚀 Published smoothly: {topic}")
 
     def run(self):
         self._publish_content()
