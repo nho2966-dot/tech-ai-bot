@@ -8,13 +8,15 @@ import time
 import hashlib
 
 # إعداد السجل التقني
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)-5s | %(message)s')
 
 LAST_TWEET_FILE = "last_tweet_hash.txt"
 
 class TechAgent:
     def __init__(self):
-        # إعداد العملاء
+        logging.info("=== TechAgent Pro v15.0 [Rate-Limit Optimized] ===")
+        
+        # إعداد AI
         router_key = os.getenv("OPENROUTER_API_KEY")
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1" if router_key else None,
@@ -22,83 +24,77 @@ class TechAgent:
         )
         self.model = "qwen/qwen-2.5-72b-instruct" if router_key else "gpt-4o-mini"
         
+        # إعداد X - تفعيل wait_on_rate_limit للتعامل مع القيود
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            wait_on_rate_limit=False # نجعله False لنتحكم فيه برمجياً ولا يعلق الأكشن
         )
 
-        # الدستور الصارم للوكيل TechAgent
         self.system_instr = (
-            "اسمك TechAgent. وكيل تقني مختص. "
-            "المجالات: AI، أمن سيبراني، ألعاب، تسريبات، وأجهزة. "
-            "المصادر: TechCrunch, Wired, The Verge, BleepingComputer, NIST, المدونات الرسمية. "
-            "القواعد: لغة تقنية جافة تماماً، بدون لمسات لغوية، استخدام جداول Markdown، ذكر الروابط، والختم بـ +#. "
-            "إذا كان الخبر غير مؤكد، اذكر ذلك صراحة."
+            "اسمك TechAgent. وكيل تقني مختص. المصادر: TechCrunch, Wired, The Verge. "
+            "القواعد: لغة تقنية جافة، جداول Markdown، روابط، والتوقيع +#."
         )
-
-    def _is_duplicate(self, content):
-        h = hashlib.md5(content.encode()).hexdigest()
-        if os.path.exists(LAST_TWEET_FILE):
-            with open(LAST_TWEET_FILE, "r") as f:
-                if h in f.read(): return True
-        return False
-
-    def _save_hash(self, content):
-        h = hashlib.md5(content.encode()).hexdigest()
-        with open(LAST_TWEET_FILE, "a") as f:
-            f.write(f"{h}|{datetime.now().isoformat()}\n")
 
     def _generate_content(self, user_msg):
         try:
             resp = self.ai_client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_instr},
-                    {"role": "user", "content": user_msg}
-                ],
-                temperature=0.2 # دقة عالية جداً
+                messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": user_msg}],
+                temperature=0.2
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
             logging.error(f"AI Error: {e}")
             return None
 
+    def _publish_daily(self):
+        """نشر المحتوى اليومي - الأولوية القصوى"""
+        try:
+            tasks = [
+                "حلل ثغرة أمنية حديثة مع الرابط.",
+                "مقارنة بجدول Markdown بين iPhone 17 و Samsung S25.",
+                "آخر تحديثات AI في التعليم 2026."
+            ]
+            content = self._generate_content(random.choice(tasks))
+            if content and len(content) <= 280:
+                if "+#" not in content: content += "\n+#"
+                self.x_client.create_tweet(text=content)
+                logging.info("🚀 تم نشر التغريدة بنجاح.")
+                return True
+        except tweepy.TooManyRequests:
+            logging.warning("⚠️ تجاوز حد الطلبات في النشر (Rate Limit).")
+        except Exception as e:
+            logging.error(f"X Post Error: {e}")
+        return False
+
     def _process_mentions(self):
+        """الرد على المنشنات - مع معالجة حذر للـ Rate Limit"""
         try:
             me = self.x_client.get_me().data
             mentions = self.x_client.get_users_mentions(id=me.id, max_results=5)
             if not mentions.data: return
 
             for tweet in mentions.data:
-                reply = self._generate_content(f"رد بذكاء وموضوعية على استفسار المتابع: {tweet.text}")
-                if reply and not self._is_duplicate(reply):
+                reply = self._generate_content(f"رد تقني جاف على: {tweet.text}")
+                if reply:
                     if "+#" not in reply: reply += "\n+#"
                     self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    self._save_hash(reply)
-                    time.sleep(30)
+                    logging.info(f"✅ تم الرد على المنشن.")
+                    time.sleep(5) # تأخير بسيط
+        except tweepy.TooManyRequests:
+            logging.warning("⚠️ تجاوز حد الطلبات في المنشنات. سأتوقف الآن.")
         except Exception as e:
             logging.error(f"Mentions Error: {e}")
 
-    def _publish_daily(self):
-        tasks = [
-            "حلل أحدث ثغرة أمنية اليوم من NIST أو BleepingComputer مع الرابط.",
-            "قدم مقارنة تقنية بجدول Markdown بين iPhone 17 و Samsung S25 بناءً على التسريبات.",
-            "ما هي آخر تحديثات AI في الطب أو التعليم لعام 2026؟",
-            "انقل سبقاً صحفياً تقنياً من Mark Gurman أو The Verge مع الرابط."
-        ]
-        content = self._generate_content(random.choice(tasks))
-        if content and not self._is_duplicate(content) and len(content) <= 280:
-            if "+#" not in content: content += "\n+#"
-            self.x_client.create_tweet(text=content)
-            self._save_hash(content)
-
     def run(self):
-        self._process_mentions()
+        # 1. حاول النشر أولاً (لأن حدوده في الحساب المجاني أضيق)
         self._publish_daily()
+        # 2. حاول الرد على المنشنات ثانياً
+        self._process_mentions()
 
 if __name__ == "__main__":
     TechAgent().run()
