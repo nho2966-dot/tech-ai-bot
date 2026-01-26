@@ -3,20 +3,24 @@ import logging
 import tweepy
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
+import textwrap
 import random
 import time
 
+# إعداد السجل التقني
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v45.0 [High-Value Content Edition] ===")
+        logging.info("=== TechAgent Pro v55.0 [Publish & Reply Master] ===")
         
+        # إعداد AI
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
         
+        # إعداد X API
         auth = tweepy.OAuth1UserHandler(
             os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
             os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
@@ -31,89 +35,96 @@ class TechAgentUltimate:
         )
 
         self.system_instr = (
-            "أنت TechAgent. خبير تقني لجيل المحترفين. لغتك جافة، غنية بالأرقام، وخالية من الحشو. "
-            "الهدف: إثراء القارئ بمعلومات غير شائعة حول: (هندسة البرمجيات، عتاد الـ AI، خوارزميات المنصات، "
-            "أدوات الإنتاجية، الأمن السيبراني العميق، واقتصاد التقنية). "
-            "القواعد: الختم دائماً بـ +#. التنسيق: نقاط مركزة."
+            "اسمك TechAgent. وكيل تقني جاف. الختم دائماً بـ +#. "
+            "الردود يجب أن تكون غنية بالبيانات والأرقام وموجهة للمحترفين. "
+            "ممنوع التحية أو الرموز التعبيرية الزائدة. المصدر دائماً: TechAgent Intelligence."
         )
 
-    def _create_visual_card(self, content):
+    def _create_safe_visual_table(self, content):
+        """توليد صورة مقارنة مع ضمان الهوامش وعدم الاقتطاع 100%"""
         try:
-            img = Image.new('RGB', (1200, 1000), color=(5, 10, 15))
+            width, height = 1200, 1000
+            padding = 100
+            line_height = 60
+            img = Image.new('RGB', (width, height), color=(8, 12, 18))
             d = ImageDraw.Draw(img)
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            font_path = os.path.join(current_dir, "font.ttf")
             
-            if os.path.exists(font_path):
-                font_title = ImageFont.truetype(font_path, 65)
-                font_body = ImageFont.truetype(font_path, 38)
-            else:
-                font_title = font_body = ImageFont.load_default()
+            font_path = os.path.join(os.path.dirname(__file__), "font.ttf")
+            font = ImageFont.truetype(font_path, 38) if os.path.exists(font_path) else ImageFont.load_default()
+            font_bold = ImageFont.truetype(font_path, 55) if os.path.exists(font_path) else ImageFont.load_default()
 
-            d.text((70, 60), "TECHAGENT INTEL REPORT | 2026", fill=(29, 155, 240), font=font_title)
+            d.text((padding, 60), "TECHAGENT | INTEL REPORT", fill=(29, 155, 240), font=font_bold)
+            d.line([(padding, 140), (width-padding, 140)], fill=(40, 50, 60), width=2)
             
-            y_pos = 220
+            y_pos = 200
             for line in content.split('\n'):
-                if line.strip():
-                    d.text((70, y_pos), line.strip(), fill=(245, 245, 245), font=font_body)
-                    y_pos += 70
+                if not line.strip(): continue
+                wrapped = textwrap.wrap(line, width=50)
+                for w_line in wrapped:
+                    d.text((padding, y_pos), w_line.strip(), fill=(230, 235, 240), font=font)
+                    y_pos += line_height
             
-            path = "tech_report.png"
-            img.save(path)
+            d.text((padding, y_pos + 40), "Source: TechAgent Intelligence Unit", fill=(70, 80, 90), font=font)
+            final_img = img.crop((0, 0, width, min(y_pos + 150, height)))
+            path = "intel_table.png"
+            final_img.save(path)
             return path
         except Exception as e:
-            logging.error(f"Rendering Error: {e}")
+            logging.error(f"Image Error: {e}")
             return None
 
-    def _publish_enriched_post(self):
-        # مصفوفة المحتوى المنوع والمثري
-        categories = {
-            "AI & Future": [
-                "تحليل الفرق التقني بين نماذج Transformer و نماذج SSM القادمة",
-                "أدوات AI لبرمجة تطبيقات الـ Full-stack في دقائق",
-                "هندسة الأوامر (Chain-of-Thought) للحصول على نتائج برمجية دقيقة"
-            ],
-            "Social Engineering": [
-                "كيف تعمل خوارزمية التوصية في YouTube لعام 2026؟",
-                "تحليل الـ Metadata وكيف تستخدمها المنصات لتصنيف المحتوى",
-                "استراتيجيات الـ SEO الحديثة داخل منصات التواصل الاجتماعي"
-            ],
-            "Hardware & Tech": [
-                "مقارنة بين معمارية x86 و ARM في أجهزة الـ Server لعام 2026",
-                "لماذا نحتاج الـ NPUs في الأجهزة المحمولة؟ تحليل الأداء",
-                "تسريبات تقنيات الشحن السريع 300W+ وتأثيرها على عمر البطارية"
-            ],
-            "Cyber Security": [
-                "تحليل هجمات الـ Zero-day المعتمدة على الـ AI",
-                "بروتوكولات التشفير ما بعد الكوانتم (Post-Quantum Cryptography)",
-                "طرق تأمين المحافظ الرقمية (Cold Wallets) من الاختراقات الحديثة"
-            ]
-        }
-        
-        cat_name = random.choice(list(categories.keys()))
-        topic = random.choice(categories[cat_name])
-        
-        prompt = f"قدم تحليلاً تقنياً عميقاً ومثرياً (5 نقاط بالبيانات) حول: {topic}. اجعل المعلومات حصرية للمحترفين."
-        
+    def _generate_ai_response(self, prompt):
         try:
             resp = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-                temperature=0.3
+                temperature=0.2
             )
-            content = resp.choices[0].message.content.strip()
-            
-            img_path = self._create_visual_card(content)
-            if img_path:
-                media = self.api_v1.media_upload(img_path)
-                status = f"📊 [{cat_name}] {topic}\n\nتحليل معمق لجيل التقنيين الجدد. 👇\n\n+#"
-                self.client_v2.create_tweet(text=status, media_ids=[media.media_id])
-                logging.info(f"🚀 Published: {topic}")
+            return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"Post Error: {e}")
+            logging.error(f"AI Error: {e}")
+            return None
 
-    def run(self):
-        self._publish_enriched_post()
+    def _handle_interactions(self):
+        """الرد على المنشنات وصيد الكلمات المفتاحية"""
+        try:
+            # 1. المنشنات
+            me = self.client_v2.get_me().data
+            mentions = self.client_v2.get_users_mentions(id=me.id, max_results=5)
+            if mentions.data:
+                for tweet in mentions.data:
+                    reply = self._generate_ai_response(f"رد تقني جاف ومختصر: {tweet.text}")
+                    if reply:
+                        self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
+                        logging.info(f"✅ تم الرد على المنشن: {tweet.id}")
 
-if __name__ == "__main__":
-    TechAgentUltimate().run()
+            # 2. الكلمات المفتاحية (صيد التريند)
+            keywords = ["RTX 5090", "تسريبات آيفون", "أدوات AI للبرمجة", "خوارزمية تيك توك"]
+            query = f"({ ' OR '.join(keywords) }) -is:retweet lang:ar"
+            search = self.client_v2.search_recent_tweets(query=query, max_results=3)
+            if search.data:
+                for tweet in search.data:
+                    reply = self._generate_ai_response(f"حلل هذه التغريدة تقنياً باختصار: {tweet.text}")
+                    if reply:
+                        self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
+                        logging.info(f"🎯 تم صيد تفاعل جديد: {tweet.id}")
+                        time.sleep(10)
+        except Exception as e:
+            logging.error(f"Interaction Error: {e}")
+
+    def _publish_content(self):
+        """النشر الاستهدافي الدوري"""
+        scenarios = [
+            ("مقارنة عتادية: RTX 5090 vs RTX 4090", True),
+            ("خوارزمية X: تحليل هندسي لزيادة الوصول", False),
+            ("مقارنة معالجات: Snapdragon 8 Gen 5 vs Apple A19", True),
+            ("أدوات AI لزيادة إنتاجية المبرمجين 2026", False)
+        ]
+        topic, is_comp = random.choice(scenarios)
+        content = self._generate_ai_response(f"حلل تقنياً: {topic}. {'اجعلها مقارنة بجدول' if is_comp else '5 نقاط مكثفة'}")
+        
+        if content:
+            hashtags = "#الذكاء_الاصطناعي #تقنية #برمجة #TechAgent"
+            source = "المصدر: وحدة تحليل البيانات - TechAgent"
+            
+            if is_comp
