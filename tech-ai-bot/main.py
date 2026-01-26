@@ -7,15 +7,16 @@ import random
 import time
 import hashlib
 
-# إعداد السجل بنبرة احترافية ولطيفة
+# إعداد السجل بنبرة احترافية
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 LAST_TWEET_FILE = "last_tweet_hash.txt"
 
 class TechAgent:
     def __init__(self):
-        logging.info("=== TechAgent Pro v21.0 [Youth & Trends Edition] ===")
+        logging.info("=== TechAgent Pro v23.0 [Multi-Tasking Intelligence] ===")
         
+        # إعداد AI و X (Premium Support)
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
@@ -29,68 +30,53 @@ class TechAgent:
             wait_on_rate_limit=True
         )
 
-        # الدستور المحدث لاستقطاب فئة الشباب التقني
+        # الدستور الموسع (الاستهداف + الردود + القيمة المضافة)
         self.system_instr = (
-            "اسمك TechAgent. أنت وكيل ذكي يستهدف الشباب التقني الطموح على X. "
-            "مهمتك تقديم محتوى جذاب، سريع، وعالي القيمة يركز على: "
-            "1. (Lifestyle Tech): كيف يغير AI حياتهم اليومية، دراستهم، وعملهم. "
-            "2. (Gaming & Gear): أحدث عتاد الألعاب، مقارنات كروت الشاشة، وتحديثات GTA/Fortnite. "
-            "3. (Smartphones): مقارنات حادة بـ Markdown بين iPhone و Samsung و أجهزة الألعاب المحمولة. "
-            "4. (Digital Wealth): تسريبات العملات الرقمية والتقنيات المالية الناشئة. "
-            "القواعد: لغة تقنية جافة ومباشرة، جداول واضحة، روابط مصادر موثوقة، والختم بـ +#."
+            "اسمك TechAgent. أنت وكيل استراتيجي لجمهور الشباب والتقنيين على X. "
+            "مهمتك: النشر الاستهدافي والردود الذكية. "
+            "المحتوى المسموح: (1) تحليل AI وأدوات العمل الحر، (2) عتاد الألعاب، (3) تسريبات الأجهزة، (4) تصحيح إشاعات تقنية. "
+            "الهيكل: ابدأ بملخص مركز، استخدم جداول Markdown للمقارنات، أضف فقرة 'لماذا يهمك هذا؟' للمستقبل، اذكر المصادر الموثوقة. "
+            "القواعد: لغة تقنية جافة، موضوعية، بدون لمسات أدبية، والختم دائماً بـ +#."
         )
 
-    def _generate_youth_content(self, niche):
-        # محاور تهم الشباب بناءً على تحليلات X
-        prompts = {
-            "gaming": "حلل أحدث تسريب لـ GTA VI أو تحديث رئيسي في Fortnite، مع جدول لمواصفات التشغيل المطلوبة ورابط.",
-            "ai_productivity": "انشر عن أداة AI جديدة تمكن الشباب من زيادة دخلهم أو إنتاجيتهم (مثل أدوات توليد الفيديو أو الكود) مع الرابط.",
-            "phone_wars": "مقارنة تقنية جافة بجدول Markdown بين iPhone 17 و Samsung S25 من منظور مستخدم شاب (ألعاب، تصوير، بطارية).",
-            "leaks": "انشر أحدث تسريبات Mark Gurman حول أجهزة Apple القادمة بأسلوب مشوق ومباشر مع ذكر الرابط."
-        }
-        
+    def _generate_content(self, task_prompt, max_tokens=1500):
         try:
             resp = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[
                     {"role": "system", "content": self.system_instr},
-                    {"role": "user", "content": prompts[niche]}
+                    {"role": "user", "content": task_prompt}
                 ],
-                temperature=0.3,
-                max_tokens=1200
+                temperature=0.2,
+                max_tokens=max_tokens
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"AI Error: {e}")
             return None
 
-    def _is_duplicate(self, content):
-        h = hashlib.md5(content.encode()).hexdigest()
-        if os.path.exists(LAST_TWEET_FILE):
-            with open(LAST_TWEET_FILE, "r") as f:
-                if h in f.read(): return True
-        return False
+    def _process_mentions(self):
+        """الردود الذكية: التفاعل مع المتابعين واستفساراتهم"""
+        try:
+            me = self.x_client.get_me().data
+            mentions = self.x_client.get_users_mentions(id=me.id, max_results=10)
+            if not mentions.data: return
 
-    def _save_hash(self, content):
-        h = hashlib.md5(content.encode()).hexdigest()
-        with open(LAST_TWEET_FILE, "a") as f:
-            f.write(f"{h}|{datetime.now().isoformat()}\n")
+            for tweet in mentions.data:
+                prompt = f"المتابع يسأل: '{tweet.text}'. أجب تقنياً بجدول أو نقاط وروابط موثوقة. إذا كان السؤال عاماً اقترح أسئلة محددة."
+                reply = self._generate_content(prompt, max_tokens=800)
+                if reply:
+                    if "+#" not in reply: reply += "\n+#"
+                    self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                    time.sleep(2)
+            logging.info("✅ تم الانتهاء من الردود الذكية.")
+        except Exception as e:
+            logging.error(f"Mentions Error: {e}")
 
-    def run(self):
-        # اختيار المحور الشبابي عشوائياً
-        niche = random.choice(["gaming", "ai_productivity", "phone_wars", "leaks"])
-        logging.info(f"TechAgent يستهدف اهتمامات الشباب في: {niche}")
-        
-        content = self._generate_youth_content(niche)
-        
-        if content and not self._is_duplicate(content):
-            if "+#" not in content: content += "\n+#"
-            try:
-                self.x_client.create_tweet(text=content)
-                self._save_hash(content)
-                logging.info(f"🚀 تم نشر المحتوى الشبابي بنجاح.")
-            except Exception as e:
-                logging.error(f"X Error: {e}")
-
-if __name__ == "__main__":
-    TechAgent().run()
+    def _publish_high_value_post(self):
+        """النشر الاستهدافي: تنويع المحتوى بين الفرص والتحليلات"""
+        scenarios = [
+            "انشر عن أداة AI جديدة تساعد الشباب في الربح من العمل الحر (Freelancing) مع شرح فني ورابط.",
+            "مقارنة تقنية بجدول Markdown بين iPhone 17 و Samsung S25 وتحليل أداء المعالجات 2026.",
+            "تصحيح إشاعة تقنية منتشرة (Myth Buster) مدعومة بالحقائق والمصادر الرسمية.",
+            "تحليل لعتاد ألعاب جديد (GPU
