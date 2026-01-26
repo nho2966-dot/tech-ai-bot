@@ -1,58 +1,36 @@
-name: TechAgent Pro Run
+name: TechAgent Ultimate Runner
 
 on:
   schedule:
-    - cron: '0 */4 * * *' 
-  workflow_dispatch:
+    # يعمل كل 6 ساعات (يمكنك تعديلها حسب رغبتك)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يتيح لك تشغيل البوت يدوياً في أي وقت
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Dependencies
         run: |
-          pip install tweepy openai python-dotenv pyyaml requests
+          python -m pip install --upgrade pip
+          pip install tweepy openai python-dotenv pyyaml requests Pillow
 
-      - name: Find and Run Bot
+      - name: Run TechAgent
         env:
+          # تأكد من إضافة هذه الأسرار في إعدادات مستودع GitHub (Secrets)
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
-        run: |
-          # ابحث عن ملف main.py وتشغيله أينما وجد
-          FILE_PATH=$(find . -name "main.py" -not -path "*/.*" | head -n 1)
-          if [ -z "$FILE_PATH" ]; then
-            echo "❌ Error: main.py not found in the repository!"
-            exit 1
-          fi
-          echo "🚀 Found main.py at: $FILE_PATH"
-          python "$FILE_PATH"
-
-      - name: Save Memory
-        if: always()
-        run: |
-          git config --local user.email "bot@techagent.com"
-          git config --local user.name "TechAgent-Bot"
-          # البحث عن ملف الهاش وحفظه
-          HASH_PATH=$(find . -name "last_tweet_hash.txt" | head -n 1)
-          if [ -n "$HASH_PATH" ]; then
-            git add "$HASH_PATH"
-            git commit -m "Update memory [skip ci]" || echo "No changes"
-            git push || echo "No changes"
-          fi
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+        run: python tech-ai-bot/main.py
