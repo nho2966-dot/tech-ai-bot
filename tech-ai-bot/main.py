@@ -6,19 +6,19 @@ from PIL import Image, ImageDraw, ImageFont
 import random
 import time
 
-# إعداد السجل
+# إعداد السجل التقني
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v40.0 [Arabic Rendering Fix] ===")
+        logging.info("=== TechAgent Pro v41.0 [Final Visual Fix] ===")
         
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
         
-        # إعداد X API
+        # إعداد X API (v1.1 للصور و v2 للنشر)
         auth = tweepy.OAuth1UserHandler(
             os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
             os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
@@ -33,48 +33,46 @@ class TechAgentUltimate:
         )
 
     def _create_visual_card(self, content):
-        """توليد البطاقة البصرية ومعالجة مشكلة الخطوط"""
+        """توليد البطاقة البصرية مع دعم كامل للخط العربي"""
         try:
-            # صورة بخلفية تقنية داكنة
-            img = Image.new('RGB', (1000, 850), color=(10, 15, 20))
+            img = Image.new('RGB', (1100, 900), color=(11, 15, 20)) # خلفية داكنة احترافية
             d = ImageDraw.Draw(img)
             
-            # تحديد مسار الخط بدقة
-            base_path = os.path.dirname(os.path.abspath(__file__))
-            font_path = os.path.join(base_path, "font.ttf")
+            # تحديد مسار الخط بدقة (يجب أن يكون font.ttf بجانب main.py)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            font_path = os.path.join(current_dir, "font.ttf")
             
             if os.path.exists(font_path):
-                # تكبير الخطوط لتناسب دقة الصور في X
                 font_title = ImageFont.truetype(font_path, 55)
                 font_body = ImageFont.truetype(font_path, 34)
-                logging.info("✅ Cairo font loaded from font.ttf")
+                logging.info(f"✅ تم تحميل الخط بنجاح من: {font_path}")
             else:
-                logging.error(f"❌ font.ttf not found at {font_path}. Checking root...")
+                logging.error(f"❌ خطأ: ملف font.ttf غير موجود في {current_dir}")
                 font_title = font_body = ImageFont.load_default()
 
-            # رسم العنوان
-            d.text((50, 40), "TECHAGENT INTEL | 2026", fill=(29, 155, 240), font=font_title)
+            # رسم العنوان العلوي
+            d.text((60, 50), "TECHAGENT INTEL | 2026", fill=(29, 155, 240), font=font_title)
             
-            # رسم الأسطر مع مسافات مريحة للعين
-            y_offset = 180
+            # رسم الأسطر مع معالجة المسافات
+            y_pos = 180
             for line in content.split('\n'):
-                if line.strip():
-                    # محاذاة النص وتعديله
-                    d.text((50, y_offset), line.strip(), fill=(235, 240, 245), font=font_body)
-                    y_offset += 60
+                clean_line = line.strip()
+                if clean_line:
+                    d.text((60, y_pos), clean_line, fill=(235, 240, 245), font=font_body)
+                    y_pos += 65
             
-            img_name = "verified_tech_card.png"
-            img.save(img_name)
-            return img_name
+            path = "tech_card_final.png"
+            img.save(path)
+            return path
         except Exception as e:
             logging.error(f"Rendering Error: {e}")
             return None
 
     def _generate_content(self, topic):
-        # السياسة التحريرية المعتمدة
+        """توليد محتوى تقني مكثف للشباب"""
         prompt = (
-            f"أنت TechAgent. قدم 5 نقاط تقنية جافة وعميقة جداً للشباب المحترفين حول: {topic}. "
-            "ممنوع استخدام Markdown. ممنوع المقدمات. الختم بـ +#."
+            f"أنت TechAgent. قدم تحليل تقني جاف وعميق (5 نقاط) حول: {topic}. "
+            "ممنوع استخدام Markdown أو رموز زخرفية. الختم بـ +#."
         )
         try:
             resp = self.ai_client.chat.completions.create(
@@ -84,28 +82,29 @@ class TechAgentUltimate:
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"AI Generation Error: {e}")
+            logging.error(f"AI Error: {e}")
             return None
 
     def run(self):
+        """تشغيل دورة النشر"""
         topics = [
-            "مستقبل البرمجة مع Cursor و AI Agents",
-            "ثورات معالجات 2026: Snapdragon vs Apple",
-            "أدوات AI لتوليد الدخل السلبي للشباب التقني"
+            "مستقبل البرمجة مع AI Agents لعام 2026",
+            "تسريبات Snapdragon 8 Gen 5 vs Apple A19",
+            "أدوات AI لزيادة دخل المبرمجين المستقلين"
         ]
-        selected_topic = random.choice(topics)
-        content = self._generate_content(selected_topic)
+        topic = random.choice(topics)
+        content = self._generate_content(topic)
         
         if content:
             path = self._create_visual_card(content)
             if path:
                 try:
                     media = self.api_v1.media_upload(path)
-                    tweet_text = f"🚨 جديد TechAgent: {selected_topic}\n\nتحليل عتاد وبرمجيات جيل المحترفين. 👇\n\n+#"
+                    tweet_text = f"🚨 تحليل تقني: {topic}\n\nبيانات جافة لجيل المحترفين. 👇\n\n+#"
                     self.client_v2.create_tweet(text=tweet_text, media_ids=[media.media_id])
-                    logging.info("🚀 Tweet with Image posted successfully!")
+                    logging.info("🚀 تم نشر التغريدة بنجاح!")
                 except Exception as e:
-                    logging.error(f"X Posting Error: {e}")
+                    logging.error(f"X Post Error: {e}")
 
 if __name__ == "__main__":
     TechAgentUltimate().run()
