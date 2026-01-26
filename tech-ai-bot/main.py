@@ -2,43 +2,66 @@ import os
 import logging
 import tweepy
 from openai import OpenAI
+from PIL import Image, ImageDraw
 import random
 import time
 
-# إعداد السجل بنبرة احترافية
+# إعداد السجل
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
-class TechAgent:
+class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v26.0 [Optimized for X Premium] ===")
+        logging.info("=== TechAgent Pro v36.0 [Trend-Magnet Edition] ===")
         
-        # إعداد AI
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
-
-        # إعداد X - تعطيل الانتظار التلقائي للتحكم اليدوي
-        self.x_client = tweepy.Client(
+        
+        # إعداد X (دعم Premium لرفع الوسائط)
+        auth = tweepy.OAuth1UserHandler(
+            os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
+            os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
+        )
+        self.api_v1 = tweepy.API(auth)
+        self.client_v2 = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=False 
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
-        # الهوية المعتمدة
         self.system_instr = (
-            "اسمك TechAgent. وكيل تقني لجيل الشباب. لغة جافة، جداول Markdown، روابط، والختم بـ +#."
+            "اسمك TechAgent. وكيل تقني لجيل الشباب. "
+            "مهمتك: النشر الاستهدافي والردود الذكية. "
+            "المواضيع: (AI للعمل الحر، عتاد الألعاب، تسريبات الهواتف، الأمن السيبراني، الإنترنت الفضائي، البرمجة بالذكاء الاصطناعي). "
+            "القواعد: لغة تقنية جافة، لا تستخدم جداول Markdown في النص، بل نقاط واضحة ومباشرة. الختم بـ +#."
         )
 
-    def _generate_content(self, prompt):
+    def _create_visual_card(self, content):
+        """تحويل المحتوى لبطاقة بصرية احترافية (المقترح 2)"""
         try:
+            img = Image.new('RGB', (1000, 700), color=(10, 10, 12)) 
+            d = ImageDraw.Draw(img)
+            # رسم ترويسة البطاقة
+            d.text((50, 40), "TECHAGENT INSIGHTS | 2026", fill=(29, 155, 240))
+            d.text((50, 120), content, fill=(240, 240, 240))
+            
+            path = "trend_card.png"
+            img.save(path)
+            return path
+        except Exception as e:
+            logging.error(f"Visual Card Error: {e}")
+            return None
+
+    def _generate_content(self, prompt, is_visual=False):
+        try:
+            prefix = "صغ محتوى تقني مكثف بنقاط لبطاقة بصرية عن: " if is_visual else ""
             resp = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-                temperature=0.2
+                messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": f"{prefix}{prompt}"}],
+                temperature=0.3
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
@@ -46,49 +69,45 @@ class TechAgent:
             return None
 
     def _process_mentions(self):
-        """معالجة الردود بذكاء وحذر"""
+        """الردود الذكية (شرط ثابت)"""
         try:
-            # لجلب المنشنات نحتاج ID الحساب. بدلاً من طلب get_me() دائماً
-            # سنحاول جلبه مرة واحدة، وفي حال الفشل نعتمد على النشر فقط
-            me = self.x_client.get_me()
-            if not me.data: return
-            
-            # طلب 5 منشنات فقط لتوفير الكوتا
-            mentions = self.x_client.get_users_mentions(id=me.data.id, max_results=5)
-            if not mentions.data: 
-                logging.info("ℹ️ لا توجد منشنات جديدة للرد عليها.")
-                return
+            me = self.client_v2.get_me().data
+            mentions = self.client_v2.get_users_mentions(id=me.id, max_results=5)
+            if mentions.data:
+                for tweet in mentions.data:
+                    reply = self._generate_content(f"رد تقني جاف على: {tweet.text}")
+                    if reply:
+                        if "+#" not in reply: reply += "\n+#"
+                        self.client_v2.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                        time.sleep(3)
+        except Exception:
+            logging.info("Mentions limit or no new tweets.")
 
-            for tweet in mentions.data:
-                reply = self._generate_content(f"رد تقني جاف ومفيد على: {tweet.text}")
-                if reply:
-                    if "+#" not in reply: reply += "\n+#"
-                    self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    logging.info(f"✅ تم الرد على: {tweet.id}")
-                    time.sleep(5) # فاصل زمني بسيط بين الردود
-        except tweepy.TooManyRequests:
-            logging.warning("⚠️ تم بلوغ حد الطلبات للمنشنات. سيتم التخطي.")
-        except Exception as e:
-            logging.error(f"Mentions Error: {e}")
-
-    def _publish_post(self):
-        """النشر الاستهدافي للشباب"""
-        try:
-            tasks = ["أداة AI للعمل الحر", "مقارنة مواصفات هواتف 2026", "تسريب عتاد ألعاب"]
-            content = self._generate_content(random.choice(tasks))
-            if content:
-                if "+#" not in content: content += "\n+#"
-                self.x_client.create_tweet(text=content)
-                logging.info("🚀 تم النشر الاستهدافي بنجاح.")
-        except tweepy.TooManyRequests:
-            logging.warning("⚠️ تم بلوغ حد الطلبات للنشر.")
-        except Exception as e:
-            logging.error(f"Post Error: {e}")
+    def _publish_trend_post(self):
+        """النشر الاستهدافي للمواضيع الجاذبة للشباب"""
+        scenarios = [
+            "أفضل أدوات البرمجة بالذكاء الاصطناعي (Cursor vs VS Code) لعام 2026",
+            "مقارنة تسريبات مواصفات iPhone 18 و Samsung S26 Ultra",
+            "كيفية تأمين حساباتك من هجمات الهندسة الاجتماعية المتطورة",
+            "تأثير الإنترنت الفضائي (Starlink) على مستقبل العمل الحر في المناطق النائية",
+            "أحدث كروت الشاشة (RTX 50-series) وأدائها مع ألعاب الـ 4K"
+        ]
+        topic = random.choice(scenarios)
+        content = self._generate_content(topic, is_visual=True)
+        
+        if content:
+            img_path = self._create_visual_card(content)
+            try:
+                media = self.api_v1.media_upload(img_path)
+                status_text = f"🚨 تحليل تقني جديد: {topic.split('(')[0]}\n\nالتفاصيل الكاملة في البطاقة المرفقة لجيل المحترفين. 👇\n\n+#"
+                self.client_v2.create_tweet(text=status_text, media_ids=[media.media_id])
+                logging.info("🚀 تم نشر محتوى التريند بنجاح.")
+            except Exception as e:
+                logging.error(f"Post Error: {e}")
 
     def run(self):
-        # النشر أولاً لأنه الأهم للأداء العام، ثم محاولة الردود
-        self._publish_post()
+        self._publish_trend_post()
         self._process_mentions()
 
 if __name__ == "__main__":
-    TechAgent().run()
+    TechAgentUltimate().run()
