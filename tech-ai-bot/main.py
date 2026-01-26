@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v71.0 [Fixed & Stable] ===")
+        logging.info("=== TechAgent Pro v72.0 [Fixed Syntax] ===")
         
         # إعداد المحرك الذكي والاتصال بـ X
         self.ai_client = OpenAI(
@@ -124,20 +124,34 @@ class TechAgentUltimate:
 
     def _post(self):
         """دورة النشر الآلي"""
-        scenarios = [
-            ("أهمية وحدات المعالجة العصبية (NPUs) في جوالات 2026", False),
-            ("مقارنة بين RTX 5090 و RTX 4090 من حيث كفاءة الطاقة (Power Efficiency)", True),
-            ("كيف تختار مزود الطاقة (PSU) المناسب لتجميعتك؟", False)
-        ]
-        topic, is_img = random.choice(scenarios)
-        content = self._get_ai_text(f"اكتب محتوى ممتع عن {topic}")
-        
-        if content:
-            tags = "#تقنية #ذكاء_اصطناعي #TechAgent"
-            if is_img:
-                path = self._create_visual(content)
-                if path:
-                    media = self.api_v1.media_upload(path)
-                    self.client_v2.create_tweet(text=f"🚀 {topic}\n\nتحليلنا الكامل في الصورة! 👇\n\n{tags}\n\n+#", media_ids=[media.media_id])
-            else:
-                self.client_v2.create_tweet(
+        try:
+            scenarios = [
+                ("أهمية وحدات المعالجة العصبية (NPUs) في جوالات 2026", False),
+                ("مقارنة بين RTX 5090 و RTX 4090 من حيث كفاءة الطاقة (Power Efficiency)", True),
+                ("كيف تختار مزود الطاقة (PSU) المناسب لتجميعتك؟", False)
+            ]
+            topic, is_img = random.choice(scenarios)
+            content = self._get_ai_text(f"اكتب محتوى ممتع عن {topic}")
+            
+            if content:
+                tags = "#تقنية #ذكاء_اصطناعي #TechAgent"
+                if is_img:
+                    path = self._create_visual(content)
+                    if path:
+                        media = self.api_v1.media_upload(path)
+                        self.client_v2.create_tweet(
+                            text=f"🚀 {topic}\n\nتحليلنا الكامل في الصورة! 👇\n\n{tags}\n\n+#",
+                            media_ids=[media.media_id]
+                        )
+                else:
+                    self.client_v2.create_tweet(text=f"💡 {topic}\n\n{content}\n\n{tags}\n\n+#")
+        except Exception as e:
+            logging.error(f"Posting Error: {e}")
+
+    def run(self):
+        self._post()
+        time.sleep(30)
+        self._interact()
+
+if __name__ == "__main__":
+    TechAgentUltimate().run()
