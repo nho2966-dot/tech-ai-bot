@@ -1,7 +1,6 @@
-openai>=1.12.0
 tweepy>=4.14.0
-python-dotenv>=1.0.0
-Pillow>=10.0.0
+openai>=1.0.0
+python-dotenv>=1.2.1
+Pillow>=12.1.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
-
