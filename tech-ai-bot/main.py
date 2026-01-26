@@ -1,22 +1,20 @@
 import os
-import yaml
 import logging
 import tweepy
 from openai import OpenAI
 from datetime import datetime
 
-# إعداد السجلات
+# إعداد السجلات لتتبع العملية بدقة في GitHub Actions
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)-5s | %(message)s',
-    handlers=[logging.StreamHandler()]
+    format='%(asctime)s | %(levelname)-5s | %(message)s'
 )
 
 class TechAgentPro:
     def __init__(self):
-        logging.info("🚀 تشغيل نسخة المشتركين (API v2 Only)")
+        logging.info("🚀 بدء تشغيل نظام المشتركين الموثق - v2")
         
-        # إعداد عميل X بنظام v2 حصراً (المتوافق مع الباقة المدفوعة)
+        # الاتصال باستخدام v2 (المسار الرسمي للمشتركين)
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -25,46 +23,43 @@ class TechAgentPro:
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
             wait_on_rate_limit=True
         )
-
+        
+        # إعداد OpenAI لإنشاء المحتوى الأصلي
         self.ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini" # يمكنك تغييره حسب اشتراكك في OpenAI
 
-    def _generate_response(self, text, user):
-        """توليد محتوى تقني حقيقي وأصلي"""
-        system_prompt = f"أنت خبير تقني. رد على {user} بتحليل ذكي وجدول مقارنة صغير 📊 إذا لزم الأمر. اذكر مصدر تقني موثوق. الرد < 280 حرف."
+    def _generate_real_content(self, user_query, username):
+        """توليد محتوى تقني حقيقي (جداول وتحليلات) وليس نصاً تجريبياً"""
+        prompt = f"أنت خبير تقني. حلل طلب {username} التالي: '{user_query}'. رد بجدول مقارنة صغير 📊 ومعلومات دقيقة. الرد يجب أن يكون أقل من 260 حرف وموجه لـ @{username}."
         try:
-            resp = self.ai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text}
-                ],
-                max_tokens=150
+            response = self.ai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200
             )
-            return resp.choices[0].message.content.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logging.error(f"AI Error: {e}")
             return None
 
     def run(self):
         try:
-            # 1. التحقق من الاتصال وجلب بيانات البوت
+            # 1. جلب بيانات البوت (للتأكد من عدم الرد على النفس)
             me = self.x_client.get_me().data
             if not me:
-                logging.error("❌ تعذر جلب بيانات الحساب. تأكد من الـ Tokens.")
+                logging.error("❌ فشل الاتصال. تأكد من أن الصلاحيات هي Read and Write.")
                 return
             
-            bot_id = me.id
-            logging.info(f"✅ متصل كـ @{me.username}")
+            bot_username = me.username.lower()
+            logging.info(f"✅ متصل كـ @{bot_username}")
 
-            # 2. نشر تغريدة الحالة (للتأكد من أن النشر يعمل)
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.x_client.create_tweet(text=f"🚀 TechAgent Pro متصل (v2)\nالأنظمة تعمل بكفاءة عالية 📊\n🕒 {now}")
+            # 2. نشر تغريدة إثبات حالة (محتوى متغير لمنع الرفض بسبب التكرار)
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.x_client.create_tweet(text=f"🚀 TechAgent Pro: الأنظمة نشطة.\nنظام تحليل البيانات والمقارنات جاهز 📊\n🕒 تحديث: {now_str}")
             logging.info("✅ تم نشر تغريدة الحالة بنجاح")
 
-            # 3. جلب المنشنات والرد عليها (متاح للمشتركين فقط عبر v2)
+            # 3. معالجة المنشنات والرد بمحتوى حقيقي
             mentions = self.x_client.get_users_mentions(
-                id=bot_id,
+                id=me.id,
                 expansions=["author_id"],
                 user_fields=["username"]
             )
@@ -74,25 +69,25 @@ class TechAgentPro:
                 for tweet in mentions.data:
                     author = users_map.get(tweet.author_id, "user")
                     
-                    # منع الرد على النفس
-                    if author.lower() == me.username.lower():
+                    # ⚠️ منع الرد على النفس
+                    if author.lower() == bot_username:
                         continue
 
-                    logging.info(f"📩 معالجة طلب من @{author}")
-                    reply_content = self._generate_response(tweet.text, author)
-                    
-                    if reply_content:
-                        # الرد باستخدام v2
+                    logging.info(f"📩 جاري إنشاء محتوى مخصص لـ @{author}...")
+                    final_content = self._generate_real_content(tweet.text, author)
+
+                    if final_content:
+                        # الرد الفعلي
                         self.x_client.create_tweet(
-                            text=f"@{author} {reply_content}"[:280],
+                            text=final_content[:280],
                             in_reply_to_tweet_id=tweet.id
                         )
-                        logging.info(f"✅ تم الرد على @{author}")
+                        logging.info(f"✅ تم الرد بنجاح على @{author}")
             else:
                 logging.info("😴 لا توجد منشنات جديدة.")
 
         except tweepy.Forbidden as e:
-            logging.error(f"❌ خطأ 403/453: يرجى التأكد من وضع التطبيق داخل 'Project' في Developer Portal. الباقة المدفوعة تتطلب تنظيماً معيناً للمشاريع.")
+            logging.error(f"❌ خطأ 403/453: تويتر يرفض الطلب. تأكد من إعدادات OAuth 1.0a في Developer Portal.")
         except Exception as e:
             logging.error(f"❌ خطأ غير متوقع: {e}")
 
