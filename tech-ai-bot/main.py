@@ -12,15 +12,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v55.0 [Publish & Reply Master] ===")
+        logging.info("=== TechAgent Pro v56.0 [Final Syntax Fix] ===")
         
-        # إعداد AI
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
         
-        # إعداد X API
         auth = tweepy.OAuth1UserHandler(
             os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
             os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
@@ -36,12 +34,10 @@ class TechAgentUltimate:
 
         self.system_instr = (
             "اسمك TechAgent. وكيل تقني جاف. الختم دائماً بـ +#. "
-            "الردود يجب أن تكون غنية بالبيانات والأرقام وموجهة للمحترفين. "
-            "ممنوع التحية أو الرموز التعبيرية الزائدة. المصدر دائماً: TechAgent Intelligence."
+            "المحتوى غني بالبيانات والأرقام. المصدر: TechAgent Intelligence."
         )
 
     def _create_safe_visual_table(self, content):
-        """توليد صورة مقارنة مع ضمان الهوامش وعدم الاقتطاع 100%"""
         try:
             width, height = 1200, 1000
             padding = 100
@@ -86,9 +82,7 @@ class TechAgentUltimate:
             return None
 
     def _handle_interactions(self):
-        """الرد على المنشنات وصيد الكلمات المفتاحية"""
         try:
-            # 1. المنشنات
             me = self.client_v2.get_me().data
             mentions = self.client_v2.get_users_mentions(id=me.id, max_results=5)
             if mentions.data:
@@ -98,8 +92,7 @@ class TechAgentUltimate:
                         self.client_v2.create_tweet(text=f"{reply}\n+#", in_reply_to_tweet_id=tweet.id)
                         logging.info(f"✅ تم الرد على المنشن: {tweet.id}")
 
-            # 2. الكلمات المفتاحية (صيد التريند)
-            keywords = ["RTX 5090", "تسريبات آيفون", "أدوات AI للبرمجة", "خوارزمية تيك توك"]
+            keywords = ["RTX 5090", "تسريبات آيفون", "أدوات AI للبرمجة"]
             query = f"({ ' OR '.join(keywords) }) -is:retweet lang:ar"
             search = self.client_v2.search_recent_tweets(query=query, max_results=3)
             if search.data:
@@ -113,7 +106,6 @@ class TechAgentUltimate:
             logging.error(f"Interaction Error: {e}")
 
     def _publish_content(self):
-        """النشر الاستهدافي الدوري"""
         scenarios = [
             ("مقارنة عتادية: RTX 5090 vs RTX 4090", True),
             ("خوارزمية X: تحليل هندسي لزيادة الوصول", False),
@@ -127,4 +119,21 @@ class TechAgentUltimate:
             hashtags = "#الذكاء_الاصطناعي #تقنية #برمجة #TechAgent"
             source = "المصدر: وحدة تحليل البيانات - TechAgent"
             
-            if is_comp
+            if is_comp:  # تم إضافة النقطتين هنا للإصلاح
+                path = self._create_safe_visual_table(content)
+                if path:
+                    media = self.api_v1.media_upload(path)
+                    text = f"🚨 {topic}\n\nبيانات المقارنة المرفقة دقيقة.\n\n{source}\n\n{hashtags}\n\n+#"
+                    self.client_v2.create_tweet(text=text, media_ids=[media.media_id])
+            else:
+                text = f"🚨 {topic}\n\n{content}\n\n💡 ضع استفسارك في التعليقات للتحليل الآلي.\n\n{source}\n\n{hashtags}"
+                self.client_v2.create_tweet(text=text)
+            logging.info(f"🚀 Published: {topic}")
+
+    def run(self):
+        self._publish_content()
+        time.sleep(30)
+        self._handle_interactions()
+
+if __name__ == "__main__":
+    TechAgentUltimate().run()
