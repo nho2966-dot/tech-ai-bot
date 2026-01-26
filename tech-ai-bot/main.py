@@ -1,29 +1,16 @@
 import os
-import yaml
 import logging
 import tweepy
-from openai import OpenAI
-from datetime import datetime
 import random
 import time
+import json
+from openai import OpenAI
+from datetime import datetime
 
-# ─── إعداد السجل ────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)-5s | %(message)s',
-    handlers=[logging.StreamHandler()]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgentPro:
     def __init__(self):
-        logging.info("=== تشغيل TechAgent Pro v3: محتوى حقيقي 📊 ===")
-
-        # ─── اتصال الذكاء الاصطناعي ─────────────────────────────────────
-        openai_key = os.getenv("OPENAI_API_KEY")
-        self.ai_client = OpenAI(api_key=openai_key)
-        self.model = "gpt-4o-mini"
-
-        # ─── اتصال X (API v2) ───────────────────────────────────────────
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -32,69 +19,76 @@ class TechAgentPro:
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
             wait_on_rate_limit=True
         )
+        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.history_file = "tweet_history.json"
 
-        me = self.x_client.get_me().data
-        self.my_id = me.id
-        self.my_username = me.username.lower()
+    def _is_duplicate(self, content):
+        """التحقق من أن التغريدة لم تُنشر من قبل (بناءً على تشابه المعنى)"""
+        if not os.path.exists(self.history_file):
+            return False
+        with open(self.history_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+            # التحقق من آخر 50 تغريدة لضمان التنوع
+            return any(content[:30] in old_tweet for old_tweet in history[-50:])
 
-    def _generate_content(self):
-        """إنشاء تغريدة تقنية حقيقية لإفادة المتابعين"""
-        prompt = "اكتب تغريدة تقنية مفيدة جداً بالعربية عن (الذكاء الاصطناعي أو الهواتف). استخدم إيموجي وهاشتاق. الرد < 270 حرف."
-        try:
-            resp = self.ai_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=250
-            )
-            return resp.choices[0].message.content.strip()
-        except Exception: return None
+    def _save_to_history(self, content):
+        history = []
+        if os.path.exists(self.history_file):
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+        history.append(content)
+        with open(self.history_file, 'w', encoding='utf-8') as f:
+            json.dump(history[-100:], f, ensure_ascii=False) # الاحتفاظ بآخر 100 فقط
 
-    def _generate_reply(self, tweet_text, username):
-        """توليد رد تقني محترف بجدول مقارنة إذا لزم الأمر"""
-        prompt = f"حلل تقنياً: '{tweet_text}'. رد على @{username} بجدول مقارنة صغير 📊 أو معلومة دقيقة. الرد < 260 حرف."
-        try:
-            resp = self.ai_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200
-            )
-            return resp.choices[0].message.content.strip()
-        except Exception: return None
+    def ask_ai(self, prompt, system_instruction):
+        engines = [
+            {"name": "Qwen", "url": "https://openrouter.ai/api/v1", "key": self.openrouter_key, "model": "alibabacloud/qwen-2.5-72b-instruct"},
+            {"name": "OpenAI", "url": None, "key": self.openai_key, "model": "gpt-4o-mini"}
+        ]
+        
+        for engine in engines:
+            if engine["key"]:
+                try:
+                    client = OpenAI(base_url=engine["url"], api_key=engine["key"]) if engine["url"] else OpenAI(api_key=engine["key"])
+                    resp = client.chat.completions.create(
+                        model=engine["model"],
+                        messages=[{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}],
+                        max_tokens=400
+                    )
+                    return resp.choices[0].message.content.strip()
+                except Exception as e:
+                    logging.warning(f"فشل محرك {engine['name']}: {e}")
+        return None
 
     def run(self):
         try:
-            # 1. نشر التغريدة التقنية اليومية (محتوى حقيقي)
-            content = self._generate_content()
-            if content:
-                self.x_client.create_tweet(text=content)
-                logging.info(f"✨ تم نشر محتوى تقني جديد: {content[:50]}...")
-                time.sleep(60) # انتظار دقيقة قبل البدء بالمنشنات
+            # 1. تحديد الوقت الحالي لإجبار الـ AI على محتوى "جديد جداً"
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            
+            # 2. بناء أمر (Prompt) يركز على العامل الزمني والتسريبات الحديثة
+            instruction = f"""أنت رادار تقني عالمي. اليوم هو {current_date}.
+            وظيفتك: تقديم أحدث تسريب أو خبر تقني عاجل وقع في الـ 48 ساعة الأخيرة فقط.
+            ركز على عمالقة التقنية (Apple, Nvidia, Samsung, Google).
+            القواعد:
+            - ممنوع تكرار أخبار قديمة.
+            - يجب أن يكون المحتوى مفهوماً ومكتملاً بنسبة 100%.
+            - اللغة العربية فصحى واحترافية.
+            - الطول أقل من 275 حرفاً."""
 
-            # 2. معالجة المنشنات
-            mentions = self.x_client.get_users_mentions(
-                id=self.my_id,
-                expansions=["author_id"],
-                user_fields=["username"]
-            )
-
-            if mentions.data:
-                users_map = {u.id: u.username for u in mentions.includes.get("users", [])}
-                for tweet in mentions.data:
-                    author = users_map.get(tweet.author_id)
-                    if not author or author.lower() == self.my_username: continue
-
-                    logging.info(f"📩 معالجة منشن من @{author}")
-                    reply_text = self._generate_reply(tweet.text, author)
-                    
-                    if reply_text:
-                        # التأكد من أن الرد يبدأ بالمنشن لضمان ظهوره في "Replies"
-                        final_reply = f"@{author} {reply_text}" if not reply_text.startswith("@") else reply_text
-                        self.x_client.create_tweet(
-                            text=final_reply[:280],
-                            in_reply_to_tweet_id=tweet.id
-                        )
-                        logging.info(f"✅ تم الرد على @{author}")
-                        time.sleep(random.randint(30, 90)) # تأخير عشوائي طبيعي
+            prompt = "أعطني أهم تسريب تقني أو خبر عاجل ومؤكد لهذا اليوم. ابدأ التغريدة بكلمة '🚨 جديد' أو '🚨 تسريب عاجل'."
+            
+            # 3. محاولات توليد محتوى غير مكرر
+            for _ in range(3): # 3 محاولات للحصول على نص فريد
+                raw_content = self.ask_ai(prompt, instruction)
+                if raw_content and not self._is_duplicate(raw_content):
+                    # نشر التغريدة
+                    self.x_client.create_tweet(text=raw_content)
+                    self._save_to_history(raw_content)
+                    logging.info(f"✨ تم النشر (محتوى جديد وفريد): {raw_content[:50]}")
+                    break
+                else:
+                    logging.info("المحتوى مكرر أو غير كافٍ، إعادة التوليد...")
 
         except Exception as e:
             logging.error(f"خطأ: {e}")
