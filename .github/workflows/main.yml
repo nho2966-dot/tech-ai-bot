@@ -2,20 +2,18 @@ name: TechAgent Pro Run
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # تشغيل كل 4 ساعات لضمان جودة المحتوى
+    - cron: '0 */4 * * *' 
   workflow_dispatch:
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # ضروري جداً لحفظ الذاكرة ومنع التكرار
+      contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -26,7 +24,7 @@ jobs:
         run: |
           pip install tweepy openai python-dotenv pyyaml requests
 
-      - name: Run Tech Bot
+      - name: Find and Run Bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -36,15 +34,25 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
-        run: python main.py
+        run: |
+          # ابحث عن ملف main.py وتشغيله أينما وجد
+          FILE_PATH=$(find . -name "main.py" -not -path "*/.*" | head -n 1)
+          if [ -z "$FILE_PATH" ]; then
+            echo "❌ Error: main.py not found in the repository!"
+            exit 1
+          fi
+          echo "🚀 Found main.py at: $FILE_PATH"
+          python "$FILE_PATH"
 
-      - name: Save Memory and Sync
-        if: always() # لضمان حفظ الذاكرة حتى لو فشل النشر
+      - name: Save Memory
+        if: always()
         run: |
           git config --local user.email "bot@techagent.com"
           git config --local user.name "TechAgent-Bot"
-          # إنشاء الملف إذا لم يكن موجوداً لمنع الخطأ
-          touch last_tweet_hash.txt
-          git add last_tweet_hash.txt
-          git commit -m "Update memory: prevent duplicate tweets [skip ci]" || echo "No changes to commit"
-          git push || echo "No changes to push"
+          # البحث عن ملف الهاش وحفظه
+          HASH_PATH=$(find . -name "last_tweet_hash.txt" | head -n 1)
+          if [ -n "$HASH_PATH" ]; then
+            git add "$HASH_PATH"
+            git commit -m "Update memory [skip ci]" || echo "No changes"
+            git push || echo "No changes"
+          fi
