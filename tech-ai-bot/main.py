@@ -1,16 +1,47 @@
 import os
+import yaml
 import logging
 import tweepy
+from openai import OpenAI
+from datetime import datetime, timedelta
 import random
 import time
-import json
-from openai import OpenAI
-from datetime import datetime
+import hashlib
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
+# ─── إعداد السجل ────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)-5s | %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+LAST_TWEET_FILE = "last_tweet_hash.txt"  # لمنع التكرار
 
 class TechAgentPro:
     def __init__(self):
+        logging.info("=== TechAgent Pro v6 – تركيز على المستقبل والسبق الصحفي ===")
+        logging.info(f"المسار الحالي: {os.getcwd()}")
+
+        self.config = self._load_config()
+
+        # ─── اتصال AI (OpenRouter أولوية + OpenAI fallback) ──────────────
+        router_key = os.getenv("OPENROUTER_API_KEY")
+        openai_key = os.getenv("OPENAI_API_KEY")
+
+        if router_key:
+            logging.info("استخدام OpenRouter")
+            self.ai_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=router_key)
+            self.model = "alibabacloud/qwen-2.5-72b-instruct"  # قوي في التوقعات والعربية
+        elif openai_key:
+            logging.info("استخدام OpenAI")
+            self.ai_client = OpenAI(api_key=openai_key)
+            self.model = "gpt-4o-mini"
+        else:
+            raise ValueError("مفاتيح AI مفقودة")
+
+        logging.info(f"النموذج: {self.model}")
+
+        # ─── اتصال X ────────────────────────────────────────────────────────
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -19,79 +50,130 @@ class TechAgentPro:
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
             wait_on_rate_limit=True
         )
-        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.history_file = "tweet_history.json"
 
-    def _is_duplicate(self, content):
-        """التحقق من أن التغريدة لم تُنشر من قبل (بناءً على تشابه المعنى)"""
-        if not os.path.exists(self.history_file):
+        me = self.x_client.get_me().data
+        self.my_id = me.id
+        self.my_username = me.username.lower()
+        logging.info(f"البوت: @{self.my_username}")
+
+        # إعدادات النشر المستقبلي والأمان
+        self.daily_posts_target = 2
+        self.min_delay_between_posts = 900   # 15 دقيقة
+        self.max_delay_between_posts = 3600  # ساعة
+        self.max_replies_per_run = 4
+        self.min_followers_to_reply = 40
+
+    def _load_config(self):
+        secret = os.getenv("CONFIG_YAML")
+        if secret:
+            logging.info("تحميل من Secret CONFIG_YAML")
+            return yaml.safe_load(secret)
+
+        logging.warning("استخدام افتراضي")
+        return {
+            "behavior": {
+                "daily_posts_target": 2,
+                "min_delay_between_posts": 900,
+                "max_delay_between_posts": 3600,
+                "max_replies_per_run": 4,
+                "min_followers_to_reply": 40,
+                "spam_keywords": ["crypto", "airdrop", "giveaway", "claim", "free", "bot"]
+            }
+        }
+
+    def _was_similar_tweet_posted_today(self, content: str) -> bool:
+        if not os.path.exists(LAST_TWEET_FILE):
             return False
-        with open(self.history_file, 'r', encoding='utf-8') as f:
-            history = json.load(f)
-            # التحقق من آخر 50 تغريدة لضمان التنوع
-            return any(content[:30] in old_tweet for old_tweet in history[-50:])
+        try:
+            with open(LAST_TWEET_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    h, t = line.strip().split("|")
+                    if datetime.now() - datetime.fromisoformat(t) < timedelta(hours=24):
+                        if hashlib.md5(content.encode()).hexdigest() == h:
+                            return True
+        except:
+            return False
+        return False
 
-    def _save_to_history(self, content):
-        history = []
-        if os.path.exists(self.history_file):
-            with open(self.history_file, 'r', encoding='utf-8') as f:
-                history = json.load(f)
-        history.append(content)
-        with open(self.history_file, 'w', encoding='utf-8') as f:
-            json.dump(history[-100:], f, ensure_ascii=False) # الاحتفاظ بآخر 100 فقط
+    def _save_tweet_hash(self, content: str):
+        h = hashlib.md5(content.encode()).hexdigest()
+        with open(LAST_TWEET_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{h}|{datetime.now().isoformat()}\n")
 
-    def ask_ai(self, prompt, system_instruction):
-        engines = [
-            {"name": "Qwen", "url": "https://openrouter.ai/api/v1", "key": self.openrouter_key, "model": "alibabacloud/qwen-2.5-72b-instruct"},
-            {"name": "OpenAI", "url": None, "key": self.openai_key, "model": "gpt-4o-mini"}
-        ]
-        
-        for engine in engines:
-            if engine["key"]:
-                try:
-                    client = OpenAI(base_url=engine["url"], api_key=engine["key"]) if engine["url"] else OpenAI(api_key=engine["key"])
-                    resp = client.chat.completions.create(
-                        model=engine["model"],
-                        messages=[{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}],
-                        max_tokens=400
-                    )
-                    return resp.choices[0].message.content.strip()
-                except Exception as e:
-                    logging.warning(f"فشل محرك {engine['name']}: {e}")
-        return None
+    def _generate_future_tech_tweet(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        next_year = (datetime.now() + timedelta(days=365)).strftime("%Y")
+
+        prompt = f"""
+        التاريخ اليوم {today}. أنت خبير تقني متخصص في التوقعات المستقبلية والسبق الصحفي.
+        اكتب تغريدة تقنية بالعربية الفصحى عن تطور تقني متوقع خلال {today}–{next_year}.
+        القواعد الصارمة:
+        - ركز على السبق الصحفي المستقبلي (مثل ميزات AI قادمة، أجهزة 2027، تغييرات في الألعاب أو الخصوصية).
+        - استند إلى اتجاهات حديثة موثوقة فقط (مثل CES 2026، تقارير The Verge، TechCrunch).
+        - اذكر مصدر موثوق أو قل 'توقع مبني على اتجاهات حالية' أو 'غير مؤكد رسميًا'.
+        - ابدأ بـ '🚀 المستقبل:' أو '🔮 توقع 2027:' أو '📈 سبق صحفي محتمل'.
+        - اجعلها دقيقة، مفيدة، جذابة، مع إيموجي احترافي وهاشتاغات.
+        - أقل من 270 حرف.
+        - انهِ بسؤال مفتوح قوي للتفاعل.
+        - التغريدة مكتملة، ذات معنى، وليست مجرد عنوان.
+        """
+
+        try:
+            resp = self.ai_client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=280,
+                temperature=0.72
+            )
+            content = resp.choices[0].message.content.strip()
+
+            # ضمان الجودة والاكتمال
+            if len(content) < 100 or content.count('.') < 3 or "..." in content * 3:
+                logging.warning("تغريدة غير مكتملة → إعادة محاولة")
+                return self._generate_future_tech_tweet()  # إعادة محاولة مرة واحدة
+
+            if len(content) > 270:
+                content = content[:267] + "…"
+
+            return content
+        except Exception as e:
+            logging.error(f"خطأ توليد تغريدة مستقبلية: {e}")
+            return None
 
     def run(self):
         try:
-            # 1. تحديد الوقت الحالي لإجبار الـ AI على محتوى "جديد جداً"
-            current_date = datetime.now().strftime("%Y-%m-%d")
-            
-            # 2. بناء أمر (Prompt) يركز على العامل الزمني والتسريبات الحديثة
-            instruction = f"""أنت رادار تقني عالمي. اليوم هو {current_date}.
-            وظيفتك: تقديم أحدث تسريب أو خبر تقني عاجل وقع في الـ 48 ساعة الأخيرة فقط.
-            ركز على عمالقة التقنية (Apple, Nvidia, Samsung, Google).
-            القواعد:
-            - ممنوع تكرار أخبار قديمة.
-            - يجب أن يكون المحتوى مفهوماً ومكتملاً بنسبة 100%.
-            - اللغة العربية فصحى واحترافية.
-            - الطول أقل من 275 حرفاً."""
+            me = self.x_client.get_me().data
+            logging.info(f"متصل → @{me.username}")
 
-            prompt = "أعطني أهم تسريب تقني أو خبر عاجل ومؤكد لهذا اليوم. ابدأ التغريدة بكلمة '🚨 جديد' أو '🚨 تسريب عاجل'."
-            
-            # 3. محاولات توليد محتوى غير مكرر
-            for _ in range(3): # 3 محاولات للحصول على نص فريد
-                raw_content = self.ask_ai(prompt, instruction)
-                if raw_content and not self._is_duplicate(raw_content):
-                    # نشر التغريدة
-                    self.x_client.create_tweet(text=raw_content)
-                    self._save_to_history(raw_content)
-                    logging.info(f"✨ تم النشر (محتوى جديد وفريد): {raw_content[:50]}")
+            # نشر تغريدتين مستقبليتين يوميًا
+            posted = 0
+            while posted < 2:
+                content = self._generate_future_tech_tweet()
+                if not content:
                     break
-                else:
-                    logging.info("المحتوى مكرر أو غير كافٍ، إعادة التوليد...")
+
+                if self._was_similar_tweet_posted_today(content):
+                    logging.info("محتوى مشابه موجود → تخطي")
+                    break
+
+                self.x_client.create_tweet(text=content)
+                logging.info(f"✨ تم نشر التغريدة المستقبلية رقم {posted+1}: {content[:60]}...")
+                self._save_tweet_hash(content)
+                posted += 1
+
+                if posted < 2:
+                    delay = random.randint(900, 3600)  # 15–60 دقيقة
+                    logging.info(f"انتظار {delay//60} دقيقة قبل التغريدة الثانية...")
+                    time.sleep(delay)
+
+            if posted == 0:
+                logging.warning("لم يتم نشر أي تغريدة اليوم")
 
         except Exception as e:
-            logging.error(f"خطأ: {e}")
+            logging.error(f"خطأ عام: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    TechAgentPro().run()
+    try:
+        TechAgentPro().run()
+    except Exception as e:
+        logging.critical(f"فشل كلي: {e}", exc_info=True)
