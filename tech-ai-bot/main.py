@@ -5,12 +5,12 @@ from openai import OpenAI
 import random
 import time
 
-# إعداد السجل
+# إعداد السجل بنبرة احترافية
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 
 class TechAgent:
     def __init__(self):
-        logging.info("=== TechAgent Pro v25.0 [Rate-Limit Resilience] ===")
+        logging.info("=== TechAgent Pro v26.0 [Optimized for X Premium] ===")
         
         # إعداد AI
         self.ai_client = OpenAI(
@@ -18,7 +18,7 @@ class TechAgent:
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
 
-        # إعداد X - تعطيل الانتظار التلقائي لتجنب تعليق الـ Action
+        # إعداد X - تعطيل الانتظار التلقائي للتحكم اليدوي
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -28,6 +28,7 @@ class TechAgent:
             wait_on_rate_limit=False 
         )
 
+        # الهوية المعتمدة
         self.system_instr = (
             "اسمك TechAgent. وكيل تقني لجيل الشباب. لغة جافة، جداول Markdown، روابط، والختم بـ +#."
         )
@@ -45,43 +46,47 @@ class TechAgent:
             return None
 
     def _process_mentions(self):
-        """معالجة الردود مع حماية ضد الـ Rate Limit"""
+        """معالجة الردود بذكاء وحذر"""
         try:
-            # محاولة جلب المعرف الخاص بي
+            # لجلب المنشنات نحتاج ID الحساب. بدلاً من طلب get_me() دائماً
+            # سنحاول جلبه مرة واحدة، وفي حال الفشل نعتمد على النشر فقط
             me = self.x_client.get_me()
             if not me.data: return
             
+            # طلب 5 منشنات فقط لتوفير الكوتا
             mentions = self.x_client.get_users_mentions(id=me.data.id, max_results=5)
-            if not mentions.data: return
+            if not mentions.data: 
+                logging.info("ℹ️ لا توجد منشنات جديدة للرد عليها.")
+                return
 
             for tweet in mentions.data:
-                reply = self._generate_content(f"رد تقني جاف على: {tweet.text}")
+                reply = self._generate_content(f"رد تقني جاف ومفيد على: {tweet.text}")
                 if reply:
                     if "+#" not in reply: reply += "\n+#"
                     self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
-                    logging.info(f"✅ تم الرد على المنشن {tweet.id}")
-                    time.sleep(5)
+                    logging.info(f"✅ تم الرد على: {tweet.id}")
+                    time.sleep(5) # فاصل زمني بسيط بين الردود
         except tweepy.TooManyRequests:
-            logging.warning("⚠️ تجاوز حد الطلبات (Rate Limit). سيتم التوقف الآن ومعاودة المحاولة لاحقاً.")
+            logging.warning("⚠️ تم بلوغ حد الطلبات للمنشنات. سيتم التخطي.")
         except Exception as e:
             logging.error(f"Mentions Error: {e}")
 
     def _publish_post(self):
-        """النشر الاستهدافي"""
+        """النشر الاستهدافي للشباب"""
         try:
-            scenarios = ["أداة AI للعمل الحر", "مقارنة هواتف بجدول", "تحليل عتاد ألعاب"]
-            content = self._generate_content(random.choice(scenarios))
+            tasks = ["أداة AI للعمل الحر", "مقارنة مواصفات هواتف 2026", "تسريب عتاد ألعاب"]
+            content = self._generate_content(random.choice(tasks))
             if content:
                 if "+#" not in content: content += "\n+#"
                 self.x_client.create_tweet(text=content)
-                logging.info("🚀 تم النشر بنجاح.")
+                logging.info("🚀 تم النشر الاستهدافي بنجاح.")
         except tweepy.TooManyRequests:
-            logging.warning("⚠️ حد النشر ممتلئ حالياً.")
+            logging.warning("⚠️ تم بلوغ حد الطلبات للنشر.")
         except Exception as e:
             logging.error(f"Post Error: {e}")
 
     def run(self):
-        # تنفيذ النشر أولاً كأولوية، ثم محاولة الردود
+        # النشر أولاً لأنه الأهم للأداء العام، ثم محاولة الردود
         self._publish_post()
         self._process_mentions()
 
