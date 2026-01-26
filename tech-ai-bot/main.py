@@ -8,7 +8,7 @@ import random
 import time
 import hashlib
 
-# ─── إعداد السجل (Logs) ──────────────────────────────────────────────────
+# ─── إعداد السجل الاحترافي ──────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)-5s | %(message)s',
@@ -19,24 +19,16 @@ LAST_TWEET_FILE = "last_tweet_hash.txt"
 
 class TechAgentPro:
     def __init__(self):
-        logging.info("=== TechAgent Pro v6.2 – إصلاح الأخطاء البرمجية ===")
-        
+        logging.info("=== TechAgent Pro v8.0 [Super Intelligent Mode] ===")
         self.config = self._load_config()
 
-        # ─── إعداد الذكاء الاصطناعي ──────────────────────
+        # ─── إعداد الذكاء الاصطناعي (Qwen 2.5 72B) ───────────────────────
         router_key = os.getenv("OPENROUTER_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-
-        if router_key:
-            logging.info("تفعيل محرك OpenRouter (Qwen)")
-            self.ai_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=router_key)
-            self.model = "qwen/qwen-2.5-72b-instruct"
-        elif openai_key:
-            logging.info("تفعيل محرك OpenAI (Fallback)")
-            self.ai_client = OpenAI(api_key=openai_key)
-            self.model = "gpt-4o-mini"
-        else:
-            raise ValueError("❌ خطأ: لم يتم العثور على مفاتيح API (Secrets)")
+        self.ai_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=router_key or os.getenv("OPENAI_API_KEY")
+        )
+        self.model = "qwen/qwen-2.5-72b-instruct" if router_key else "gpt-4o-mini"
 
         # ─── إعداد منصة X ──────────────────────────────────────────
         self.x_client = tweepy.Client(
@@ -49,69 +41,90 @@ class TechAgentPro:
         )
 
     def _load_config(self):
-        secret = os.getenv("CONFIG_YAML")
-        if secret:
-            try:
-                return yaml.safe_load(secret)
-            except:
-                pass
-        return {"behavior": {"daily_posts_target": 2}}
+        return {"min_followers": 30, "max_replies_per_run": 5}
 
-    def _was_similar_tweet_posted_today(self, content: str) -> bool:
-        if not os.path.exists(LAST_TWEET_FILE):
-            return False
-        try:
-            current_hash = hashlib.md5(content.encode()).hexdigest()
-            with open(LAST_TWEET_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    if "|" in line:
-                        h, t = line.strip().split("|")
-                        if datetime.now() - datetime.fromisoformat(t) < timedelta(hours=24):
-                            if current_hash == h:
-                                return True
-        except:
-            return False
-        return False
-
-    def _save_tweet_hash(self, content: str):
-        h = hashlib.md5(content.encode()).hexdigest()
-        with open(LAST_TWEET_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{h}|{datetime.now().isoformat()}\n")
-
-    def _generate_future_tech_tweet(self):
-        today = datetime.now().strftime("%Y-%m-%d")
-        prompt = f"""
-        التاريخ اليوم {today}. أنت خبير تقني متخصص في التسريبات.
-        اكتب تغريدة احترافية بالعربية الفصحى عن (Apple أو Samsung أو Nvidia) وتوقعات 2026.
-        ابدأ بـ '🚨 جديد:' أو '🔮 رادار المستقبل:'.
-        يجب أن تكون التغريدة مكتملة المعنى، دقيقة، وأقل من 270 حرف.
-        انهِ بسؤال تفاعلي.
-        """
+    def _generate_smart_content(self, system_prompt, user_input):
+        """توليد محتوى فائق الذكاء"""
         try:
             resp = self.ai_client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_input}
+                ],
+                temperature=0.8, # لزيادة الإبداع في الردود
+                max_tokens=300
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"❌ خطأ AI: {e}")
+            logging.error(f"AI Generation Error: {e}")
             return None
+
+    def _process_mentions(self):
+        """الرد الذكي جداً على المتابعين"""
+        try:
+            me = self.x_client.get_me().data
+            mentions = self.x_client.get_users_mentions(
+                id=me.id, 
+                max_results=10, 
+                expansions=["author_id", "referenced_tweets.id"],
+                tweet_fields=["text", "public_metrics"]
+            )
+            
+            if not mentions.data:
+                logging.info("لا توجد تفاعلات جديدة حالياً.")
+                return
+
+            # نظام الرد الذكي
+            system_instruction = """أنت خبير تقني عبقري، ردودك ذكية، مختصرة، ومثيرة للإعجاب بالعربية الفصحى.
+            - إذا كان السؤال تقنياً: أجب بعمق وبصيرة.
+            - إذا كان مزاحاً: رد بروح دعابة تقنية راقية.
+            - إذا كان نقداً: كن ديبلوماسياً وذكياً.
+            - لا تستخدم أكثر من 240 حرفاً."""
+
+            for tweet in mentions.data:
+                logging.info(f"تحليل منشن من ID: {tweet.author_id}")
+                
+                reply_text = self._generate_smart_content(system_instruction, tweet.text)
+                
+                if reply_text:
+                    self.x_client.create_tweet(
+                        text=reply_text,
+                        in_reply_to_tweet_id=tweet.id
+                    )
+                    logging.info(f"✅ تم الرد بذكاء على: {tweet.text[:30]}...")
+                    time.sleep(random.randint(20, 40)) # حماية من الحظر
+        except Exception as e:
+            logging.error(f"Mentions Error: {e}")
+
+    def _publish_leak_tweet(self):
+        """نشر تسريبات وسبق صحفي"""
+        system_instruction = "أنت رادار التسريبات التقنية العالمي لعام 2026."
+        user_prompt = "أعطني سبقاً صحفياً تقنياً واحداً عن Apple أو Nvidia، مكتوباً بأسلوب مشوق جداً وذكي."
+        
+        content = self._generate_smart_content(system_instruction, user_prompt)
+        
+        if content:
+            # التحقق من عدم التكرار (Hash System)
+            current_hash = hashlib.md5(content.encode()).hexdigest()
+            is_duplicate = False
+            if os.path.exists(LAST_TWEET_FILE):
+                with open(LAST_TWEET_FILE, "r") as f:
+                    if current_hash in f.read(): is_duplicate = True
+
+            if not is_duplicate:
+                self.x_client.create_tweet(text=content)
+                with open(LAST_TWEET_FILE, "a") as f:
+                    f.write(f"{current_hash}|{datetime.now().isoformat()}\n")
+                logging.info("🚀 تم نشر السبق الصحفي الجديد.")
 
     def run(self):
         try:
-            me = self.x_client.get_me().data
-            logging.info(f"✅ متصل بحساب: @{me.username}")
-            
-            content = self._generate_future_tech_tweet()
-            if content and not self._was_similar_tweet_posted_today(content):
-                self.x_client.create_tweet(text=content)
-                self._save_tweet_hash(content)
-                logging.info(f"🚀 تم النشر: {content[:50]}...")
-            else:
-                logging.info("⏭️ تخطي: محتوى مكرر أو غير صالح.")
+            # تنفيذ الردود أولاً ثم النشر
+            self._process_mentions()
+            self._publish_leak_tweet()
         except Exception as e:
-            logging.error(f"❌ خطأ في التشغيل: {e}")
+            logging.critical(f"Critical Failure: {e}")
 
 if __name__ == "__main__":
     TechAgentPro().run()
