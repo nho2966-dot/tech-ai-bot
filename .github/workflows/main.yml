@@ -1,69 +1,50 @@
-name: TechAgent Pro - Run Bot
+name: TechAgent Pro Run
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'   # كل ساعة
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    - cron: '0 */4 * * *' # تشغيل كل 4 ساعات لضمان جودة المحتوى
+  workflow_dispatch:
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ضروري جداً لحفظ الذاكرة ومنع التكرار
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "requirements.txt غير موجود → تثبيت الحزم يدوياً"
-            pip install tweepy openai python-dotenv pyyaml requests
-          fi
+          pip install tweepy openai python-dotenv pyyaml requests
 
-      - name: Debug - Show structure
-        run: |
-          echo "Current dir: $(pwd)"
-          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          ls -la
-          echo "Contents of tech-ai-bot folder:"
-          ls -la tech-ai-bot || echo "مجلد tech-ai-bot غير موجود"
-
-      - name: Change to bot directory & Run
-        working-directory: ./tech-ai-bot
+      - name: Run Tech Bot
         env:
-          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: |
-          echo "Working directory: $(pwd)"
-          ls -la
-          python main.py
+          CONFIG_YAML: ${{ secrets.CONFIG_YAML }}
+        run: python main.py
 
-      - name: Upload logs (if any)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-logs
-          path: |
-            tech-ai-bot/*.log
-            tech-ai-bot/botlog.txt
-            tech-ai-bot/agent_logs.log
-          retention-days: 7
+      - name: Save Memory and Sync
+        if: always() # لضمان حفظ الذاكرة حتى لو فشل النشر
+        run: |
+          git config --local user.email "bot@techagent.com"
+          git config --local user.name "TechAgent-Bot"
+          # إنشاء الملف إذا لم يكن موجوداً لمنع الخطأ
+          touch last_tweet_hash.txt
+          git add last_tweet_hash.txt
+          git commit -m "Update memory: prevent duplicate tweets [skip ci]" || echo "No changes to commit"
+          git push || echo "No changes to push"
