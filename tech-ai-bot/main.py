@@ -3,6 +3,10 @@ import logging
 import tweepy
 from openai import OpenAI
 from datetime import datetime
+from dotenv import load_dotenv  # ✅ جديد
+
+# ✅ جديد: تحميل المتغيرات من .env
+load_dotenv()
 
 # إعداد السجلات لتتبع العملية بدقة في GitHub Actions
 logging.basicConfig(
@@ -14,14 +18,13 @@ class TechAgentPro:
     def __init__(self):
         logging.info("🚀 بدء تشغيل نظام المشتركين الموثق - v2")
         
-        # الاتصال باستخدام v2 (المسار الرسمي للمشتركين)
+        # ✅ إزالة X_BEARER_TOKEN من OAuth 1.0a
         self.x_client = tweepy.Client(
-            bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            wait_on_rate_limit=True  # ✅ موجود بالفعل
         )
         
         # إعداد OpenAI لإنشاء المحتوى الأصلي
