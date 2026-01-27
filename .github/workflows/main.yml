@@ -1,4 +1,63 @@
-name: build-and-run
+name: Tech AI Bot - Auto Every 6h + Manual
+
+on:
+  workflow_dispatch: {}     # ✅ تشغيل يدوي من GitHub
+  schedule:
+    - cron: "0 */6 * * *"   # ✅ تشغيل تلقائي كل 6 ساعات (UTC)
+
+concurrency:
+  group: tech-ai-bot
+  cancel-in-progress: true  # يمنع تشغيلين بنفس الوقت
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: tech-ai-bot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check
+        working-directory: tech-ai-bot
+        run: |
+          python -m py_compile main.py
+
+      - name: Run bot
+        working-directory: tech-ai-bot
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+
+          # تشغيل آمن أولاً (اختياري): اجعلها 1 ثم 0
+          DRY_RUN: "0"
+
+          SOURCE_MODE: "1"
+          POLL_MODE: "1"
+          TIP_MODE: "1"
+
+          POST_CAP_MONTHLY: "3000"
+          READ_CAP_MONTHLY: "15000"
+          POSTS_PER_15MIN_SOFT: "95"
+
+          MAX_HASHTAGS: "2"
+          SIGNATURE: ""
+
+        run: |
+          python main.pyname: build-and-run
 
 on:
   push:
