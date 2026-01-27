@@ -1,14 +1,17 @@
-name: TechAgent Bot Runner
+name: build-and-run
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: '0 */6 * * *' # يعمل كل 6 ساعات، يمكنك تغييره
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً للتجربة
+    - cron: '0 17 * * *' # ينشر تلقائياً الساعة 8 مساءً بتوقيت مكة (5 مساءً UTC)
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً في أي وقت
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,23 +23,21 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          # الدخول للمجلد الذي يحتوي على requirements.txt وتثبيتها
+          cd tech-ai-bot
           python -m pip install --upgrade pip
-          # التأكد من تثبيت المكتبات من المسار الصحيح لتفعيل RTL
-          if [ -f tech-ai-bot/requirements.txt ]; then
-            pip install -r tech-ai-bot/requirements.txt
-          else
-            echo "Requirements file not found in tech-ai-bot folder!"
-            exit 1
-          fi
+          pip install -r requirements.txt
 
       - name: Run TechAgent Bot
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # ربط أسرار جيت هب بالمتغيرات البيئية للكود
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          # تشغيل البوت من المجلد الفرعي
-          python tech-ai-bot/main.py
+          # الخطوة الحاسمة: الدخول للمجلد الصحيح ثم التشغيل
+          cd tech-ai-bot
+          python main.py
