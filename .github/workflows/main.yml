@@ -1,13 +1,13 @@
-name: Tech AI Bot - Auto Every 6h + Manual
+name: Tech AI Bot - Auto Every 6h + Manual (Stateful)
 
 on:
-  workflow_dispatch: {}     # ✅ تشغيل يدوي من GitHub
+  workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"   # ✅ تشغيل تلقائي كل 6 ساعات (UTC)
+    - cron: "0 */6 * * *"   # كل 6 ساعات (UTC)
 
 concurrency:
   group: tech-ai-bot
-  cancel-in-progress: true  # يمنع تشغيلين بنفس الوقت
+  cancel-in-progress: true
 
 jobs:
   build-and-run:
@@ -28,10 +28,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # استرجاع/حفظ الحالة بين التشغيلات (state.json + audit_log.jsonl)
+      - name: Restore bot state (cache)
+        uses: actions/cache@v4
+        with:
+          path: |
+            tech-ai-bot/state.json
+            tech-ai-bot/audit_log.jsonl
+          key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            bot-state-${{ github.ref_name }}-
+
       - name: Syntax check
         working-directory: tech-ai-bot
-        run: |
-          python -m py_compile main.py
+        run: python -m py_compile main.py
 
       - name: Run bot
         working-directory: tech-ai-bot
@@ -42,61 +52,40 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
 
-          # تشغيل آمن أولاً (اختياري): اجعلها 1 ثم 0
           DRY_RUN: "0"
-
           SOURCE_MODE: "1"
           POLL_MODE: "1"
           TIP_MODE: "1"
 
+          # Reply safety
+          REPLY_ENABLED: "1"
+          MAX_REPLIES_PER_RUN: "2"
+          MAX_REPLIES_PER_HOUR: "4"
+          MAX_REPLIES_PER_DAY: "12"
+          MAX_REPLIES_PER_USER_PER_DAY: "1"
+          REPLY_COOLDOWN_HOURS: "12"
+          QUIET_HOURS_UTC: "0-5"
+          REPLY_JITTER_MIN: "2"
+          REPLY_JITTER_MAX: "6"
+          AUTO_KILL_ON_ERRORS: "1"
+          MAX_ERRORS_PER_RUN: "3"
+          KILL_COOLDOWN_MINUTES: "180"
+
           POST_CAP_MONTHLY: "3000"
           READ_CAP_MONTHLY: "15000"
           POSTS_PER_15MIN_SOFT: "95"
-
           MAX_HASHTAGS: "2"
           SIGNATURE: ""
 
         run: |
-          python main.pyname: build-and-run
-
-on:
-  push:
-    branches:
-      - main
-  schedule:
-    - cron: '0 17 * * *' # ينشر تلقائياً الساعة 8 مساءً بتوقيت مكة (5 مساءً UTC)
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً في أي وقت
-
-jobs:
-  build-and-run:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          # الدخول للمجلد الذي يحتوي على requirements.txt وتثبيتها
-          cd tech-ai-bot
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run TechAgent Bot
-        env:
-          # ربط أسرار جيت هب بالمتغيرات البيئية للكود
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: |
-          # الخطوة الحاسمة: الدخول للمجلد الصحيح ثم التشغيل
-          cd tech-ai-bot
           python main.py
+
+      # رفع الحالة والسجلات كـ Artifacts دائمًا
+      - name: Upload bot artifacts (logs/state)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-artifacts
+          path: |
+            tech-ai-bot/state.json
+            tech-ai-bot/audit_log.jsonl
