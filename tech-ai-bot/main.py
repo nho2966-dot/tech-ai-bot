@@ -1,35 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Tech Expert Master Bot (X) — Basic Plan — Full Integrated (Final)
+"""Tech AI Bot (X) — Basic Plan — Final main.py (with Daily Tech Tips pillar + poll + safety)
 
-Features:
-- Basic plan guards (monthly + 15-min soft)
-- SOURCE_MODE: RSS-only content + Credibility Gate (no extra URLs, no unsupported numbers)
-- Thread: numbering 1/N, hashtags only in last tweet (<=2), friendly CTA, readable line breaks
-- First tweet: adds blurb ("نبذة:" + "مثال سريع:") and injects "حسب تصويتكم 👇" before "نبذة:" when driven by poll
-- Poll Mode:
-  - Per pillar polls (AI/Cloud/Programming)
-  - Per audience level polls (beginner/intermediate/advanced) with attractive options
-  - Auto-infer audience level from poll replies (proxy)
-  - Measure poll engagement via public_metrics and learn best level (bandit-like)
-- Dashboard + Smart Recommendation
-- Optional: send recommendation email via SMTP
+What this bot does
+- Posts:
+  - RSS-driven Threads (SOURCE_MODE) with credibility gate (no extra URLs, no unsupported numbers)
+  - Tip posts (short, practical) on Tue/Thu by default
+  - A dedicated pillar: "نصائح تقنية يومية" is biased to Tip format (daily practical value)
+- Poll mode:
+  - per-pillar + per-level polls; learns which audience level performs better
+  - includes a dedicated poll for "نصائح تقنية يومية" (AI daily / smart devices / social / privacy)
+- Replies:
+  - replies to mentions only
+  - strong anti-duplication + safety throttles + quiet hours + opt-out + kill-switch
+- Dashboard + smart recommendation + optional email of recommendation (SMTP)
 
-Required env:
-OPENROUTER_API_KEY
-X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
-
-Optional env:
-DRY_RUN=1
-SOURCE_MODE=1
-POLL_MODE=1
-TIP_MODE=1
-SHOW_DASHBOARD=1
-SEND_RECOMMENDATION=1
-METRICS_DELAY_SECONDS=120
-POST_CAP_MONTHLY=3000
-READ_CAP_MONTHLY=15000
-POSTS_PER_15MIN_SOFT=95
-SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, RECOMMENDATION_EMAIL_TO
+Required env/secrets:
+  OPENROUTER_API_KEY
+  X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
 """
 
 import os
@@ -38,7 +25,8 @@ import json
 import time
 import random
 import logging
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import xml.etree.ElementTree as ET
@@ -46,32 +34,23 @@ import xml.etree.ElementTree as ET
 import tweepy
 from openai import OpenAI
 
-# ----------------------------
-# Logging
-# ----------------------------
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-# ----------------------------
-# Constants
-# ----------------------------
-TWEET_LIMIT = 280
-THREAD_DELIM = "\n---\n"
 STATE_FILE = "state.json"
 AUDIT_LOG = "audit_log.jsonl"
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 DIGIT_RE = re.compile(r"\d+")
 
-# ----------------------------
-# Basic plan guards
-# ----------------------------
+TWEET_LIMIT = 280
+THREAD_DELIM = "\n---\n"
+
+# Plan guards (Basic)
 POST_CAP_MONTHLY = int(os.getenv("POST_CAP_MONTHLY", "3000"))
 READ_CAP_MONTHLY = int(os.getenv("READ_CAP_MONTHLY", "15000"))
 POSTS_PER_15MIN_SOFT = int(os.getenv("POSTS_PER_15MIN_SOFT", "95"))
 
-# ----------------------------
 # Modes
-# ----------------------------
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 SOURCE_MODE = os.getenv("SOURCE_MODE", "1") == "1"
 POLL_MODE = os.getenv("POLL_MODE", "1") == "1"
@@ -83,17 +62,27 @@ POLL_EVERY_DAYS = int(os.getenv("POLL_EVERY_DAYS", "7"))
 POLL_DURATION_MINUTES = int(os.getenv("POLL_DURATION_MINUTES", "1440"))
 METRICS_DELAY_SECONDS = int(os.getenv("METRICS_DELAY_SECONDS", "120"))
 
-# ----------------------------
-# Automation compliance
-# ----------------------------
-MAX_REPLIES_PER_RUN = int(os.getenv("MAX_REPLIES_PER_RUN", "3"))
-BLOCK_TREND_JACKING = True
+# Reply safety knobs
+REPLY_ENABLED = os.getenv("REPLY_ENABLED", "1") == "1"
+MAX_REPLIES_PER_RUN = int(os.getenv("MAX_REPLIES_PER_RUN", "2"))
+MAX_REPLIES_PER_HOUR = int(os.getenv("MAX_REPLIES_PER_HOUR", "4"))
+MAX_REPLIES_PER_DAY = int(os.getenv("MAX_REPLIES_PER_DAY", "12"))
+MAX_REPLIES_PER_USER_PER_DAY = int(os.getenv("MAX_REPLIES_PER_USER_PER_DAY", "1"))
+REPLY_COOLDOWN_HOURS = int(os.getenv("REPLY_COOLDOWN_HOURS", "12"))
+REPLY_JITTER_MIN = float(os.getenv("REPLY_JITTER_MIN", "2"))
+REPLY_JITTER_MAX = float(os.getenv("REPLY_JITTER_MAX", "6"))
+QUIET_HOURS_UTC = os.getenv("QUIET_HOURS_UTC", "0-5")
+AUTO_KILL_ON_ERRORS = os.getenv("AUTO_KILL_ON_ERRORS", "1") == "1"
+MAX_ERRORS_PER_RUN = int(os.getenv("MAX_ERRORS_PER_RUN", "3"))
+KILL_COOLDOWN_MINUTES = int(os.getenv("KILL_COOLDOWN_MINUTES", "180"))
 
 LEVELS = ["beginner", "intermediate", "advanced"]
 
-# ----------------------------
+DEFAULT_HASHTAGS = ["#تقنية", "#برمجة"]
+MAX_HASHTAGS = int(os.getenv("MAX_HASHTAGS", "2"))
+SIGNATURE = os.getenv("SIGNATURE", "").strip()
+
 # SMTP (optional)
-# ----------------------------
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -101,9 +90,7 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 RECOMMENDATION_EMAIL_TO = os.getenv("RECOMMENDATION_EMAIL_TO", "")
 
-# ----------------------------
-# Poll Config
-# ----------------------------
+# Poll Config (includes Daily Tech Tips)
 POLL_CONFIG = {
     "الذكاء الاصطناعي": {
         "question": "وين تحب نركّز في ثريد AI القادم؟ 🤖",
@@ -137,6 +124,7 @@ POLL_CONFIG = {
             },
         },
     },
+
     "الحوسبة السحابية": {
         "question": "إيش أكثر شيء يرهقك في السحابة؟ ☁️",
         "levels": {
@@ -169,6 +157,7 @@ POLL_CONFIG = {
             },
         },
     },
+
     "البرمجة": {
         "question": "إيش أكثر شيء يضيّع وقتك في البرمجة؟ 👨‍💻",
         "levels": {
@@ -201,10 +190,43 @@ POLL_CONFIG = {
             },
         },
     },
+
+    "نصائح تقنية يومية": {
+        "question": "وش تحب نصيحة اليوم تكون عن؟ 💡",
+        "levels": {
+            "beginner": {
+                "options": ["AI يومي", "أجهزة ذكية", "مواقع التواصل", "خصوصية وأمان"],
+                "keywords": {
+                    "AI يومي": ["chatgpt", "prompt", "ai"],
+                    "أجهزة ذكية": ["iphone", "android", "pixel", "smartwatch"],
+                    "مواقع التواصل": ["instagram", "whatsapp", "facebook"],
+                    "خصوصية وأمان": ["privacy", "security", "scam"],
+                },
+            },
+            "intermediate": {
+                "options": ["AI يومي", "أجهزة ذكية", "مواقع التواصل", "خصوصية وأمان"],
+                "keywords": {
+                    "AI يومي": ["chatgpt", "prompt", "ai"],
+                    "أجهزة ذكية": ["iphone", "android", "pixel", "smartwatch"],
+                    "مواقع التواصل": ["instagram", "whatsapp", "facebook"],
+                    "خصوصية وأمان": ["privacy", "security", "scam"],
+                },
+            },
+            "advanced": {
+                "options": ["AI يومي", "أجهزة ذكية", "مواقع التواصل", "خصوصية وأمان"],
+                "keywords": {
+                    "AI يومي": ["chatgpt", "prompt", "ai"],
+                    "أجهزة ذكية": ["iphone", "android", "pixel", "smartwatch"],
+                    "مواقع التواصل": ["instagram", "whatsapp", "facebook"],
+                    "خصوصية وأمان": ["privacy", "security", "scam"],
+                },
+            },
+        },
+    },
 }
 
 
-def utcnow_iso():
+def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -217,20 +239,46 @@ class TechBot:
     def __init__(self):
         self._require_env()
 
-        self.signature = os.getenv("SIGNATURE", "").strip()
-        self.max_hashtags = int(os.getenv("MAX_HASHTAGS", "2"))
-        self.default_hashtags = ["#تقنية", "#برمجة"]
+        self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
+        self.x = tweepy.Client(
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True,
+        )
 
         self.content_pillars = {
             "الذكاء الاصطناعي": "ملخصات موثوقة + أمثلة عملية",
             "الحوسبة السحابية": "مستجدات رسمية + تطبيق عملي",
             "البرمجة": "أفضل الممارسات + حلول عملية",
+            "نصائح تقنية يومية": "نصائح عملية يومية في AI + الأجهزة الذكية + مواقع التواصل",
         }
 
+        # RSS feeds per pillar
         self.feeds = {
-            "الذكاء الاصطناعي": ["https://cloud.google.com/blog/rss", "https://blogs.microsoft.com/feed"],
-            "الحوسبة السحابية": ["https://aws.amazon.com/about-aws/whats-new/recent/feed/", "https://cloud.google.com/blog/rss"],
-            "البرمجة": ["https://devblogs.microsoft.com/dotnet/feed/", "https://devblogs.microsoft.com/visualstudio/feed/"],
+            "الذكاء الاصطناعي": [
+                "https://openai.com/news/rss.xml",
+                "https://cloud.google.com/blog/rss",
+                "https://blogs.microsoft.com/feed",
+            ],
+            "الحوسبة السحابية": [
+                "https://aws.amazon.com/about-aws/whats-new/recent/feed/",
+                "https://cloud.google.com/blog/rss",
+            ],
+            "البرمجة": [
+                "https://devblogs.microsoft.com/dotnet/feed/",
+                "https://devblogs.microsoft.com/visualstudio/feed/",
+            ],
+            "نصائح تقنية يومية": [
+                "https://openai.com/news/rss.xml",
+                "https://blog.google/rss/",
+                "https://android-developers.googleblog.com/atom.xml",
+                "https://security.googleblog.com/feeds/posts/default?alt=rss",
+                "https://apple.com/newsroom/rss-feed.rss",
+                "https://about.fb.com/news/feed/",
+                "https://instagram-engineering.com/feed",
+            ],
         }
 
         self.system_instr = (
@@ -242,31 +290,16 @@ class TechBot:
             "لا تضع روابط إلا رابط المصدر مرة واحدة فقط في آخر تغريدة كسطر يبدأ بـ 'المصدر:'.\n"
         )
 
-        self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
-        self.x = tweepy.Client(
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True,
-        )
-
         self.state = self._load_state()
-
         logging.info("📌 Profile Checklist (يدوي): Bio واضح + Pin أفضل ثريد + Banner وعد قيمة")
 
-    # ----------------------------
-    # Env
-    # ----------------------------
     def _require_env(self):
         needed = ["OPENROUTER_API_KEY", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]
         missing = [k for k in needed if not os.getenv(k)]
         if missing:
             raise EnvironmentError(f"Missing env vars: {', '.join(missing)}")
 
-    # ----------------------------
-    # State & Audit
-    # ----------------------------
+    # ---------- state ----------
     def _load_state(self):
         if os.path.exists(STATE_FILE):
             try:
@@ -291,6 +324,18 @@ class TechBot:
         s.setdefault("poll_pillar_index", 0)
         s.setdefault("poll_perf", {})
 
+        s.setdefault("last_mention_id", None)
+        s.setdefault("replied_to_ids", [])
+        s.setdefault("recent_reply_hashes", [])
+        s.setdefault("reply_user_cooldown", {})
+        s.setdefault("reply_times_1h", [])
+        s.setdefault("reply_day_key", None)
+        s.setdefault("replies_today", 0)
+        s.setdefault("replies_today_by_user", {})
+        s.setdefault("opt_out_users", [])
+        s.setdefault("reply_kill_until", None)
+        s.setdefault("errors_last_run", 0)
+
         return s
 
     def _save_state(self):
@@ -305,9 +350,7 @@ class TechBot:
             "payload": payload,
         })
 
-    # ----------------------------
-    # Guards
-    # ----------------------------
+    # ---------- guards ----------
     def _month_key(self):
         now = datetime.now(timezone.utc)
         return f"{now.year}-{now.month:02d}"
@@ -339,684 +382,14 @@ class TechBot:
         self.state["reads_this_month"] += n
         self._save_state()
 
-    def _can_post_15m(self, n=1):
+    def _prune_post_times_15m(self):
         self._ensure_month()
         now = time.time()
-        w = now - 15*60
+        w = now - 15 * 60
         self.state["post_times_15m"] = [t for t in self.state["post_times_15m"] if t >= w]
         self._save_state()
+
+    def _can_post_15m(self, n=1):
+        self._prune_post_times_15m()
         return len(self.state["post_times_15m"]) + n <= POSTS_PER_15MIN_SOFT
 
-    def _mark_post_15m(self, n=1):
-        now = time.time()
-        self.state["post_times_15m"].extend([now] * n)
-        self.state["post_times_15m"] = self.state["post_times_15m"][-400:]
-        self._save_state()
-
-    def _automation_guard(self, context: str) -> bool:
-        if BLOCK_TREND_JACKING and ("ترند" in context or "trend" in context.lower()):
-            logging.info("🛑 منع: ترند (Automation compliance).")
-            return False
-        return True
-
-    # ----------------------------
-    # Formatting & CTA
-    # ----------------------------
-    def _wrap_lines(self, text: str, max_len: int = 60) -> str:
-        words = (text or "").split()
-        if not words:
-            return ""
-        lines, cur = [], []
-        cur_len = 0
-        for w in words:
-            add = len(w) + (1 if cur else 0)
-            if cur_len + add > max_len:
-                lines.append(" ".join(cur))
-                cur = [w]
-                cur_len = len(w)
-            else:
-                cur.append(w)
-                cur_len += add
-        if cur:
-            lines.append(" ".join(cur))
-        return "\n".join(lines)
-
-    def _readability(self, text: str) -> str:
-        parts = [p.strip() for p in (text or "").splitlines() if p.strip()]
-        if not parts:
-            return (text or "").strip()
-        wrapped = [self._wrap_lines(p, 60) for p in parts]
-        out = "\n".join(wrapped)
-        out = re.sub(r"\n{3,}", "\n\n", out).strip()
-        return out
-
-    def _smart_cta(self, pillar=None) -> str:
-        pool = [
-            "تحبها كخطوات ولا كقائمة أدوات؟",
-            "قد واجهت المشكلة هذه؟ إيش كان أصعب جزء؟",
-            "تحب مثال عملي على بيئتك؟",
-            "أي خيار يناسب شغلك أكثر؟",
-            "تبغاني أبسطها أكثر ولا كذا واضحة؟",
-        ]
-        return random.choice(pool)
-
-    def _ensure_cta(self, text: str, pillar=None) -> str:
-        if "؟" not in text and "?" not in text:
-            return text.rstrip() + "\n" + self._smart_cta(pillar)
-        return text
-
-    # ----------------------------
-    # Blurb + injection
-    # ----------------------------
-    def _make_blurb(self, title: str, summary: str) -> str:
-        prompt = (
-            "اكتب نبذة قصيرة جدًا (سطر واحد أو سطرين) تبدأ بـ 'نبذة:'\n"
-            "وتحتوي 'مثال سريع:' يوضح الفكرة بمثال عملي صغير جدًا.\n"
-            "بدون روابط، بدون هاشتاقات، بدون أرقام.\n"
-            "لغة ودّية وواضحة.\n\n"
-            f"العنوان: {title}\n"
-            f"الملخص: {summary}\n"
-        )
-        resp = self.ai.chat.completions.create(
-            model="qwen/qwen-2.5-72b-instruct",
-            messages=[
-                {"role": "system", "content": "سطر/سطرين فقط. بدون أرقام/روابط/هاشتاقات."},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        blurb = resp.choices[0].message.content.strip()
-        blurb = re.sub(URL_RE, "", blurb)
-        blurb = re.sub(DIGIT_RE, "", blurb).strip()
-        if not blurb.startswith("نبذة:"):
-            blurb = "نبذة: " + blurb
-        if "مثال" not in blurb:
-            blurb = blurb.rstrip(" .") + " — مثال سريع: طبّقها على جزء صغير."
-        if len(blurb) > 170:
-            blurb = blurb[:169].rstrip() + "…"
-        return blurb
-
-    def _prepend_blurb(self, tweets, blurb: str, soft_limit=220):
-        if not tweets:
-            return tweets
-        if "نبذة:" in tweets[0]:
-            return tweets
-        new_first = (tweets[0].strip() + "\n" + blurb).strip()
-        if len(new_first) > soft_limit:
-            new_first = new_first[:soft_limit - 1].rstrip() + "…"
-        tweets[0] = new_first
-        return tweets
-
-    def _inject_poll_prefix(self, tweets):
-        if not tweets:
-            return tweets
-        if "نبذة:" in tweets[0] and "حسب تصويتكم" not in tweets[0]:
-            tweets[0] = re.sub(r"\nنبذة:", "\nحسب تصويتكم 👇\nنبذة:", tweets[0], count=1)
-        return tweets
-
-    # ----------------------------
-    # RSS
-    # ----------------------------
-    def _fetch_url(self, url, timeout=12):
-        req = Request(url, headers={"User-Agent": "TechExpertBot/1.0"})
-        with urlopen(req, timeout=timeout) as r:
-            return r.read()
-
-    def _strip_html(self, s: str) -> str:
-        s = re.sub(r"<[^>]+>", " ", s or "")
-        s = re.sub(r"\s{2,}", " ", s).strip()
-        return s
-
-    def _parse_feed(self, xml_bytes: bytes):
-        items = []
-        try:
-            root = ET.fromstring(xml_bytes)
-        except Exception:
-            return items
-
-        if "rss" in root.tag.lower():
-            ch = root.find("channel")
-            if ch is None:
-                return items
-            for it in ch.findall("item"):
-                items.append({
-                    "title": self._strip_html(it.findtext("title") or ""),
-                    "link": (it.findtext("link") or "").strip(),
-                    "summary": self._strip_html(it.findtext("description") or ""),
-                })
-            return items
-
-        ns = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
-        for e in root.findall(f"{ns}entry"):
-            link = ""
-            for l in e.findall(f"{ns}link"):
-                if l.attrib.get("rel", "alternate") == "alternate":
-                    link = l.attrib.get("href", "")
-                    break
-            items.append({
-                "title": self._strip_html(e.findtext(f"{ns}title") or ""),
-                "link": link.strip(),
-                "summary": self._strip_html(e.findtext(f"{ns}summary") or e.findtext(f"{ns}content") or ""),
-            })
-        return items
-
-    def _get_source_item(self, pillar: str, keyword: str = None):
-        feeds = self.feeds.get(pillar, [])
-        if not feeds:
-            return None
-        kw = (keyword or "").lower().strip()
-        random.shuffle(feeds)
-        for feed_url in feeds:
-            try:
-                items = self._parse_feed(self._fetch_url(feed_url))
-                if kw:
-                    for it in items[:50]:
-                        blob = (it["title"] + " " + it["summary"]).lower()
-                        if kw in blob and it["link"] and it["link"] not in self.state["used_links"]:
-                            return it
-                for it in items[:25]:
-                    if it["link"] and it["link"] not in self.state["used_links"]:
-                        return it
-            except (HTTPError, URLError, TimeoutError):
-                continue
-            except Exception:
-                continue
-        return None
-
-    # ----------------------------
-    # Credibility gate
-    # ----------------------------
-    def _credibility_gate(self, tweets, source_link: str, source_text: str):
-        joined = "\n".join(tweets)
-        urls = URL_RE.findall(joined)
-        for u in urls:
-            if u.rstrip(").,]") != source_link:
-                return False, f"رابط غير مسموح: {u}"
-        if source_link not in joined:
-            return False, "رابط المصدر غير موجود"
-        out_nums = set(DIGIT_RE.findall(joined))
-        src_nums = set(DIGIT_RE.findall(source_text or ""))
-        if out_nums - src_nums:
-            return False, "أرقام غير مدعومة بالمصدر"
-        return True, "ok"
-
-    # ----------------------------
-    # Keyword seed
-    # ----------------------------
-    def _keyword_seed(self, pillar: str, level: str):
-        try:
-            cfg = POLL_CONFIG[pillar]["levels"][level]
-            opt = cfg["options"][0]
-            kws = cfg.get("keywords", {}).get(opt, [])
-            return kws[0] if kws else None
-        except Exception:
-            return None
-
-    # ----------------------------
-    # Generate content
-    # ----------------------------
-    def _generate_thread(self, pillar: str, item: dict):
-        prompt = (
-            f"اكتب Thread عربي تقني عن: {pillar} اعتمادًا على المصدر فقط.\n"
-            f"افصل بين التغريدات بهذا الفاصل حرفيًا: {THREAD_DELIM}\n"
-            "شروط صارمة:\n"
-            "- 2 إلى 5 تغريدات.\n"
-            "- كل تغريدة <= 240 حرف.\n"
-            "- لا روابط إلا رابط المصدر مرة واحدة في آخر تغريدة (المصدر: ...)\n"
-            "- لا هاشتاقات.\n\n"
-            f"العنوان: {item['title']}\n"
-            f"الملخص: {item['summary']}\n"
-            f"الرابط: {item['link']}\n"
-        )
-        resp = self.ai.chat.completions.create(
-            model="qwen/qwen-2.5-72b-instruct",
-            messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-        )
-        raw = resp.choices[0].message.content.strip()
-        parts = [p.strip() for p in raw.split(THREAD_DELIM) if p.strip()]
-        if not parts:
-            parts = [raw]
-        parts = [self._readability(self._ensure_cta(p, pillar)) for p in parts]
-        if item["link"] and item["link"] not in "\n".join(parts):
-            parts[-1] = parts[-1].rstrip() + f"\nالمصدر: {item['link']}"
-        return parts
-
-    def _generate_tip(self, pillar: str, item: dict):
-        prompt = (
-            "اكتب تغريدة واحدة Tip عربية ودّية:\n"
-            "- Hook + Tip + مثال سريع\n"
-            "- سؤال لطيف\n"
-            "- ضع (المصدر:) آخر سطر\n"
-            "- لا أرقام/هاشتاقات\n\n"
-            f"العنوان: {item['title']}\n"
-            f"الملخص: {item['summary']}\n"
-            f"الرابط: {item['link']}\n"
-        )
-        resp = self.ai.chat.completions.create(
-            model="qwen/qwen-2.5-72b-instruct",
-            messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}],
-        )
-        t = self._readability(self._ensure_cta(resp.choices[0].message.content.strip(), pillar))
-        if item["link"] and item["link"] not in t:
-            t = t.rstrip() + f"\nالمصدر: {item['link']}"
-        t = re.sub(DIGIT_RE, "", t)
-        return t[:240]
-
-    # ----------------------------
-    # Thread post-processing
-    # ----------------------------
-    def _add_numbering(self, tweets):
-        n = len(tweets)
-        if n <= 1:
-            return [tweets[0][:TWEET_LIMIT]]
-        out = []
-        for i, t in enumerate(tweets, start=1):
-            prefix = f"{i}/{n} "
-            max_len = TWEET_LIMIT - len(prefix)
-            t = t.strip()
-            if len(t) > max_len:
-                t = t[:max_len - 1].rstrip() + "…"
-            out.append(prefix + t)
-        return out
-
-    def _apply_hashtags_last_only(self, tweets):
-        tags = self.default_hashtags[: self.max_hashtags]
-        tags = tags[:2]
-        tag_line = " ".join(tags).strip()
-        last = tweets[-1].rstrip() + f"\n\n{tag_line}"
-        if self.signature:
-            last = last.strip() + f" {self.signature}"
-        tweets[-1] = last[:TWEET_LIMIT]
-        return tweets
-
-    # ----------------------------
-    # Metrics (score)
-    # ----------------------------
-    def _score_tweet(self, tweet_id: str) -> int:
-        if not tweet_id:
-            return 0
-        if not self._can_read_monthly(1):
-            return 0
-        try:
-            tw = self.x.get_tweet(id=tweet_id, tweet_fields=["public_metrics"], user_auth=True)
-            self._mark_read_monthly(1)
-            m = tw.data.public_metrics
-            likes = int(m.get("like_count", 0))
-            replies = int(m.get("reply_count", 0))
-            rts = int(m.get("retweet_count", 0))
-            quotes = int(m.get("quote_count", 0))
-            return replies * 3 + quotes * 3 + rts * 2 + likes
-        except Exception:
-            return 0
-
-    # ----------------------------
-    # Publish
-    # ----------------------------
-    def _publish_tweet(self, text: str, in_reply_to: str = None, content_type: str = None, pillar: str = None, level: str = None):
-        if not self._can_post_monthly(1) or not self._can_post_15m(1):
-            return None
-
-        if DRY_RUN:
-            logging.info(f"[DRY_RUN] Tweet:\n{text}\n")
-            self._mark_post_monthly(1)
-            self._mark_post_15m(1)
-            tid = f"dry_{random.randint(1000,9999)}"
-            self._audit("posted", {"pillar": pillar, "level": level, "score": 0, "tweet_id": tid}, content_type=content_type)
-            return tid
-
-        if in_reply_to:
-            resp = self.x.create_tweet(text=text, in_reply_to_tweet_id=in_reply_to, user_auth=True)
-        else:
-            resp = self.x.create_tweet(text=text, user_auth=True)
-
-        self._mark_post_monthly(1)
-        self._mark_post_15m(1)
-        tid = resp.data["id"]
-        self._audit("posted", {"pillar": pillar, "level": level, "score": 0, "tweet_id": tid}, content_type=content_type)
-        return tid
-
-    def _publish_thread(self, tweets, pillar: str, level: str):
-        needed = len(tweets)
-        if not self._can_post_monthly(needed) or not self._can_post_15m(needed):
-            return []
-        prev = None
-        ids = []
-        for t in tweets:
-            tid = self._publish_tweet(t, in_reply_to=prev, content_type="thread", pillar=pillar, level=level)
-            if not tid:
-                break
-            prev = tid
-            ids.append(tid)
-            time.sleep(1.2)
-
-        if ids and not DRY_RUN:
-            time.sleep(max(0, METRICS_DELAY_SECONDS))
-            sc = self._score_tweet(ids[0])
-            self._audit("thread_scored", {"pillar": pillar, "level": level, "score": sc, "tweet_id": ids[0]}, content_type="thread")
-
-        return ids
-
-    # ----------------------------
-    # Poll learning
-    # ----------------------------
-    def _init_perf_bucket(self, pillar: str):
-        self.state.setdefault("poll_perf", {})
-        self.state["poll_perf"].setdefault(pillar, {})
-        for lvl in LEVELS:
-            self.state["poll_perf"][pillar].setdefault(lvl, {"polls": 0, "eng_sum": 0, "reply_sum": 0})
-        self._save_state()
-
-    def _poll_has_ended(self) -> bool:
-        last = self.state.get("last_poll_at")
-        if not last:
-            return False
-        try:
-            last_dt = datetime.fromisoformat(last)
-        except Exception:
-            return False
-        return (datetime.now(timezone.utc) - last_dt).total_seconds() >= POLL_DURATION_MINUTES * 60
-
-    def _classify_level_from_text(self, text: str) -> str:
-        t = (text or "").lower()
-        beginner_kw = ["وش يعني", "من وين أبدأ", "مبتدئ", "basics", "what is", "beginner"]
-        advanced_kw = ["rag", "vector", "sre", "latency", "kubernetes", "orchestration", "scalability"]
-        intermediate_kw = ["cost", "debug", "testing", "security", "performance", "refactor"]
-
-        score = {"beginner": 0, "intermediate": 0, "advanced": 0}
-        for k in beginner_kw:
-            if k in t:
-                score["beginner"] += 2
-        for k in advanced_kw:
-            if k in t:
-                score["advanced"] += 2
-        for k in intermediate_kw:
-            if k in t:
-                score["intermediate"] += 1
-
-        best = max(score, key=lambda k: score[k])
-        return best if score[best] else "intermediate"
-
-    def _infer_level_from_poll_replies(self, poll_id: str) -> str:
-        if not self._can_read_monthly(1):
-            return "intermediate"
-        try:
-            query = f"conversation_id:{poll_id} -is:retweet"
-            res = self.x.search_recent_tweets(query=query, max_results=50, user_auth=True)
-            self._mark_read_monthly(1)
-            if not res or not res.data:
-                return "intermediate"
-            votes = {"beginner": 0, "intermediate": 0, "advanced": 0}
-            for tw in res.data:
-                votes[self._classify_level_from_text(tw.text)] += 1
-            best = max(votes, key=lambda k: votes[k])
-            return best if votes[best] else "intermediate"
-        except Exception:
-            return "intermediate"
-
-    def _update_poll_learning(self):
-        if not self._poll_has_ended() or self.state.get("last_poll_processed"):
-            return
-        poll_id = self.state.get("last_poll_id")
-        pillar = self.state.get("last_poll_pillar")
-        used_level = self.state.get("last_poll_level")
-        if not poll_id or not pillar or not used_level:
-            return
-
-        self._init_perf_bucket(pillar)
-        inferred = self._infer_level_from_poll_replies(poll_id)
-        score = self._score_tweet(poll_id)
-
-        self.state["poll_perf"][pillar][used_level]["polls"] += 1
-        self.state["poll_perf"][pillar][used_level]["eng_sum"] += score
-        self.state["poll_perf"][pillar][inferred]["reply_sum"] += 1
-
-        self.state["last_poll_processed"] = True
-        self._save_state()
-        self._audit("poll_learned", {"pillar": pillar, "level": used_level, "score": score, "tweet_id": poll_id}, content_type="poll")
-
-    def _choose_level_for_pillar(self, pillar: str) -> str:
-        self._init_perf_bucket(pillar)
-        perf = self.state["poll_perf"][pillar]
-        avgs = {lvl: perf[lvl]["eng_sum"] / max(1, perf[lvl]["polls"]) for lvl in LEVELS}
-        best = max(avgs, key=lambda k: avgs[k])
-        reply_pref = max(LEVELS, key=lambda k: perf[k]["reply_sum"])
-        r = random.random()
-        if r < 0.70:
-            return best
-        elif r < 0.90:
-            return reply_pref
-        return random.choice(LEVELS)
-
-    # ----------------------------
-    # Poll posting
-    # ----------------------------
-    def _should_run_poll(self) -> bool:
-        if not POLL_MODE:
-            return False
-        last = self.state.get("last_poll_at")
-        if not last:
-            return True
-        try:
-            last_dt = datetime.fromisoformat(last)
-        except Exception:
-            return True
-        return (datetime.now(timezone.utc) - last_dt).days >= POLL_EVERY_DAYS
-
-    def _pick_poll_pillar(self) -> str:
-        pillars = list(POLL_CONFIG.keys())
-        idx = int(self.state.get("poll_pillar_index", 0)) % len(pillars)
-        pillar = pillars[idx]
-        self.state["poll_pillar_index"] = (idx + 1) % len(pillars)
-        self._save_state()
-        return pillar
-
-    def _post_poll(self):
-        if not self._automation_guard("poll"):
-            return None
-        pillar = self._pick_poll_pillar()
-        level = self._choose_level_for_pillar(pillar)
-        cfg = POLL_CONFIG[pillar]["levels"][level]
-        question = POLL_CONFIG[pillar]["question"]
-        options = cfg["options"][:4]
-
-        if not self._can_post_monthly(1) or not self._can_post_15m(1):
-            return None
-
-        if DRY_RUN:
-            logging.info(f"[DRY_RUN] Poll {pillar}/{level}: {question} | {options}")
-            poll_id = f"dry_poll_{random.randint(1000,9999)}"
-        else:
-            resp = self.x.create_tweet(text=question, poll_options=options, poll_duration_minutes=POLL_DURATION_MINUTES, user_auth=True)
-            poll_id = resp.data["id"]
-            self._mark_post_monthly(1)
-            self._mark_post_15m(1)
-
-        self.state["last_poll_at"] = utcnow_iso()
-        self.state["last_poll_id"] = poll_id
-        self.state["last_poll_pillar"] = pillar
-        self.state["last_poll_level"] = level
-        self.state["last_poll_processed"] = False
-        self._save_state()
-
-        self._audit("poll_posted", {"pillar": pillar, "level": level, "score": 0, "tweet_id": poll_id}, content_type="poll")
-        return poll_id
-
-    # ----------------------------
-    # Dashboard & recommendation
-    # ----------------------------
-    def _smart_recommendation(self, days: int = 14):
-        if not os.path.exists(AUDIT_LOG):
-            return None
-        cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-        pillar_scores, level_scores, type_scores = {}, {}, {}
-        with open(AUDIT_LOG, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    r = json.loads(line)
-                except Exception:
-                    continue
-                ts = datetime.fromisoformat(r["ts"]).timestamp()
-                if ts < cutoff:
-                    continue
-                payload = r.get("payload", {})
-                score = int(payload.get("score", 0))
-                pillar = payload.get("pillar")
-                level = payload.get("level")
-                ctype = r.get("content_type")
-                if pillar:
-                    pillar_scores.setdefault(pillar, []).append(score)
-                if level:
-                    level_scores.setdefault(level, []).append(score)
-                if ctype:
-                    type_scores.setdefault(ctype, []).append(score)
-
-        def best_avg(d):
-            if not d:
-                return None
-            return max(d.items(), key=lambda x: sum(x[1]) / max(1, len(x[1])))[0]
-
-        return {
-            "pillar": best_avg(pillar_scores),
-            "level": best_avg(level_scores),
-            "content_type": best_avg(type_scores),
-            "days": days,
-        }
-
-    def show_dashboard(self, days: int = 30):
-        print(f"\n📊 DASHBOARD (آخر {days} يوم)")
-        print(f"- posts_this_month: {self.state.get('posts_this_month')}")
-        print(f"- reads_this_month: {self.state.get('reads_this_month')}")
-        print(f"- last_poll_pillar: {self.state.get('last_poll_pillar')}")
-        print(f"- last_poll_level: {self.state.get('last_poll_level')}")
-        reco = self._smart_recommendation(days=14)
-        if reco and any(reco.values()):
-            print("\n🧠 توصية ذكية:")
-            print(f"- المحور: {reco.get('pillar')}")
-            print(f"- المستوى: {reco.get('level')}")
-            print(f"- النوع: {reco.get('content_type')}")
-
-    def send_recommendation_email(self, days: int = 14):
-        if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM and RECOMMENDATION_EMAIL_TO):
-            logging.info("📭 SMTP غير مكتمل — تم تجاوز الإرسال.")
-            return
-        reco = self._smart_recommendation(days=days) or {}
-        pillar = reco.get("pillar") or "الذكاء الاصطناعي"
-        level = reco.get("level") or "intermediate"
-        ctype = reco.get("content_type") or "thread"
-        subject = "🧠 توصية المحتوى الذكية – الأسبوع القادم"
-        body = f"""مرحبًا 👋
-
-بناءً على تحليل آخر {days} يوم:
-
-✅ المحور الأقوى: {pillar}
-✅ مستوى الجمهور الأنسب: {level}
-✅ نوع المحتوى الأفضل: {ctype}
-
-📌 الاقتراح:
-انشر {ctype} عن "{pillar}" موجّه لمستوى "{level}".
-
-— Tech Bot
-"""
-        import smtplib
-        from email.message import EmailMessage
-        msg = EmailMessage()
-        msg["From"] = SMTP_FROM
-        msg["To"] = RECOMMENDATION_EMAIL_TO
-        msg["Subject"] = subject
-        msg.set_content(body)
-        try:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-                s.starttls()
-                s.login(SMTP_USER, SMTP_PASSWORD)
-                s.send_message(msg)
-            self._audit("email_sent", {"to": RECOMMENDATION_EMAIL_TO, "score": 0}, content_type="email")
-            logging.info("📨 تم إرسال التوصية بالبريد.")
-        except Exception as e:
-            self._audit("email_failed", {"error": str(e), "score": 0}, content_type="email")
-            logging.error(f"❌ فشل إرسال البريد: {e}")
-
-    # ----------------------------
-    # Content mode
-    # ----------------------------
-    def _content_mode(self) -> str:
-        if POLL_MODE and self._should_run_poll():
-            return "poll"
-        if TIP_MODE:
-            wd = datetime.now(timezone.utc).weekday()
-            if wd in (1, 3):
-                return "tip"
-        return "thread"
-
-    # ----------------------------
-    # Run
-    # ----------------------------
-    def run(self):
-        self._update_poll_learning()
-
-        if SHOW_DASHBOARD:
-            self.show_dashboard(days=30)
-            return
-
-        if SEND_RECOMMENDATION:
-            self.send_recommendation_email(days=14)
-            return
-
-        mode = self._content_mode()
-        if mode == "poll":
-            self._post_poll()
-            return
-
-        pillar = self.state.get("last_poll_pillar") or random.choice(list(self.content_pillars.keys()))
-        level = self.state.get("last_poll_level") or "intermediate"
-        keyword = self._keyword_seed(pillar, level)
-
-        item = self._get_source_item(pillar, keyword=keyword) if SOURCE_MODE else None
-        if not item:
-            logging.info("⚠️ لا يوجد عنصر RSS مناسب.")
-            return
-
-        source_link = item["link"]
-        source_text = (item["title"] + " " + item["summary"]).strip()
-
-        if mode == "tip":
-            tip = self._generate_tip(pillar, item)
-            ok, _ = self._credibility_gate([tip], source_link, source_text)
-            if not ok:
-                logging.info("🛑 Tip blocked by credibility gate")
-                return
-            tags = " ".join(self.default_hashtags[:2])
-            tip_final = (tip.strip() + f"\n\n{tags}").strip()[:TWEET_LIMIT]
-            tid = self._publish_tweet(tip_final, content_type="tip", pillar=pillar, level=level)
-            if tid and not DRY_RUN:
-                time.sleep(max(0, METRICS_DELAY_SECONDS))
-                sc = self._score_tweet(tid)
-                self._audit("tip_scored", {"pillar": pillar, "level": level, "score": sc, "tweet_id": tid}, content_type="tip")
-            self.state["used_links"].append(source_link)
-            self.state["used_links"] = self.state["used_links"][-200:]
-            self._save_state()
-            return
-
-        tweets = self._generate_thread(pillar, item)
-        ok, _ = self._credibility_gate(tweets, source_link, source_text)
-        if not ok:
-            logging.info("🛑 Thread blocked by credibility gate")
-            return
-
-        blurb = self._make_blurb(item["title"], item["summary"])
-        tweets = self._prepend_blurb(tweets, blurb, soft_limit=220)
-
-        if self.state.get("last_poll_id"):
-            tweets = self._inject_poll_prefix(tweets)
-
-        tweets = [self._readability(t) for t in tweets]
-        tweets = self._add_numbering(tweets)
-        tweets = self._apply_hashtags_last_only(tweets)
-
-        self._publish_thread(tweets, pillar=pillar, level=level)
-
-        self.state["used_links"].append(source_link)
-        self.state["used_links"] = self.state["used_links"][-200:]
-        self._save_state()
-
-
-if __name__ == "__main__":
-    TechBot().run()
