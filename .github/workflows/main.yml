@@ -28,16 +28,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # استرجاع/حفظ الحالة بين التشغيلات (state.json + audit_log.jsonl)
+      # ✅ إنشاء ملفات الحالة إن لم تكن موجودة (حل التحذير)
+      - name: Ensure state files exist
+        working-directory: tech-ai-bot
+        run: |
+          touch state.json
+          touch audit_log.jsonl
+
+      # ✅ Cache صحيح (داخل working-directory)
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
           path: |
             tech-ai-bot/state.json
             tech-ai-bot/audit_log.jsonl
-          key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
+          key: bot-state-${{ github.ref_name }}
           restore-keys: |
-            bot-state-${{ github.ref_name }}-
+            bot-state-
 
       - name: Syntax check
         working-directory: tech-ai-bot
@@ -80,7 +87,7 @@ jobs:
         run: |
           python main.py
 
-      # رفع الحالة والسجلات كـ Artifacts دائمًا
+      # ✅ Artifacts ستُرفع الآن بدون تحذير
       - name: Upload bot artifacts (logs/state)
         if: always()
         uses: actions/upload-artifact@v4
