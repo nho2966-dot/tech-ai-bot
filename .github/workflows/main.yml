@@ -1,4 +1,4 @@
-name: Tech AI Bot - Subfolder Configuration
+name: Tech AI Bot - Production
 
 on:
   workflow_dispatch: {}
@@ -7,13 +7,11 @@ on:
 
 concurrency:
   group: tech-ai-bot
-  cancel-in-progress: true
+  cancel-in-progress: false # جعل العمليات تنتظر دورها بدل الإلغاء
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-
-    # ✅ أخبرنا النظام أن العمل كله سيتم داخل مجلد tech-ai-bot
     defaults:
       run:
         working-directory: tech-ai-bot
@@ -21,8 +19,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: . # جلب المستودع كاملاً للمجلد الحالي للـ runner
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,26 +28,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install tweepy openai; fi
-
-      - name: Ensure state files exist
-        run: |
-          touch state.json
-          touch audit_log.jsonl
+          pip install tweepy openai
 
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
-          # ✅ المسار هنا نسبي للمجلد الفرعي بفضل defaults أعلاه
           path: |
             tech-ai-bot/state.json
             tech-ai-bot/audit_log.jsonl
           key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-state-${{ github.ref_name }}-
-
-      - name: Syntax check
-        run: python -m py_compile main.py
 
       - name: Run bot
         env:
@@ -63,12 +50,11 @@ jobs:
           SIGNATURE: "+#"
         run: python main.py
 
-      - name: Upload bot artifacts (logs/state)
+      - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-artifacts
-          # ✅ نرفع الملفات من داخل المجلد الفرعي
           path: |
             tech-ai-bot/state.json
             tech-ai-bot/audit_log.jsonl
