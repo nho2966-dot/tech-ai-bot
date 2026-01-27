@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 class TechAgentUltimate:
     def __init__(self):
-        logging.info("=== TechAgent Pro v74.0 [Structure Fixed] ===")
+        logging.info("=== TechAgent Pro v74.1 [Syntax Fixed] ===")
         
         # إعداد الاتصال
         self.ai_client = OpenAI(
@@ -50,9 +50,7 @@ class TechAgentUltimate:
     def _fix_text(self, text):
         """إصلاح النص العربي المقطع والمعكوس"""
         if AR_SUPPORT:
-            # إعادة تشكيل الحروف لتتصل ببعضها
             reshaped_text = arabic_reshaper.reshape(text)
-            # تصحيح الاتجاه من اليمين لليسار
             return get_display(reshaped_text)
         return text
 
@@ -70,7 +68,7 @@ class TechAgentUltimate:
                 font = ImageFont.truetype(font_path, 40)
                 font_bold = ImageFont.truetype(font_path, 60)
             else:
-                logging.warning("⚠️ ملف الخط font.ttf غير موجود في المسار!")
+                logging.warning("⚠️ ملف الخط font.ttf غير موجود!")
                 font = font_bold = ImageFont.load_default()
 
             # رسم العنوان
@@ -86,5 +84,53 @@ class TechAgentUltimate:
                     d.text((width - 80, y_pos), self._fix_text(w_line.strip()), fill=(241, 245, 249), font=font, anchor="ra")
                     y_pos += 75
             
-            # إضافة المصدر
-            source_txt = self._fix
+            # إضافة المصدر (تم تصحيح السطر الذي سبب الخطأ)
+            source_txt = self._fix_text("المصدر: وحدة ذكاء TechAgent v74.1")
+            d.text((width - 80, y_pos + 80), source_txt, fill=(148, 163, 184), font=font, anchor="ra")
+            
+            save_path = "tech_output.png"
+            img.save(save_path)
+            return save_path
+        except Exception as e:
+            logging.error(f"❌ خطأ في إنشاء الصورة: {e}")
+            return None
+
+    def _post(self):
+        try:
+            topics = [
+                "مستقبل الـ NPU في 2026", 
+                "صراع كروت الشاشة RTX 5090", 
+                "الذكاء الاصطناعي التوليدي في البرمجة"
+            ]
+            topic = random.choice(topics)
+            
+            prompt = f"اكتب تغريدة تسويقية بأسلوب Hook مثير عن {topic} مع مصطلحات إنجليزية وسؤال جدلي."
+            
+            resp = self.ai_client.chat.completions.create(
+                model="qwen/qwen-2.5-72b-instruct",
+                messages=[{"role": "system", "content": self.system_instr}, {"role": "user", "content": prompt}]
+            )
+            content = resp.choices[0].message.content.strip()
+            
+            image_path = self._create_visual(content)
+            
+            if image_path and os.path.exists(image_path):
+                media = self.api_v1.media_upload(image_path)
+                self.client_v2.create_tweet(
+                    text=f"🚀 جديدنا اليوم من TechAgent..\n\n{content[:150]}...\n\n#تقنية #2026 +#",
+                    media_ids=[media.media_id]
+                )
+                logging.info("✅ تم النشر مع الصورة بنجاح!")
+            else:
+                self.client_v2.create_tweet(text=f"{content}\n\n+#")
+                logging.info("✅ تم النشر نصياً فقط!")
+
+        except Exception as e:
+            logging.error(f"❌ فشل النشر: {e}")
+
+    def run(self):
+        self._post()
+
+if __name__ == "__main__":
+    agent = TechAgentUltimate()
+    agent.run()
