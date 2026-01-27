@@ -1,4 +1,4 @@
-name: Tech AI Bot - Auto Every 6h + Manual (Stateful)
+name: Tech AI Bot - Subfolder Configuration
 
 on:
   workflow_dispatch: {}
@@ -13,15 +13,16 @@ jobs:
   build-and-run:
     runs-on: ubuntu-latest
 
-    # ✅ تم تصحيح المسار ليكون المجلد الرئيسي للمستودع
-    # إذا كان كود البوت موجوداً مباشرة في الـ root، احذف هذا السطر أو اجعله "."
+    # ✅ أخبرنا النظام أن العمل كله سيتم داخل مجلد tech-ai-bot
     defaults:
       run:
-        working-directory: .
+        working-directory: tech-ai-bot
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          path: . # جلب المستودع كاملاً للمجلد الحالي للـ runner
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,9 +42,10 @@ jobs:
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
+          # ✅ المسار هنا نسبي للمجلد الفرعي بفضل defaults أعلاه
           path: |
-            state.json
-            audit_log.jsonl
+            tech-ai-bot/state.json
+            tech-ai-bot/audit_log.jsonl
           key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-state-${{ github.ref_name }}-
@@ -58,8 +60,6 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          DRY_RUN: "0"
-          MAX_REPLIES_PER_RUN: "2"
           SIGNATURE: "+#"
         run: python main.py
 
@@ -68,6 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bot-artifacts
+          # ✅ نرفع الملفات من داخل المجلد الفرعي
           path: |
-            state.json
-            audit_log.jsonl
+            tech-ai-bot/state.json
+            tech-ai-bot/audit_log.jsonl
