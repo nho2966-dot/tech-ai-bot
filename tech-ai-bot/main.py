@@ -1,22 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Tech AI Bot (X) — Basic Plan — Final main.py (with Daily Tech Tips pillar + poll + safety)
-
-What this bot does
-- Posts:
-  - RSS-driven Threads (SOURCE_MODE) with credibility gate (no extra URLs, no unsupported numbers)
-  - Tip posts (short, practical) on Tue/Thu by default
-  - A dedicated pillar: "نصائح تقنية يومية" is biased to Tip format (daily practical value)
-- Poll mode:
-  - per-pillar + per-level polls; learns which audience level performs better
-  - includes a dedicated poll for "نصائح تقنية يومية" (AI daily / smart devices / social / privacy)
-- Replies:
-  - replies to mentions only
-  - strong anti-duplication + safety throttles + quiet hours + opt-out + kill-switch
-- Dashboard + smart recommendation + optional email of recommendation (SMTP)
-
-Required env/secrets:
-  OPENROUTER_API_KEY
-  X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
+"""
+Tech AI Bot (X) — Final main.py
+- RSS threads + tips
+- Daily Tech Tips pillar + Poll
+- Topic of the Day: daily tip guided by last poll actual votes (winner option)
+- Mention replies with anti-dup + safety throttles
+- State persisted to state.json + audit_log.jsonl
 """
 
 import os
@@ -82,14 +71,6 @@ DEFAULT_HASHTAGS = ["#تقنية", "#برمجة"]
 MAX_HASHTAGS = int(os.getenv("MAX_HASHTAGS", "2"))
 SIGNATURE = os.getenv("SIGNATURE", "").strip()
 
-# SMTP (optional)
-SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "")
-RECOMMENDATION_EMAIL_TO = os.getenv("RECOMMENDATION_EMAIL_TO", "")
-
 # Poll Config (includes Daily Tech Tips)
 POLL_CONFIG = {
     "الذكاء الاصطناعي": {
@@ -124,7 +105,6 @@ POLL_CONFIG = {
             },
         },
     },
-
     "الحوسبة السحابية": {
         "question": "إيش أكثر شيء يرهقك في السحابة؟ ☁️",
         "levels": {
@@ -157,7 +137,6 @@ POLL_CONFIG = {
             },
         },
     },
-
     "البرمجة": {
         "question": "إيش أكثر شيء يضيّع وقتك في البرمجة؟ 👨‍💻",
         "levels": {
@@ -190,7 +169,6 @@ POLL_CONFIG = {
             },
         },
     },
-
     "نصائح تقنية يومية": {
         "question": "وش تحب نصيحة اليوم تكون عن؟ 💡",
         "levels": {
@@ -255,7 +233,6 @@ class TechBot:
             "نصائح تقنية يومية": "نصائح عملية يومية في AI + الأجهزة الذكية + مواقع التواصل",
         }
 
-        # RSS feeds per pillar
         self.feeds = {
             "الذكاء الاصطناعي": [
                 "https://openai.com/news/rss.xml",
@@ -291,15 +268,20 @@ class TechBot:
         )
 
         self.state = self._load_state()
-        logging.info("📌 Profile Checklist (يدوي): Bio واضح + Pin أفضل ثريد + Banner وعد قيمة")
+        logging.info("📌 Profile Checklist: Bio واضح + Pin أفضل ثريد + Banner وعد قيمة")
 
+    # ----------------------------
+    # Env
+    # ----------------------------
     def _require_env(self):
         needed = ["OPENROUTER_API_KEY", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]
         missing = [k for k in needed if not os.getenv(k)]
         if missing:
             raise EnvironmentError(f"Missing env vars: {', '.join(missing)}")
 
-    # ---------- state ----------
+    # ----------------------------
+    # State & Audit
+    # ----------------------------
     def _load_state(self):
         if os.path.exists(STATE_FILE):
             try:
@@ -310,12 +292,14 @@ class TechBot:
         else:
             s = {}
 
+        # posting guards
         s.setdefault("used_links", [])
         s.setdefault("month_key", None)
         s.setdefault("posts_this_month", 0)
         s.setdefault("reads_this_month", 0)
         s.setdefault("post_times_15m", [])
 
+        # polls
         s.setdefault("last_poll_at", None)
         s.setdefault("last_poll_id", None)
         s.setdefault("last_poll_pillar", None)
@@ -324,6 +308,7 @@ class TechBot:
         s.setdefault("poll_pillar_index", 0)
         s.setdefault("poll_perf", {})
 
+        # replies
         s.setdefault("last_mention_id", None)
         s.setdefault("replied_to_ids", [])
         s.setdefault("recent_reply_hashes", [])
@@ -335,6 +320,13 @@ class TechBot:
         s.setdefault("opt_out_users", [])
         s.setdefault("reply_kill_until", None)
         s.setdefault("errors_last_run", 0)
+
+        # Topic of the Day
+        s.setdefault("tod_day_key", None)
+        s.setdefault("tod_pillar", None)
+        s.setdefault("tod_choice", None)
+        s.setdefault("tod_keywords", [])
+        s.setdefault("tod_poll_id", None)
 
         return s
 
@@ -349,47 +341,4 @@ class TechBot:
             "content_type": content_type,
             "payload": payload,
         })
-
-    # ---------- guards ----------
-    def _month_key(self):
-        now = datetime.now(timezone.utc)
-        return f"{now.year}-{now.month:02d}"
-
-    def _ensure_month(self):
-        mk = self._month_key()
-        if self.state.get("month_key") != mk:
-            self.state["month_key"] = mk
-            self.state["posts_this_month"] = 0
-            self.state["reads_this_month"] = 0
-            self.state["post_times_15m"] = []
-            self._save_state()
-
-    def _can_post_monthly(self, n=1):
-        self._ensure_month()
-        return self.state["posts_this_month"] + n <= POST_CAP_MONTHLY
-
-    def _mark_post_monthly(self, n=1):
-        self._ensure_month()
-        self.state["posts_this_month"] += n
-        self._save_state()
-
-    def _can_read_monthly(self, n=1):
-        self._ensure_month()
-        return self.state["reads_this_month"] + n <= READ_CAP_MONTHLY
-
-    def _mark_read_monthly(self, n=1):
-        self._ensure_month()
-        self.state["reads_this_month"] += n
-        self._save_state()
-
-    def _prune_post_times_15m(self):
-        self._ensure_month()
-        now = time.time()
-        w = now - 15 * 60
-        self.state["post_times_15m"] = [t for t in self.state["post_times_15m"] if t >= w]
-        self._save_state()
-
-    def _can_post_15m(self, n=1):
-        self._prune_post_times_15m()
-        return len(self.state["post_times_15m"]) + n <= POSTS_PER_15MIN_SOFT
 
