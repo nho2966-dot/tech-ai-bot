@@ -1,63 +1,55 @@
-name: Tech AI Bot - Production
+name: Tech AI Bot Final Execution
 
 on:
-  workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"
-
-concurrency:
-  group: tech-ai-bot
-  cancel-in-progress: false
+    # سيقوم البوت بالعمل كل 6 ساعات (يمكنك تعديلها)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً للتجربة
 
 jobs:
-  build-and-run:
+  run-bot:
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: tech-ai-bot   # ← المكان الصحيح حسب هيكل مشروعك
-
+    
     steps:
-
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          # هذا الخيار مهم للسماح للبوت برفع ملف state.json المحدث
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
+          cd tech-ai-bot
           python -m pip install --upgrade pip
-          pip install -r requirements.txt   # ← موجود داخل tech-ai-bot
+          pip install tweepy openai python-dotenv
 
-      - name: Restore bot state (cache)
-        uses: actions/cache@v4
-        with:
-          path: |
-            state.json
-            audit_log.jsonl
-            logs
-          key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: bot-state-${{ github.ref_name }}-
-
-      - name: Run bot
+      - name: Run Tech AI Bot
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # تأكد من تطابق أسماء الـ Secrets في إعدادات GitHub لديك
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          SIGNATURE: "+#"
-        run: python main.py   # ← main.py موجود هنا 100%
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # إعدادات إضافية حسب الكود
+          DRY_RUN: 0
+          SIGNATURE: "" # اتركها فارغة أو أضف توقيعك
+        run: |
+          cd tech-ai-bot
+          python main.py
 
-      - name: Upload bot artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-artifacts
-          path: |
-            state.json
-            audit_log.jsonl
-            logs/**
+      - name: Save Bot State and Logs
+        if: always() # لضمان حفظ اللوجز حتى لو فشل النشر
+        run: |
+          cd tech-ai-bot
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # إضافة الملفات الناتجة عن التشغيل (الحالة، اللوجز، الأوديت)
+          git add state.json audit_log.jsonl
+          # التحقق من وجود تغييرات قبل المحاولة (لتجنب فشل الأكشن إذا لم يتغير شيء)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 Update bot state and logs [skip ci]" && git push)
