@@ -3,7 +3,7 @@ name: Tech AI Bot - Production
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *" # كل 6 ساعات
 
 concurrency:
   group: tech-ai-bot
@@ -15,7 +15,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: src   # ← المسار الحقيقي الصحيح
+        working-directory: tech-ai-bot/src   # ← المجلد الصحيح كما في الصورة
 
     steps:
 
@@ -23,13 +23,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Python
+      # 2) Python setup
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3) Install dependencies (الملف في جذر المشروع)
+      # 3) Install dependencies (requirements.txt في root)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -46,7 +46,7 @@ jobs:
           key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: bot-state-${{ github.ref_name }}-
 
-      # 5) Run the bot
+      # 5) Run bot
       - name: Run bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -59,7 +59,7 @@ jobs:
 
           SIGNATURE: "+#"
 
-          # Smart Scheduling — Ultra
+          # Smart Scheduling
           SCHED_MODE: "ultra"
           LOCAL_TZ_OFFSET_MINUTES: "240"
           SLOTS_DEF: "rss=11-17;tip=19-22;video=12-15;question=15-20;poll=18-21;trending=14-18;booster=16-20"
@@ -68,7 +68,7 @@ jobs:
           ENGAGEMENT_COOLDOWN_MINUTES: "45"
           RANDOM_SKIP_CHANCE: "0.25"
 
-          # Auto‑Compliance
+          # Auto Compliance
           COMPLIANCE_MODE_ENABLED: "1"
           COMPLIANCE_MAX_POSTS_PER_DAY: "8"
           COMPLIANCE_MAX_ERRORS_PER_WINDOW: "3"
@@ -89,26 +89,26 @@ jobs:
 
           # Video
           VIDEO_ENABLED: "1"
-          VIDEO_DIR: "../web"        # ← لأننا داخل src
+          VIDEO_DIR: "../web"
           VIDEO_MAX_MB: "50"
           VIDEO_MAX_SECONDS: "75"
           VIDEO_THREAD_ENABLED: "1"
           VIDEO_THREAD_POINTS: "2"
 
-          # Labels
+          # Thread Labels
           PART_LABEL_ENABLED: "1"
           PART_LABEL_STYLE: "prefix"
           PART_LABEL_LOCALIZED: "1"
 
         run: python main.py
 
-      # 6) Artifacts
+      # 6) Upload artifacts
       - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-artifacts
           path: |
-            state.json
-            audit_log.jsonl
+            ../state.json
+            ../audit_log.jsonl
             ../logs/**
