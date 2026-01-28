@@ -1,78 +1,35 @@
-# config.yaml
-# إعدادات البوت - يُقرأ عند بداية التشغيل
-# يمكنك تغيير أي قيمة هنا دون تعديل الكود
+# .github/workflows/bot-schedule.yml
+name: Run Tech AI Bot (Scheduled)
 
-bot:
-  name: "TechExpertMasterFinal"
-  version: "v88.2 Pro Growth Edition"
-  dry_run: false
-  signature: " — تقنية عربية"               # يُضاف في آخر تغريدة (اتركه فارغًا إذا لا تريد)
-  mode: "auto"                                 # auto أو manual (يمكن تجاوزه بـ --mode)
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # كل 6 ساعات
+  workflow_dispatch:        # يدوي من واجهة GitHub
 
-api:
-  openrouter:
-    api_key_env: "OPENROUTER_API_KEY"          # اسم المتغير البيئي
-  twitter:
-    api_key_env:      "X_API_KEY"
-    api_secret_env:   "X_API_SECRET"
-    access_token_env: "X_ACCESS_TOKEN"
-    access_secret_env: "X_ACCESS_SECRET"       # ← تم تصحيح المسافة هنا
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
 
-limits:
-  min_hours_between_threads: 24
-  max_replies_per_run: 2
-  max_replies_per_day: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-content:
-  default_hashtags:
-    - "#ذكاء_اصطناعي"
-    - "#تقنية"
-    # - "#سدايا"   ← أضف حسب الحاجة
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-  pillars:   # المواضيع التي يختار منها عشوائياً
-    الذكاء الاصطناعي: "Generative AI, AI Agents, أخلاقيات الاستخدام"
-    الأمن السيبراني: "Zero Trust, Passkeys, Ransomware"
-    البرمجة: "Python/Rust, أدوات AI, Clean Code"
-    الحوسبة السحابية: "AWS/Azure/GCP, Cloud Security"
-    مبادرات سعودية AI: "سدايا, علّام, كورسات مجانية معتمدة"
-    مقارنات AI: "Grok vs ChatGPT vs Gemini, أفضل أدوات AI"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-media:
-  enabled: true
-  folder: "media/"
-  probability_first_tweet: 0.4     # احتمال إرفاق ميديا في أول تغريدة من الثريد
-  probability_reply: 0.25          # احتمال إرفاق ميديا في الردود
-  files:
-    - "ai_infographic.png"
-    - "python_cheatsheet.jpg"
-    - "quick_tip.mp4"
-    - "grok_vs_chatgpt.jpg"
-    - "sdaia_banner.png"
-
-generation:
-  models_priority:
-    - "qwen/qwen-2.5-32b-instruct"          # الأسرع والأرخص أولاً
-    - "qwen/qwen-2.5-72b-instruct"
-    - "meta-llama/llama-3.1-70b-instruct"
-
-  max_tokens:
-    thread: 900
-    reply: 140
-
-  temperature: 0.65
-  thread_length:
-    min_tweets: 3
-    max_tweets: 5
-    min_chars_per_tweet: 80
-
-paths:
-  state_file: "state.json"
-  audit_log: "audit_log.jsonl"
-
-reply:
-  cache_enabled: true
-  min_text_length_to_reply: 35
-
-logging:
-  level: INFO
-  format: "%(asctime)s | %(levelname)-5s | %(message)s"
+      - name: Run the bot
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          X_API_KEY:          ${{ secrets.X_API_KEY }}
+          X_API_SECRET:       ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:     ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET:    ${{ secrets.X_ACCESS_SECRET }}
+          BOT_MODE:           auto
+        run: python bot.py --mode auto
