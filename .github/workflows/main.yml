@@ -2,8 +2,8 @@ name: Tech AI Bot Final Execution
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # يعمل كل 6 ساعات
-  workflow_dispatch: # للتشغيل اليدوي
+    - cron: '0 */6 * * *' # تشغيل تلقائي كل 6 ساعات
+  workflow_dispatch:      # تشغيل يدوياً للتحقق
 
 jobs:
   build-and-run:
@@ -20,9 +20,10 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          # الدخول للمجلد الصحيح وتثبيت المكتبات
           cd tech-ai-bot
           python -m pip install --upgrade pip
-          pip install tweepy openai python-dotenv
+          pip install -r requirements.txt || pip install tweepy openai python-dotenv
 
       - name: Run Tech AI Bot
         env:
@@ -33,24 +34,23 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DRY_RUN: 0
         run: |
+          # تشغيل البوت من داخل مجلده لضمان صحة المسارات النسبية
           cd tech-ai-bot
-          # تشغيل الملف المُنظف الذي أرسلته لك في الرد السابق
           python main.py
 
       - name: Commit and Push Changes
-        if: always()
+        if: always() # تنفيذ هذه الخطوة حتى لو فشل البوت لحفظ اللوجز
         run: |
-          cd tech-ai-bot
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # إضافة الملفات في حال تم إنشاؤها أو تحديثها
-          git add state.json audit_log.jsonl 2>/dev/null || true
+          # إضافة ملفات الحالة واللوجز من المسار الصحيح
+          git add tech-ai-bot/state.json tech-ai-bot/audit_log.jsonl 2>/dev/null || true
           
-          # التحقق إذا كان هناك تغييرات فعلاً قبل تنفيذ الـ commit
+          # التحقق من وجود تغييرات حقيقية قبل الـ Commit لتجنب الأخطاء
           if [ -n "$(git status --porcelain)" ]; then
             git commit -m "🔄 Update bot state and logs [skip ci]"
             git push
           else
-            echo "No changes to commit"
+            echo "No changes to commit, skipping push."
           fi
