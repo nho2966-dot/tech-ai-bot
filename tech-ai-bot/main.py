@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import tweepy
 from openai import OpenAI
 
-# إعداد المسارات الديناميكية لضمان العمل داخل GitHub Actions
+# إعداد المسارات لضمان العمل داخل GitHub Actions
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 AUDIT_LOG = os.path.join(BASE_DIR, "audit_log.jsonl")
@@ -19,12 +19,12 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 TWEET_LIMIT = 280
 THREAD_DELIM = "\n---\n"
 
-# تم تنظيف هذه القائمة تماماً من أي مسافات مخفية
+# تعريف المصفوفة في سطر واحد تماماً لضمان عدم وجود مسافات مخفية في الهامش
 TECH_TRIGGERS = ["كيف", "لماذا", "ما", "وش", "أفضل", "شرح", "حل", "مشكلة", "خطأ"]
 
 class TechAIExpert:
     def __init__(self):
-        logging.info("--- Tech AI Bot [Clean Start] ---")
+        logging.info("--- Tech AI Bot [Zero-Space Version] ---")
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
@@ -37,9 +37,9 @@ class TechAIExpert:
             wait_on_rate_limit=True
         )
         self.content_pillars = {
-            "الذكاء الاصطناعي": "Generative AI, AI Agents, ChatGPT",
-            "الأمن السيبراني": "Zero Trust, Passkeys, Cybersecurity",
-            "البرمجة": "Python, Rust, Clean Code"
+            "الذكاء الاصطناعي": "Generative AI, LLMs",
+            "البرمجة": "Python, Rust Development",
+            "الأمن السيبراني": "Cybersecurity Trends"
         }
         self.state = self._load_state()
 
@@ -57,18 +57,16 @@ class TechAIExpert:
 
     def generate_content(self):
         pillar = random.choice(list(self.content_pillars.keys()))
-        prompt = f"اكتب ثريد تقني عن {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}. بدون هاشتاقات."
-        
+        prompt = f"اكتب ثريد تقني عن {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}."
         resp = self.ai_client.chat.completions.create(
             model="openai/gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "مختص تقني عربي محترف. أسلوبك: Hook ثم Value ثم CTA."},
+                {"role": "system", "content": "مختص تقني محترف."},
                 {"role": "user", "content": prompt}
             ]
         )
-        content = resp.choices[0].message.content
-        tweets = [t.strip() for t in content.split(THREAD_DELIM) if t.strip()]
-        tweets[-1] += "\n\n#تقنية #ذكاء_اصطناعي"
+        tweets = [t.strip() for t in resp.choices[0].message.content.split(THREAD_DELIM) if t.strip()]
+        tweets[-1] += "\n\n#تقنية #برمجة"
         return tweets
 
     def post_thread(self, tweets):
@@ -77,7 +75,7 @@ class TechAIExpert:
             try:
                 response = self.x_client.create_tweet(text=tweet, in_reply_to_tweet_id=prev_id, user_auth=True)
                 prev_id = response.data['id']
-                time.sleep(3)
+                time.sleep(2)
             except Exception as e:
                 logging.error(f"Error: {e}")
 
