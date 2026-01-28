@@ -17,11 +17,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: Install Dependencies
         run: pip install tweepy openai requests python-dotenv
 
@@ -33,24 +28,19 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          # الدخول للمجلد الصحيح قبل التشغيل
           cd tech-ai-bot
-          if [ -f "main.py" ]; then
-            python main.py
-          else
-            echo "Error: main.py not found in tech-ai-bot folder!"
-            ls -R
-            exit 1
-          fi
+          python main.py
 
       - name: Sync and Commit Changes
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # التعديل هنا: stash التغييرات مؤقتاً ثم pull ثم pop
+          git add tech-ai-bot/state.json || echo "No state file"
+          git stash
           git pull origin main --rebase
-          # إضافة الملفات من داخل المجلد الفرعي
-          [ -f tech-ai-bot/state.json ] && git add tech-ai-bot/state.json
-          [ -f tech-ai-bot/audit_log.jsonl ] && git add tech-ai-bot/audit_log.jsonl
+          git stash pop || echo "Nothing to pop"
+          git add tech-ai-bot/state.json
           git commit -m "🔄 Sync Bot State [skip ci]" || echo "No changes"
           git push origin main
