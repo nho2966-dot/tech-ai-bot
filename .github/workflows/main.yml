@@ -1,9 +1,9 @@
-name: Tech AI Bot Pro
+name: Tech AI Bot v88
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *' # يعمل كل ساعتين لزيادة التفاعل والردود
+    - cron: '0 */2 * * *'
 
 jobs:
   build:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-            fetch-depth: 0
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,14 +32,23 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python main.py
+        run: |
+          # تأكد أن اسم الملف هو main.py
+          if [ -f "main.py" ]; then
+            python main.py
+          else
+            echo "Error: main.py not found!"
+            ls -R
+            exit 1
+          fi
 
       - name: Sync and Commit Changes
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main --rebase # سحب التعديلات قبل الرفع لمنع الفشل
-          git add state.json audit_log.jsonl || echo "No files to add"
-          git commit -m "🔄 Update Bot State [skip ci]" || echo "No changes to commit"
+          git pull origin main --rebase
+          [ -f state.json ] && git add state.json
+          [ -f audit_log.jsonl ] && git add audit_log.jsonl
+          git commit -m "🔄 Sync Bot State [skip ci]" || echo "No changes"
           git push origin main
