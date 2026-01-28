@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import tweepy
 from openai import OpenAI
 
-# إعداد المسارات لضمان العمل داخل مجلد tech-ai-bot
+# إعداد المسارات - لضمان العمل داخل GitHub Actions
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 AUDIT_LOG = os.path.join(BASE_DIR, "audit_log.jsonl")
@@ -20,15 +20,12 @@ TWEET_LIMIT = 280
 THREAD_DELIM = "\n---\n"
 HASHTAG_RE = re.compile(r"(?<!\w)#([\w_]+)", re.UNICODE)
 
-TECH_TRIGGERS = [
-    "كيف", "لماذا", "ما", "وش", "أفضل", "شرح", "حل", "مشكلة", "خطأ",
-    "error", "bug", "issue", "api", "python", "javascript", "rust",
-    "ai", "security", "blockchain", "cloud", "aws", "grok", "gpt"
-]
+# قائمة الكلمات المفتاحية منظفة تماماً من أي رموز مخفية
+TECH_TRIGGERS = ["كيف", "لماذا", "ما", "وش", "أفضل", "شرح", "حل", "مشكلة", "خطأ"]
 
 class TechExpertMasterFinal:
     def __init__(self):
-        logging.info("--- Tech Expert Master [v88.0 Fixed] ---")
+        logging.info("--- Tech Expert Master [Fixed Path Version] ---")
         self.DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
         self.SIGNATURE = os.getenv("SIGNATURE", "").strip()
         self.DEFAULT_HASHTAGS = ["#تقنية", "#برمجة"]
@@ -47,17 +44,12 @@ class TechExpertMasterFinal:
         )
 
         self.content_pillars = {
-            "الذكاء الاصطناعي": "Generative AI, AI Agents, ChatGPT/Grok/Copilot",
-            "الأمن السيبراني": "Zero Trust, Passkeys, Ransomware",
-            "البرمجة": "Python/Rust, AI Tools, Clean Code",
-            "الحوسبة السحابية": "AWS/Azure/GCP, Cloud Security"
+            "الذكاء الاصطناعي": "Generative AI and AI Agents",
+            "الأمن السيبراني": "Zero Trust and Cyber Security",
+            "البرمجة": "Python and Modern Development"
         }
 
-        self.system_instr = (
-            "اكتب كمختص تقني عربي بأسلوب واضح ومختصر.\n"
-            "التزم بالهيكلة الذهبية: Hook ثم Value ثم CTA (سؤال).\n"
-            "لا تضف هاشتاقات داخل النص.\n"
-        )
+        self.system_instr = "اكتب كمختص تقني عربي بأسلوب Hook, Value, CTA. لا تضع هاشتاقات."
         self.state = self._load_state()
 
     def _load_state(self):
@@ -72,25 +64,10 @@ class TechExpertMasterFinal:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
 
-    def _audit(self, event_type, payload):
-        record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "type": event_type,
-            "payload": payload
-        }
-        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-    def _apply_hashtags_to_last_tweet(self, tweets, max_tags=2):
-        last_tweet = tweets[-1]
-        tag_line = " ".join(self.DEFAULT_HASHTAGS[:max_tags])
-        tweets[-1] = f"{last_tweet}\n\n{tag_line}".strip()
-        return tweets
-
     def _generate_thread(self, pillar, details):
-        prompt = f"اكتب Thread تقني عن: {pillar} ({details}). افصل بـ {THREAD_DELIM}"
+        prompt = f"اكتب Thread تقني عن: {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}"
         resp = self.ai_client.chat.completions.create(
-            model="qwen/qwen-2.5-72b-instruct",
+            model="openai/gpt-4o-mini",
             messages=[
                 {"role": "system", "content": self.system_instr},
                 {"role": "user", "content": prompt}
@@ -103,20 +80,19 @@ class TechExpertMasterFinal:
         prev_id = None
         for t in tweets:
             if self.DRY_RUN:
-                logging.info(f"[DRY] {t}")
+                logging.info(f"DRY RUN: {t}")
                 continue
             resp = self.client_v2.create_tweet(text=t, in_reply_to_tweet_id=prev_id, user_auth=True)
             prev_id = resp.data["id"]
             time.sleep(2)
-        return True
 
     def run(self):
         pillar, details = random.choice(list(self.content_pillars.items()))
-        raw_tweets = self._generate_thread(pillar, details)
-        final_tweets = self._apply_hashtags_to_last_tweet(raw_tweets)
-        self._publish_thread(final_tweets)
+        tweets = self._generate_thread(pillar, details)
+        # إضافة الهاشتاق لآخر تغريدة
+        tweets[-1] = f"{tweets[-1]}\n\n#تقنية #برمجة"
+        self._publish_thread(tweets)
         self._save_state()
-        logging.info("✅ Done.")
 
 if __name__ == "__main__":
     TechExpertMasterFinal().run()
