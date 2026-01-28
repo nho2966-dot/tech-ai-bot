@@ -1,89 +1,55 @@
 import os
-import re
 import json
 import time
 import random
 import logging
-from datetime import datetime, timezone
-
+from datetime import datetime
 import tweepy
 from openai import OpenAI
 
-# إعداد المسارات لضمان العمل داخل GitHub Actions
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(BASE_DIR, "state.json")
-AUDIT_LOG = os.path.join(BASE_DIR, "audit_log.jsonl")
+# إعداد المسارات
+B_DIR = os.path.dirname(os.path.abspath(__file__))
+S_FILE = os.path.join(B_DIR, "state.json")
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(level=logging.INFO)
 
-TWEET_LIMIT = 280
-THREAD_DELIM = "\n---\n"
-
-# تعريف المصفوفة في سطر واحد تماماً لضمان عدم وجود مسافات مخفية في الهامش
-TECH_TRIGGERS = ["كيف", "لماذا", "ما", "وش", "أفضل", "شرح", "حل", "مشكلة", "خطأ"]
-
-class TechAIExpert:
+class TechBot:
     def __init__(self):
-        logging.info("--- Tech AI Bot [Zero-Space Version] ---")
-        self.ai_client = OpenAI(
+        # تم الاستغناء عن القائمة التي تسبب SyntaxError واستبدالها بنص بسيط
+        self.triggers = "كيف،لماذا،ما،حل،مشكلة".split("،")
+        self.ai = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
-        self.x_client = tweepy.Client(
+        self.x = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        self.content_pillars = {
-            "الذكاء الاصطناعي": "Generative AI, LLMs",
-            "البرمجة": "Python, Rust Development",
-            "الأمن السيبراني": "Cybersecurity Trends"
-        }
-        self.state = self._load_state()
-
-    def _load_state(self):
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except: pass
-        return {"last_run": None}
-
-    def _save_state(self):
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.state, f, ensure_ascii=False, indent=2)
-
-    def generate_content(self):
-        pillar = random.choice(list(self.content_pillars.keys()))
-        prompt = f"اكتب ثريد تقني عن {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}."
-        resp = self.ai_client.chat.completions.create(
-            model="openai/gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "مختص تقني محترف."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        tweets = [t.strip() for t in resp.choices[0].message.content.split(THREAD_DELIM) if t.strip()]
-        tweets[-1] += "\n\n#تقنية #برمجة"
-        return tweets
-
-    def post_thread(self, tweets):
-        prev_id = None
-        for tweet in tweets:
-            try:
-                response = self.x_client.create_tweet(text=tweet, in_reply_to_tweet_id=prev_id, user_auth=True)
-                prev_id = response.data['id']
-                time.sleep(2)
-            except Exception as e:
-                logging.error(f"Error: {e}")
 
     def run(self):
-        tweets = self.generate_content()
-        self.post_thread(tweets)
-        self.state["last_run"] = datetime.now().isoformat()
-        self._save_state()
+        topic = random.choice(["AI", "Coding", "CyberSecurity"])
+        prompt = f"Write a professional Arabic tech thread about {topic}. Separate tweets with '---'."
+        
+        res = self.ai.chat.completions.create(
+            model="openai/gpt-4o-mini",
+            messages=[{"role": "system", "content": "Tech Expert"}, {"role": "user", "content": prompt}]
+        )
+        
+        tweets = [t.strip() for t in res.choices[0].message.content.split('---') if t.strip()]
+        
+        p_id = None
+        for txt in tweets[:3]: # نشر أول 3 تغريدات فقط للتجربة
+            try:
+                r = self.x.create_tweet(text=txt, in_reply_to_tweet_id=p_id, user_auth=True)
+                p_id = r.data['id']
+                time.sleep(2)
+            except Exception as e:
+                logging.error(e)
+        
+        with open(S_FILE, "w") as f:
+            json.dump({"last": datetime.now().isoformat()}, f)
 
 if __name__ == "__main__":
-    TechAIExpert().run()
+    TechBot().run()
