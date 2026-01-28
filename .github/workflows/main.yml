@@ -1,46 +1,45 @@
-name: Tech Bot Ultimate Fix
+name: Tech AI Bot Pro
 
 on:
-  workflow_dispatch: # للتشغيل اليدوي بضغط زر
+  workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */2 * * *' # يعمل كل ساعتين لزيادة التفاعل والردود
 
 jobs:
-  execute:
+  build:
     runs-on: ubuntu-latest
-    permissions: # ضروري جداً للسماح للبوت بتحديث الملفات
+    permissions:
       contents: write
     
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+            fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: pip install tweepy openai python-dotenv
+      - name: Install Dependencies
+        run: pip install tweepy openai requests python-dotenv
 
-      - name: Run Bot
+      - name: Run AI Bot
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: |
-          # البحث عن ملف main.py وتشغيله أينما كان
-          FILE_PATH=$(find . -name "main.py" -not -path "*/.*" | head -n 1)
-          if [ -z "$FILE_PATH" ]; then echo "Error: main.py not found"; exit 1; fi
-          python "$FILE_PATH"
+        run: python main.py
 
-      - name: Sync Changes
+      - name: Sync and Commit Changes
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -m "update state [skip ci]" || echo "No changes"
-          git push
+          git pull origin main --rebase # سحب التعديلات قبل الرفع لمنع الفشل
+          git add state.json audit_log.jsonl || echo "No files to add"
+          git commit -m "🔄 Update Bot State [skip ci]" || echo "No changes to commit"
+          git push origin main
