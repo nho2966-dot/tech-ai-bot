@@ -1,22 +1,29 @@
-name: Final Fix Execution
+name: Tech Bot Ultimate Fix
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # للتشغيل اليدوي بضغط زر
   schedule:
     - cron: '0 */6 * * *'
 
 jobs:
-  build:
+  execute:
     runs-on: ubuntu-latest
+    permissions: # ضروري جداً للسماح للبوت بتحديث الملفات
+      contents: write
+    
     steps:
-      - uses: actions/checkout@v4
-      
-      - setup-python:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Clean and Run
+      - name: Install dependencies
+        run: pip install tweepy openai python-dotenv
+
+      - name: Run Bot
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
@@ -24,22 +31,16 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          pip install tweepy openai python-dotenv
-          
-          # إيجاد المسار الحقيقي للملف
-          TARGET=$(find . -name "main.py" | head -n 1)
-          
-          # حركة ذكية: تنظيف الملف برمجياً من حرف U+00A0 قبل التشغيل
-          sed -i 's/\xa0/ /g' "$TARGET"
-          
-          # التشغيل
-          python "$TARGET"
+          # البحث عن ملف main.py وتشغيله أينما كان
+          FILE_PATH=$(find . -name "main.py" -not -path "*/.*" | head -n 1)
+          if [ -z "$FILE_PATH" ]; then echo "Error: main.py not found"; exit 1; fi
+          python "$FILE_PATH"
 
-      - name: Push State
+      - name: Sync Changes
         if: always()
         run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@actions.com"
-          git add *.json || true
-          git commit -m "sync [skip ci]" || echo "none"
-          git push || echo "fail"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "update state [skip ci]" || echo "No changes"
+          git push
