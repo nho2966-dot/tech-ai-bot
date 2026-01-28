@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 
 import tweepy
 from openai import OpenAI
+from arabic_reshaper import reshape
+from bidi.algorithm import get_display
 
-# إعداد المسارات - لضمان العمل داخل GitHub Actions
+# إعداد المسارات لضمان العمل داخل GitHub Actions
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "state.json")
 AUDIT_LOG = os.path.join(BASE_DIR, "audit_log.jsonl")
@@ -18,24 +20,24 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 TWEET_LIMIT = 280
 THREAD_DELIM = "\n---\n"
-HASHTAG_RE = re.compile(r"(?<!\w)#([\w_]+)", re.UNICODE)
 
-# قائمة الكلمات المفتاحية منظفة تماماً من أي رموز مخفية
-TECH_TRIGGERS = ["كيف", "لماذا", "ما", "وش", "أفضل", "شرح", "حل", "مشكلة", "خطأ"]
-
-class TechExpertMasterFinal:
+class TechAIExpert:
     def __init__(self):
-        logging.info("--- Tech Expert Master [Fixed Path Version] ---")
-        self.DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
-        self.SIGNATURE = os.getenv("SIGNATURE", "").strip()
-        self.DEFAULT_HASHTAGS = ["#تقنية", "#برمجة"]
+        logging.info("--- Tech AI Bot [Production Version] ---")
+        self._init_clients()
+        self.content_pillars = {
+            "الذكاء الاصطناعي": "أحدث نماذج LLM وتطبيقات AI Agents.",
+            "البرمجة": "تطوير البرمجيات باستخدام Python و Rust.",
+            "الأمن السيبراني": "حماية البيانات وتقنيات التشفير الحديثة."
+        }
+        self.state = self._load_state()
 
+    def _init_clients(self):
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
-
-        self.client_v2 = tweepy.Client(
+        self.x_client = tweepy.Client(
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
@@ -43,56 +45,57 @@ class TechExpertMasterFinal:
             wait_on_rate_limit=True
         )
 
-        self.content_pillars = {
-            "الذكاء الاصطناعي": "Generative AI and AI Agents",
-            "الأمن السيبراني": "Zero Trust and Cyber Security",
-            "البرمجة": "Python and Modern Development"
-        }
-
-        self.system_instr = "اكتب كمختص تقني عربي بأسلوب Hook, Value, CTA. لا تضع هاشتاقات."
-        self.state = self._load_state()
-
     def _load_state(self):
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     return json.load(f)
             except: pass
-        return {"last_mention_id": None}
+        return {"last_run": None, "posted_count": 0}
 
     def _save_state(self):
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False, indent=2)
 
-    def _generate_thread(self, pillar, details):
-        prompt = f"اكتب Thread تقني عن: {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}"
+    def fix_arabic(self, text):
+        """تجهيز النص العربي للعرض الصحيح في الصور أو الأنظمة التي لا تدعمه"""
+        reshaped_text = reshape(text)
+        return get_display(reshaped_text)
+
+    def generate_content(self):
+        pillar = random.choice(list(self.content_pillars.keys()))
+        prompt = f"اكتب ثريد تقني عن {pillar}. افصل بين التغريدات بـ {THREAD_DELIM}. بدون هاشتاقات."
+        
         resp = self.ai_client.chat.completions.create(
             model="openai/gpt-4o-mini",
             messages=[
-                {"role": "system", "content": self.system_instr},
+                {"role": "system", "content": "مختص تقني عربي محترف. أسلوبك: Hook ثم Value ثم CTA."},
                 {"role": "user", "content": prompt}
             ]
         )
-        raw = resp.choices[0].message.content
-        return [p.strip() for p in raw.split(THREAD_DELIM) if p.strip()]
+        content = resp.choices[0].message.content
+        tweets = [t.strip() for t in content.split(THREAD_DELIM) if t.strip()]
+        # إضافة الهاشتاقات لآخر تغريدة فقط
+        tweets[-1] += "\n\n#تقنية #ذكاء_اصطناعي"
+        return tweets
 
-    def _publish_thread(self, tweets):
+    def post_thread(self, tweets):
         prev_id = None
-        for t in tweets:
-            if self.DRY_RUN:
-                logging.info(f"DRY RUN: {t}")
-                continue
-            resp = self.client_v2.create_tweet(text=t, in_reply_to_tweet_id=prev_id, user_auth=True)
-            prev_id = resp.data["id"]
-            time.sleep(2)
+        for tweet in tweets:
+            try:
+                response = self.x_client.create_tweet(text=tweet, in_reply_to_tweet_id=prev_id, user_auth=True)
+                prev_id = response.data['id']
+                logging.info(f"✅ Posted: {prev_id}")
+                time.sleep(5) # فاصل زمني لتجنب الـ Spam
+            except Exception as e:
+                logging.error(f"❌ Error posting: {e}")
 
     def run(self):
-        pillar, details = random.choice(list(self.content_pillars.items()))
-        tweets = self._generate_thread(pillar, details)
-        # إضافة الهاشتاق لآخر تغريدة
-        tweets[-1] = f"{tweets[-1]}\n\n#تقنية #برمجة"
-        self._publish_thread(tweets)
+        tweets = self.generate_content()
+        self.post_thread(tweets)
+        self.state["last_run"] = datetime.now().isoformat()
+        self.state["posted_count"] += 1
         self._save_state()
 
 if __name__ == "__main__":
-    TechExpertMasterFinal().run()
+    TechAIExpert().run()
