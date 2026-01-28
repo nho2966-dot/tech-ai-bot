@@ -16,7 +16,7 @@ api:
     api_key_env:      "X_API_KEY"
     api_secret_env:   "X_API_SECRET"
     access_token_env: "X_ACCESS_TOKEN"
-    access_secret_env:"X_ACCESS_SECRET"
+    access_secret_env: "X_ACCESS_SECRET"       # ← تم تصحيح المسافة هنا
 
 limits:
   min_hours_between_threads: 24
