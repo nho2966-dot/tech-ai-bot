@@ -1,12 +1,10 @@
 import os
-import re
 import json
 import time
 import random
 import logging
 import tweepy
 from openai import OpenAI
-from datetime import datetime, timezone
 
 # إعداد المسارات
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,32 +13,32 @@ STATE_FILE = os.path.join(BASE_DIR, "state.json")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 ROTATION_KINDS = ["breaking_news", "ai_daily_life", "ai_tool"]
-THREAD_DELIM = "\n---\n"
 
 class TechExpertDiversifiedPro:
     def __init__(self):
-        logging.info("--- Tech Expert Pro [Final Fix] ---")
+        logging.info("--- Tech Expert Pro [Premium Mode] ---")
         self.ai_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"])
+        
+        # إعداد العميل مع التأكد من تمرير كافة المفاتيح
         self.client_v2 = tweepy.Client(
             consumer_key=os.environ["X_API_KEY"],
             consumer_secret=os.environ["X_API_SECRET"],
             access_token=os.environ["X_ACCESS_TOKEN"],
-            access_token_secret=os.environ["X_ACCESS_SECRET"]
+            access_token_secret=os.environ["X_ACCESS_SECRET"],
+            wait_on_rate_limit=True
         )
         self.state = self._load_state()
 
     def _load_state(self):
-        default_state = {"replied_to": [], "rotation_idx": 0}
+        default = {"replied_to": [], "rotation_idx": 0}
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # التأكد من وجود المفاتيح لمنع KeyError
-                    for key, val in default_state.items():
-                        data.setdefault(key, val)
+                    for k, v in default.items(): data.setdefault(k, v)
                     return data
             except: pass
-        return default_state
+        return default
 
     def _save_state(self):
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -48,22 +46,32 @@ class TechExpertDiversifiedPro:
 
     def handle_smart_replies(self):
         try:
-            # البحث عن تغريدات تقنية عربية
-            query = "كيف برمجة lang:ar -is:retweet"
+            # استخدام بحث بسيط لضمان الصلاحيات
+            query = "برمجة OR تقنية lang:ar -is:retweet"
             tweets = self.client_v2.search_recent_tweets(query=query, max_results=5)
+            
             if tweets.data:
                 for tweet in tweets.data:
                     if tweet.id not in self.state["replied_to"]:
                         res = self.ai_client.chat.completions.create(
                             model="openai/gpt-4o-mini",
-                            messages=[{"role": "user", "content": f"رد تقني عربي مختصر جداً على: {tweet.text}"}]
+                            messages=[{"role": "user", "content": f"اكتب رداً تقنياً ذكياً ومختصراً جداً (بدون هاشتاقات) على: {tweet.text}"}]
                         )
-                        reply = res.choices[0].message.content.strip()
-                        self.client_v2.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                        reply_text = res.choices[0].message.content.strip()
+                        
+                        # تمرير user_auth=True إلزامي لبعض حسابات Premium لتمكين الردود
+                        self.client_v2.create_tweet(
+                            text=reply_text[:280], 
+                            in_reply_to_tweet_id=tweet.id,
+                            user_auth=True 
+                        )
                         self.state["replied_to"].append(tweet.id)
-                        logging.info(f"Replied to {tweet.id}")
+                        logging.info(f"✅ Successfully replied to {tweet.id}")
                         break
-        except Exception as e: logging.error(f"X API Error (Replies): {e}")
+            else:
+                logging.info("No new tweets found to reply to.")
+        except Exception as e:
+            logging.error(f"❌ Smart Reply Error: {e}")
 
     def execute_diversified_task(self):
         try:
@@ -72,16 +80,19 @@ class TechExpertDiversifiedPro:
             
             res = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "user", "content": f"اكتب تغريدة تقنية عربية مذهلة عن {kind}"}]
+                messages=[{"role": "user", "content": f"اكتب تغريدة تقنية احترافية عن {kind} باللغة العربية"}]
             )
             content = res.choices[0].message.content.strip()
-            self.client_v2.create_tweet(text=content[:280])
-            logging.info(f"Posted {kind} tweet")
-        except Exception as e: logging.error(f"X API Error (Post): {e}")
+            
+            self.client_v2.create_tweet(text=content[:280], user_auth=True)
+            logging.info(f"✅ Successfully posted {kind} tweet")
+        except Exception as e:
+            logging.error(f"❌ Post Task Error: {e}")
 
     def run(self):
+        # تنفيذ الرد الذكي ثم النشر التدويري
         self.handle_smart_replies()
-        time.sleep(10)
+        time.sleep(5)
         self.execute_diversified_task()
         self._save_state()
 
