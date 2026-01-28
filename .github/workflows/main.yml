@@ -1,4 +1,4 @@
-name: Tech AI Bot v88
+name: Tech AI Bot Fix
 
 on:
   workflow_dispatch:
@@ -31,16 +31,12 @@ jobs:
           cd tech-ai-bot
           python main.py
 
-      - name: Sync and Commit Changes
+      - name: Commit & Push Changes
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # التعديل هنا: stash التغييرات مؤقتاً ثم pull ثم pop
-          git add tech-ai-bot/state.json || echo "No state file"
-          git stash
-          git pull origin main --rebase
-          git stash pop || echo "Nothing to pop"
           git add tech-ai-bot/state.json
-          git commit -m "🔄 Sync Bot State [skip ci]" || echo "No changes"
+          git commit -m "🔄 Update State [skip ci]" || echo "No changes"
+          git pull origin main --rebase
           git push origin main
