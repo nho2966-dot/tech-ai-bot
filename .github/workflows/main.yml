@@ -15,15 +15,13 @@ jobs:
 
     defaults:
       run:
-        working-directory: repo/src   # ← المسار الصحيح الآن
+        working-directory: src   # ← المسار الحقيقي الصحيح
 
     steps:
 
-      # 1) Checkout بدون أخطاء تكرار المسار
+      # 1) Checkout (بدون path حتى لا يتكرر المجلد)
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: repo   # ← المجلد الثابت (لا يتكرر)
 
       # 2) Python
       - name: Set up Python
@@ -31,13 +29,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      # 3) Install dependencies (صحيح الآن)
+      # 3) Install dependencies (الملف في جذر المشروع)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r ../requirements.txt
 
-      # 4) Restore bot state
+      # 4) Restore cache
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
@@ -46,8 +44,7 @@ jobs:
             ../audit_log.jsonl
             ../logs
           key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            bot-state-${{ github.ref_name }}-
+          restore-keys: bot-state-${{ github.ref_name }}-
 
       # 5) Run the bot
       - name: Run bot
@@ -85,33 +82,33 @@ jobs:
           FAILSAFE_ENABLED: "1"
           FAILSAFE_PILLARS: "smart_devices,ai"
 
-          # Premium features
+          # Premium
           PIN_LAST: "1"
           MEDIA_CARDS: "1"
           CARD_BRAND: "Tech AI Bot"
 
-          # Video support
+          # Video
           VIDEO_ENABLED: "1"
-          VIDEO_DIR: "web"
+          VIDEO_DIR: "../web"        # ← لأننا داخل src
           VIDEO_MAX_MB: "50"
           VIDEO_MAX_SECONDS: "75"
           VIDEO_THREAD_ENABLED: "1"
           VIDEO_THREAD_POINTS: "2"
 
-          # Thread part labels
+          # Labels
           PART_LABEL_ENABLED: "1"
           PART_LABEL_STYLE: "prefix"
           PART_LABEL_LOCALIZED: "1"
 
         run: python main.py
 
-      # 6) Upload logs + state
+      # 6) Artifacts
       - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-artifacts
           path: |
-            repo/state.json
-            repo/audit_log.jsonl
-            repo/logs/**
+            state.json
+            audit_log.jsonl
+            ../logs/**
