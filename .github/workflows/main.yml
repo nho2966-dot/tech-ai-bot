@@ -15,25 +15,29 @@ jobs:
 
     defaults:
       run:
-        working-directory: tech-ai-bot/src   # الآن سيعمل بشكل صحيح
+        working-directory: repo/src   # ← المسار الصحيح الآن
 
     steps:
 
+      # 1) Checkout بدون أخطاء تكرار المسار
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          path: tech-ai-bot     # <<< منع تكرار المجلد
+          path: repo   # ← المجلد الثابت (لا يتكرر)
 
+      # 2) Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3) Install dependencies (صحيح الآن)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r ../requirements.txt   # صحيح الآن
+          pip install -r ../requirements.txt
 
+      # 4) Restore bot state
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
@@ -45,6 +49,7 @@ jobs:
           restore-keys: |
             bot-state-${{ github.ref_name }}-
 
+      # 5) Run the bot
       - name: Run bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -57,7 +62,7 @@ jobs:
 
           SIGNATURE: "+#"
 
-          # Smart Scheduler
+          # Smart Scheduling — Ultra
           SCHED_MODE: "ultra"
           LOCAL_TZ_OFFSET_MINUTES: "240"
           SLOTS_DEF: "rss=11-17;tip=19-22;video=12-15;question=15-20;poll=18-21;trending=14-18;booster=16-20"
@@ -66,7 +71,7 @@ jobs:
           ENGAGEMENT_COOLDOWN_MINUTES: "45"
           RANDOM_SKIP_CHANCE: "0.25"
 
-          # Auto Compliance
+          # Auto‑Compliance
           COMPLIANCE_MODE_ENABLED: "1"
           COMPLIANCE_MAX_POSTS_PER_DAY: "8"
           COMPLIANCE_MAX_ERRORS_PER_WINDOW: "3"
@@ -80,12 +85,12 @@ jobs:
           FAILSAFE_ENABLED: "1"
           FAILSAFE_PILLARS: "smart_devices,ai"
 
-          # Premium
+          # Premium features
           PIN_LAST: "1"
           MEDIA_CARDS: "1"
           CARD_BRAND: "Tech AI Bot"
 
-          # Video
+          # Video support
           VIDEO_ENABLED: "1"
           VIDEO_DIR: "web"
           VIDEO_MAX_MB: "50"
@@ -93,19 +98,20 @@ jobs:
           VIDEO_THREAD_ENABLED: "1"
           VIDEO_THREAD_POINTS: "2"
 
-          # Part Labels
+          # Thread part labels
           PART_LABEL_ENABLED: "1"
           PART_LABEL_STYLE: "prefix"
           PART_LABEL_LOCALIZED: "1"
 
         run: python main.py
 
+      # 6) Upload logs + state
       - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-artifacts
           path: |
-            tech-ai-bot/state.json
-            tech-ai-bot/audit_log.jsonl
-            tech-ai-bot/logs/**
+            repo/state.json
+            repo/audit_log.jsonl
+            repo/logs/**
