@@ -1,114 +1,56 @@
-name: Tech AI Bot - Production
+name: Tech AI Bot Production
 
 on:
-  workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *" # كل 6 ساعات
-
-concurrency:
-  group: tech-ai-bot
-  cancel-in-progress: false
+    # يعمل كل ساعة (يمكنك تعديله حسب حاجتك)
+    - cron: '0 * * * *'
+  workflow_dispatch: # للتشغيل اليدوي للتجربة
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-
+    
+    # القيمة السحرية هنا: تخبر GitHub أن كل العمليات تتم داخل مجلد البوت
     defaults:
       run:
-        working-directory: tech-ai-bot/src   # ← المجلد الصحيح كما في الصورة
+        working-directory: tech-ai-bot
 
     steps:
-
-      # 1) Checkout (بدون path حتى لا يتكرر المجلد)
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      # 2) Python setup
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.10'
+          cache: 'pip' # تسريع التثبيت في المرات القادمة
 
-      # 3) Install dependencies (requirements.txt في root)
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r ../requirements.txt
+          pip install -r requirements.txt
 
-      # 4) Restore cache
-      - name: Restore bot state (cache)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ../state.json
-            ../audit_log.jsonl
-            ../logs
-          key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: bot-state-${{ github.ref_name }}-
-
-      # 5) Run bot
-      - name: Run bot
+      - name: Run Tech AI Bot
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: "openai/gpt-4o-mini"
-
+          # تأكد من إضافة هذه المفاتيح في Settings > Secrets and variables > Actions
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-
-          SIGNATURE: "+#"
-
-          # Smart Scheduling
-          SCHED_MODE: "ultra"
-          LOCAL_TZ_OFFSET_MINUTES: "240"
-          SLOTS_DEF: "rss=11-17;tip=19-22;video=12-15;question=15-20;poll=18-21;trending=14-18;booster=16-20"
-          WEEKLY_PLAN: "sun=video,rss;mon=rss,tip;tue=question,rss;wed=tip,trending;thu=video,booster;fri=poll,tip;sat=tip,booster"
-          ENGAGEMENT_HIGH_THRESHOLD: "4"
-          ENGAGEMENT_COOLDOWN_MINUTES: "45"
-          RANDOM_SKIP_CHANCE: "0.25"
-
-          # Auto Compliance
-          COMPLIANCE_MODE_ENABLED: "1"
-          COMPLIANCE_MAX_POSTS_PER_DAY: "8"
-          COMPLIANCE_MAX_ERRORS_PER_WINDOW: "3"
-          COMPLIANCE_WINDOW_MINUTES: "60"
-          COMPLIANCE_MIN_INTERVAL_MINUTES: "20"
-          COMPLIANCE_LOCK_DURATION_MINUTES: "180"
-          COMPLIANCE_QUIET_HOURS_EXTENSION: "2"
-          COMPLIANCE_STRICT_MODE: "1"
-
-          # Failsafe
-          FAILSAFE_ENABLED: "1"
-          FAILSAFE_PILLARS: "smart_devices,ai"
-
-          # Premium
-          PIN_LAST: "1"
-          MEDIA_CARDS: "1"
-          CARD_BRAND: "Tech AI Bot"
-
-          # Video
-          VIDEO_ENABLED: "1"
-          VIDEO_DIR: "../web"
-          VIDEO_MAX_MB: "50"
-          VIDEO_MAX_SECONDS: "75"
-          VIDEO_THREAD_ENABLED: "1"
-          VIDEO_THREAD_POINTS: "2"
-
-          # Thread Labels
-          PART_LABEL_ENABLED: "1"
-          PART_LABEL_STYLE: "prefix"
-          PART_LABEL_LOCALIZED: "1"
-
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # الإعدادات الإضافية (اختياري)
+          DRY_RUN: 0
+          REPLY_ENABLED: 1
+          VIDEO_ENABLED: 1
         run: python main.py
 
-      # 6) Upload artifacts
-      - name: Upload bot artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bot-artifacts
-          path: |
-            ../state.json
-            ../audit_log.jsonl
-            ../logs/**
+      # خطوة هامة جداً لحفظ حالة البوت (state.json) واللوجز
+      - name: Commit and Push Changes
+        if: always() # احفظ التغييرات حتى لو فشل الكود
+        run: |
+          git config --global user.name "Tech-AI-Bot[bot]"
+          git config --global user.email "bot@tech-ai.com"
+          git add state.json logs/ audit_log.jsonl
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 Update bot state and logs [skip ci]" && git push)
