@@ -3,43 +3,51 @@ name: Tech AI Bot - Production
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *" # كل 6 ساعات
 
 concurrency:
   group: tech-ai-bot
-  cancel-in-progress: false # جعل العمليات تنتظر دورها بدل الإلغاء
+  cancel-in-progress: false # اجعل التشغيلات تنتظر بدل الإلغاء
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
+
+    # كل أوامر run ستُنفّذ من داخل src حيث يوجد main.py و requirements.txt
     defaults:
       run:
-        working-directory: tech-ai-bot
+        working-directory: tech-ai-bot/src
 
     steps:
+      # 1) Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2) Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3) تثبيت الاعتمادات من requirements.txt داخل src/
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install tweepy openai
+          pip install -r requirements.txt
 
+      # 4) استرجاع حالة البوت (الكاش)
+      # ملاحظة: المسارات نسبية لـ tech-ai-bot/src
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
           path: |
-            tech-ai-bot/state.json
-            tech-ai-bot/audit_log.jsonl
+            ../state.json
+            ../audit_log.jsonl
           key: bot-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             bot-state-${{ github.ref_name }}-
 
+      # 5) تشغيل البوت
       - name: Run bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -50,6 +58,8 @@ jobs:
           SIGNATURE: "+#"
         run: python main.py
 
+      # 6) رفع المخرجات (حتى لو فشل التشغيل)
+      # لأن ملفات الحالة في tech-ai-bot/ (فوق src) استخدمنا مسارات نسبية تبدأ بـ ../
       - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -58,3 +68,4 @@ jobs:
           path: |
             tech-ai-bot/state.json
             tech-ai-bot/audit_log.jsonl
+``
