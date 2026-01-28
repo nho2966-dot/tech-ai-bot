@@ -2,20 +2,16 @@ name: Tech AI Bot Final Execution
 
 on:
   schedule:
-    # سيقوم البوت بالعمل كل 6 ساعات (يمكنك تعديلها)
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً للتجربة
+    - cron: '0 */6 * * *' # يعمل كل 6 ساعات
+  workflow_dispatch: # للتشغيل اليدوي
 
 jobs:
-  run-bot:
+  build-and-run:
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          # هذا الخيار مهم للسماح للبوت برفع ملف state.json المحدث
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,26 +26,31 @@ jobs:
 
       - name: Run Tech AI Bot
         env:
-          # تأكد من تطابق أسماء الـ Secrets في إعدادات GitHub لديك
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # إعدادات إضافية حسب الكود
           DRY_RUN: 0
-          SIGNATURE: "" # اتركها فارغة أو أضف توقيعك
         run: |
           cd tech-ai-bot
+          # تشغيل الملف المُنظف الذي أرسلته لك في الرد السابق
           python main.py
 
-      - name: Save Bot State and Logs
-        if: always() # لضمان حفظ اللوجز حتى لو فشل النشر
+      - name: Commit and Push Changes
+        if: always()
         run: |
           cd tech-ai-bot
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # إضافة الملفات الناتجة عن التشغيل (الحالة، اللوجز، الأوديت)
-          git add state.json audit_log.jsonl
-          # التحقق من وجود تغييرات قبل المحاولة (لتجنب فشل الأكشن إذا لم يتغير شيء)
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 Update bot state and logs [skip ci]" && git push)
+          
+          # إضافة الملفات في حال تم إنشاؤها أو تحديثها
+          git add state.json audit_log.jsonl 2>/dev/null || true
+          
+          # التحقق إذا كان هناك تغييرات فعلاً قبل تنفيذ الـ commit
+          if [ -n "$(git status --porcelain)" ]; then
+            git commit -m "🔄 Update bot state and logs [skip ci]"
+            git push
+          else
+            echo "No changes to commit"
+          fi
