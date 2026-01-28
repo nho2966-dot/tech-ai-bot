@@ -18,23 +18,19 @@ jobs:
         working-directory: tech-ai-bot/src
 
     steps:
-      # 1) تحميل المستودع
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) إعداد Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3) تثبيت الحزم
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4) استعادة ملفات الحالة واللوج
       - name: Restore bot state (cache)
         uses: actions/cache@v4
         with:
@@ -46,51 +42,64 @@ jobs:
           restore-keys: |
             bot-state-${{ github.ref_name }}-
 
-      # 5) تشغيل البوت
       - name: Run bot
         env:
-          # مفاتيح OpenRouter
+          # OpenRouter
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: "openai/gpt-4o-mini"
 
-          # مفاتيح X (Twitter)
+          # X (Twitter)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
 
-          # توقيعك
+          # توقيع
           SIGNATURE: "+#"
+
+          # ====== Smart Scheduling (Ultra) ======
+          SCHED_MODE: "ultra"
+          LOCAL_TZ_OFFSET_MINUTES: "240"  # GMT+4 لعُمان
+          SLOTS_DEF: "rss=11-17;tip=19-22;video=12-15;question=15-20;poll=18-21;trending=14-18;booster=16-20"
+          WEEKLY_PLAN: "sun=video,rss;mon=rss,tip;tue=question,rss;wed=tip,trending;thu=video,booster;fri=poll,tip;sat=tip,booster"
+          ENGAGEMENT_HIGH_THRESHOLD: "4"
+          ENGAGEMENT_COOLDOWN_MINUTES: "45"
+          RANDOM_SKIP_CHANCE: "0.25"
+
+          # ====== Auto‑Compliance ======
+          COMPLIANCE_MODE_ENABLED: "1"
+          COMPLIANCE_MAX_POSTS_PER_DAY: "8"
+          COMPLIANCE_MAX_ERRORS_PER_WINDOW: "3"
+          COMPLIANCE_WINDOW_MINUTES: "60"
+          COMPLIANCE_MIN_INTERVAL_MINUTES: "20"
+          COMPLIANCE_LOCK_DURATION_MINUTES: "180"
+          COMPLIANCE_QUIET_HOURS_EXTENSION: "2"
+          COMPLIANCE_STRICT_MODE: "1"
 
           # ====== Failsafe ======
           FAILSAFE_ENABLED: "1"
           FAILSAFE_PILLARS: "smart_devices,ai"
-
-          # ====== اختيار نموذج OpenRouter ======
-          OPENROUTER_MODEL: "openai/gpt-4o-mini"
 
           # ====== X Premium ======
           PIN_LAST: "1"
           MEDIA_CARDS: "1"
           CARD_BRAND: "Tech AI Bot"
 
-          # ====== فيديوهات قصيرة (Short Clips) ======
+          # ====== فيديو قصير ======
           VIDEO_ENABLED: "1"
           VIDEO_DIR: "web"
           VIDEO_MAX_MB: "50"
           VIDEO_MAX_SECONDS: "75"
-
-          # ====== Video Threads ======
           VIDEO_THREAD_ENABLED: "1"
           VIDEO_THREAD_POINTS: "2"
 
-          # ====== Part Labels ======
+          # ====== ترقيم الأجزاء ======
           PART_LABEL_ENABLED: "1"
-          PART_LABEL_STYLE: "prefix"     # أو suffix
-          PART_LABEL_LOCALIZED: "1"      # يستخدم "الجزء 1/2"
+          PART_LABEL_STYLE: "prefix"
+          PART_LABEL_LOCALIZED: "1"
 
         run: python main.py
 
-      # 6) رفع ملفات الحالة واللوج
       - name: Upload bot artifacts
         if: always()
         uses: actions/upload-artifact@v4
