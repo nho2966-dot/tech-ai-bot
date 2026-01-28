@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Tech AI Bot (X) — Final main.py
+Tech AI Bot (X) — Production
 - RSS threads + tips
 - Daily Tech Tips pillar + Poll
-- Topic of the Day: daily tip guided by last poll actual votes (winner option)
+- Topic of the Day: daily tip guided by last poll winner (if accessible)
 - Mention replies with anti-dup + safety throttles
-- State persisted to state.json + audit_log.jsonl
+- State persisted to state.json + audit_log.jsonl at repo root
 """
+
+from __future__ import annotations
 
 import os
 import re
@@ -14,7 +16,9 @@ import json
 import time
 import random
 import logging
+import logging.handlers
 import hashlib
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -23,11 +27,57 @@ import xml.etree.ElementTree as ET
 import tweepy
 from openai import OpenAI
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+# =============================================================================
+# ثابت المسارات: خزّن الملفات في جذر المشروع (tech-ai-bot/)
+# =============================================================================
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(THIS_DIR, ".."))        # -> tech-ai-bot/
+LOG_DIR = os.path.join(ROOT_DIR, "logs")
+LOG_FILE = os.path.join(LOG_DIR, "bot.log")
+STATE_FILE = os.path.join(ROOT_DIR, "state.json")
+AUDIT_LOG = os.path.join(ROOT_DIR, "audit_log.jsonl")
 
-STATE_FILE = "state.json"
-AUDIT_LOG = "audit_log.jsonl"
+# =============================================================================
+# أدوات مساعدة للملفات واللوج
+# =============================================================================
+def _ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
 
+def _ensure_parent_dir(file_path: str):
+    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+
+def setup_logging():
+    _ensure_dir(LOG_DIR)
+    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Console
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+
+    # Rotating file
+    fh = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=2 * 1024 * 1024,
+                                              backupCount=5, encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    # Avoid handler duplication if reloaded
+    while root.handlers:
+        root.removeHandler(root.handlers[0])
+
+    root.addHandler(ch)
+    root.addHandler(fh)
+
+setup_logging()
+logger = logging.getLogger(__name__)
+logger.info("🚀 Tech AI Bot starting up...")
+
+# =============================================================================
+# ثوابت عامة
+# =============================================================================
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 DIGIT_RE = re.compile(r"\d+")
 
@@ -41,7 +91,7 @@ POSTS_PER_15MIN_SOFT = int(os.getenv("POSTS_PER_15MIN_SOFT", "95"))
 
 # Modes
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
-SOURCE_MODE = os.getenv("SOURCE_MODE", "1") == "1"
+SOURCE_MODE = os.getenv("SOURCE_MODE", "1") == "1"    # نشر من مصادر RSS
 POLL_MODE = os.getenv("POLL_MODE", "1") == "1"
 TIP_MODE = os.getenv("TIP_MODE", "1") == "1"
 SHOW_DASHBOARD = os.getenv("SHOW_DASHBOARD", "0") == "1"
@@ -60,7 +110,7 @@ MAX_REPLIES_PER_USER_PER_DAY = int(os.getenv("MAX_REPLIES_PER_USER_PER_DAY", "1"
 REPLY_COOLDOWN_HOURS = int(os.getenv("REPLY_COOLDOWN_HOURS", "12"))
 REPLY_JITTER_MIN = float(os.getenv("REPLY_JITTER_MIN", "2"))
 REPLY_JITTER_MAX = float(os.getenv("REPLY_JITTER_MAX", "6"))
-QUIET_HOURS_UTC = os.getenv("QUIET_HOURS_UTC", "0-5")
+QUIET_HOURS_UTC = os.getenv("QUIET_HOURS_UTC", "0-5")  # "0-5" => من منتصف الليل حتى 5 صباحًا UTC
 AUTO_KILL_ON_ERRORS = os.getenv("AUTO_KILL_ON_ERRORS", "1") == "1"
 MAX_ERRORS_PER_RUN = int(os.getenv("MAX_ERRORS_PER_RUN", "3"))
 KILL_COOLDOWN_MINUTES = int(os.getenv("KILL_COOLDOWN_MINUTES", "180"))
@@ -71,8 +121,12 @@ DEFAULT_HASHTAGS = ["#تقنية", "#برمجة"]
 MAX_HASHTAGS = int(os.getenv("MAX_HASHTAGS", "2"))
 SIGNATURE = os.getenv("SIGNATURE", "").strip()
 
-# Poll Config (includes Daily Tech Tips)
-POLL_CONFIG = {
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
+# =============================================================================
+# تكوين الاستفتاءات والمصادر
+# =============================================================================
+POLL_CONFIG: Dict[str, Dict[str, Any]] = {
     "الذكاء الاصطناعي": {
         "question": "وين تحب نركّز في ثريد AI القادم؟ 🤖",
         "levels": {
@@ -203,142 +257,6 @@ POLL_CONFIG = {
     },
 }
 
-
-def utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def append_jsonl(path: str, obj: dict):
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
-
-class TechBot:
-    def __init__(self):
-        self._require_env()
-
-        self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
-        self.x = tweepy.Client(
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True,
-        )
-
-        self.content_pillars = {
-            "الذكاء الاصطناعي": "ملخصات موثوقة + أمثلة عملية",
-            "الحوسبة السحابية": "مستجدات رسمية + تطبيق عملي",
-            "البرمجة": "أفضل الممارسات + حلول عملية",
-            "نصائح تقنية يومية": "نصائح عملية يومية في AI + الأجهزة الذكية + مواقع التواصل",
-        }
-
-        self.feeds = {
-            "الذكاء الاصطناعي": [
-                "https://openai.com/news/rss.xml",
-                "https://cloud.google.com/blog/rss",
-                "https://blogs.microsoft.com/feed",
-            ],
-            "الحوسبة السحابية": [
-                "https://aws.amazon.com/about-aws/whats-new/recent/feed/",
-                "https://cloud.google.com/blog/rss",
-            ],
-            "البرمجة": [
-                "https://devblogs.microsoft.com/dotnet/feed/",
-                "https://devblogs.microsoft.com/visualstudio/feed/",
-            ],
-            "نصائح تقنية يومية": [
-                "https://openai.com/news/rss.xml",
-                "https://blog.google/rss/",
-                "https://android-developers.googleblog.com/atom.xml",
-                "https://security.googleblog.com/feeds/posts/default?alt=rss",
-                "https://apple.com/newsroom/rss-feed.rss",
-                "https://about.fb.com/news/feed/",
-                "https://instagram-engineering.com/feed",
-            ],
-        }
-
-        self.system_instr = (
-            "اكتب كمختص تقني عربي بأسلوب ودود وواضح.\n"
-            "ممنوع اختلاق مصادر/روابط/إحصاءات/أرقام.\n"
-            "التزم بالمصدر المُعطى فقط.\n"
-            "كل تغريدة: Hook ثم Value ثم CTA (سؤال لطيف).\n"
-            "لا تضع هاشتاقات داخل النص.\n"
-            "لا تضع روابط إلا رابط المصدر مرة واحدة فقط في آخر تغريدة كسطر يبدأ بـ 'المصدر:'.\n"
-        )
-
-        self.state = self._load_state()
-        logging.info("📌 Profile Checklist: Bio واضح + Pin أفضل ثريد + Banner وعد قيمة")
-
-    # ----------------------------
-    # Env
-    # ----------------------------
-    def _require_env(self):
-        needed = ["OPENROUTER_API_KEY", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]
-        missing = [k for k in needed if not os.getenv(k)]
-        if missing:
-            raise EnvironmentError(f"Missing env vars: {', '.join(missing)}")
-
-    # ----------------------------
-    # State & Audit
-    # ----------------------------
-    def _load_state(self):
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as f:
-                    s = json.load(f)
-            except Exception:
-                s = {}
-        else:
-            s = {}
-
-        # posting guards
-        s.setdefault("used_links", [])
-        s.setdefault("month_key", None)
-        s.setdefault("posts_this_month", 0)
-        s.setdefault("reads_this_month", 0)
-        s.setdefault("post_times_15m", [])
-
-        # polls
-        s.setdefault("last_poll_at", None)
-        s.setdefault("last_poll_id", None)
-        s.setdefault("last_poll_pillar", None)
-        s.setdefault("last_poll_level", None)
-        s.setdefault("last_poll_processed", False)
-        s.setdefault("poll_pillar_index", 0)
-        s.setdefault("poll_perf", {})
-
-        # replies
-        s.setdefault("last_mention_id", None)
-        s.setdefault("replied_to_ids", [])
-        s.setdefault("recent_reply_hashes", [])
-        s.setdefault("reply_user_cooldown", {})
-        s.setdefault("reply_times_1h", [])
-        s.setdefault("reply_day_key", None)
-        s.setdefault("replies_today", 0)
-        s.setdefault("replies_today_by_user", {})
-        s.setdefault("opt_out_users", [])
-        s.setdefault("reply_kill_until", None)
-        s.setdefault("errors_last_run", 0)
-
-        # Topic of the Day
-        s.setdefault("tod_day_key", None)
-        s.setdefault("tod_pillar", None)
-        s.setdefault("tod_choice", None)
-        s.setdefault("tod_keywords", [])
-        s.setdefault("tod_poll_id", None)
-
-        return s
-
-    def _save_state(self):
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.state, f, ensure_ascii=False, indent=2)
-
-    def _audit(self, event_type: str, payload: dict, content_type: str = None):
-        append_jsonl(AUDIT_LOG, {
-            "ts": utcnow_iso(),
-            "type": event_type,
-            "content_type": content_type,
-            "payload": payload,
-        })
-
+FEEDS: Dict[str, List[str]] = {
+    "الذكاء الاصطناعي": [
+        "https://openai.com/news/rss.xml",
