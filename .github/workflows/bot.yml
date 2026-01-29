@@ -1,17 +1,24 @@
 name: Tech AI Bot Runner
+
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 */2 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
-        with: {python-version: '3.10'}
-      - run: pip install tweepy openai pyyaml
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install tweepy openai pyyaml
 
       - name: Run Bot
         env:
@@ -21,16 +28,15 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: |
-          # البحث عن ملف main.py وتشغيله من مكانه الفعلي
-          MAIN_FILE=$(find . -name "main.py" | head -n 1)
-          DIR_PATH=$(dirname "$MAIN_FILE")
-          cd "$DIR_PATH"
+          # الدخول للمجلد الظاهر في الصورة وتشغيل الكود
+          cd tech-ai-bot
           python main.py
 
-      - name: Save State
+      - name: Commit and Push State
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "action@github.com"
-          git add **/state.json || echo "No state file"
-          git commit -m "Update state" || echo "Nothing to commit"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # نستخدم النجمة لضمان إضافة الملف مهما كان مكانه
+          git add **/state.json
+          git commit -m "🔄 Update State [skip ci]" || echo "No changes to commit"
           git push
