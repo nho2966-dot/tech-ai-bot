@@ -2,8 +2,8 @@ name: Tech AI Bot Runner
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # يعمل كل ساعتين
-  workflow_dispatch:      # للتشغيل اليدوي
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
       - name: Install Dependencies
         run: pip install tweepy openai pyyaml
 
-      - name: Run Bot
+      - name: Run Bot (Smart Search Mode)
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -28,17 +28,27 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: |
-          # البحث عن ملف main.py وتشغيله من مكانه الفعلي
-          MAIN_FILE=$(find . -name "main.py" | head -n 1)
-          DIR_PATH=$(dirname "$MAIN_FILE")
-          echo "🚀 Starting from: $DIR_PATH"
+          # ابحث عن المسار الحقيقي لملف main.py
+          MAIN_PATH=$(find . -name "main.py" | head -n 1)
+          
+          if [ -z "$MAIN_PATH" ]; then
+            echo "❌ لم يتم العثور على main.py في أي مكان!"
+            exit 1
+          fi
+          
+          echo "🚀 جاري تشغيل البوت من المسار الحقيقي: $MAIN_PATH"
+          
+          # استخراج المجلد الذي يحتوي على الملف والدخول إليه
+          DIR_PATH=$(dirname "$MAIN_PATH")
           cd "$DIR_PATH"
+          
+          # تشغيل البوت
           python main.py
 
-      - name: Commit and Push State
+      - name: Save State
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add **/state.json || echo "No state file"
-          git commit -m "🔄 Update State [skip ci]" || echo "No changes"
+          git config --global user.name "github-actions"
+          git config --global user.email "action@github.com"
+          git add **/state.json || echo "No state file yet"
+          git commit -m "🔄 Update State" || echo "Nothing to commit"
           git push
