@@ -1,5 +1,6 @@
 language: ar
 tone: friendly_human
+
 topics:
   - artificial intelligence
   - ai tools
@@ -9,17 +10,18 @@ topics:
   - automation
 
 posting:
-  max_tweets_per_run: 2
+  max_posts_per_run: 1
   allow_threads: true
   hashtags_limit: 3
   emoji: true
-
-sources:
-  - https://news.ycombinator.com
-  - https://techcrunch.com
-  - https://www.theverge.com
-  - https://arxiv.org
+  peak_hours: [9, 13, 18, 21]
 
 style:
+  hook_required: true
   call_to_action: true
   questions: true
+
+sources:
+  hackernews: true
+  techcrunch: true
+  verge: true
