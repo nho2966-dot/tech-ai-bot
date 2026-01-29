@@ -2,8 +2,8 @@ name: Tech AI Bot Runner
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # يعمل كل ساعتين تلقائياً
-  workflow_dispatch: # يتيح لك التشغيل اليدوي للتجربة
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,6 +20,10 @@ jobs:
       - name: Install Dependencies
         run: pip install tweepy openai pyyaml
 
+      # --- الإضافة الهامة لمزامنة الوقت ---
+      - name: Sync Clock
+        run: sudo hwclock -s || echo "Using system time"
+
       - name: Run Bot
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -28,7 +32,6 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: |
-          # الدخول للمجلد الذي يحتوي على الكود ثم التشغيل
           cd tech-ai-bot
           python main.py
 
