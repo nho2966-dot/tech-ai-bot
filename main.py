@@ -1,39 +1,120 @@
-import json
-import yaml
-from core.trend_hunter import get_trending_topic
-from core.ai_writer import generate_content
-from core.tweet_optimizer import optimize
-from core.publisher import publish
-from utils.helpers import is_peak_time, choose_post_type
-from utils.logger import log
+import os, json, logging, tweepy, time
+from openai import OpenAI
 
-with open("config.yaml") as f:
-    config = yaml.safe_load(f)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
 
-with open("state.json") as f:
-    state = json.load(f)
+# ====== الإعدادات ======
+OPENAI_MODEL = "gpt-4o-mini"
+STATE_FILE = "state.json"
 
-if not is_peak_time(config["posting"]["peak_hours"]):
-    log("⏰ خارج وقت الذروة – تم التخطي")
-    exit()
+PERSONA_PROMPT = """
+أنت صحفي تقني عربي محترف.
+تشرح التقنية بلغة إنسانية، ودودة، ذكية.
+لا تبالغ، لا تجزم بدون مصدر.
+ابدأ دائمًا بـ Hook قوي.
+أنهِ المنشور بسؤال تفاعلي.
+"""
 
-topic = get_trending_topic(state["last_topics"])
-mode = choose_post_type() if config["posting"]["allow_threads"] else "tweet"
+TREND_TOPICS = [
+    "الذكاء الاصطناعي",
+    "ChatGPT",
+    "Meta",
+    "Google",
+    "OpenAI",
+    "تحديث",
+    "ميزة جديدة"
+]
 
-log(f"🔥 Topic: {topic}")
-log(f"📝 Mode: {mode}")
+# ====== تشغيل البوت ======
+def run_bot():
+    logging.info("🚀 تشغيل الوكيل الإعلامي الاحترافي")
 
-content = generate_content(topic, mode)
+    client = tweepy.Client(
+        bearer_token=os.environ["X_BEARER_TOKEN"],
+        consumer_key=os.environ["X_API_KEY"],
+        consumer_secret=os.environ["X_API_SECRET"],
+        access_token=os.environ["X_ACCESS_TOKEN"],
+        access_token_secret=os.environ["X_ACCESS_SECRET"],
+        wait_on_rate_limit=True
+    )
 
-if mode == "thread":
-    content = [optimize(t) for t in content.split("\n") if t.strip()]
-else:
-    content = optimize(content)
+    ai = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-publish(content)
+    query = "(AI OR تقنية OR ذكاء_اصطناعي) lang:ar -is:retweet"
+    tweets = client.search_recent_tweets(query=query, max_results=5)
 
-state["last_topics"].append(topic)
-state["last_topics"] = state["last_topics"][-10:]
+    state = load_state()
 
-with open("state.json", "w") as f:
-    json.dump(state, f, ensure_ascii=False, indent=2)
+    for tweet in tweets.data or []:
+        if tweet.id in state["replied"]:
+            continue
+
+        content = generate_content(ai, tweet.text)
+        score = evaluate_content(ai, content)
+
+        if score < 80:
+            logging.info(f"⛔ تم رفض المحتوى (Score={score})")
+            continue
+
+        client.create_tweet(
+            text=content,
+            in_reply_to_tweet_id=tweet.id
+        )
+
+        state["replied"].append(tweet.id)
+        save_state(state)
+        logging.info(f"✅ نُشر بنجاح (Score={score})")
+        break
+
+# ====== توليد المحتوى ======
+def generate_content(ai, source_text):
+    prompt = f"""
+{PERSONA_PROMPT}
+
+المصدر:
+{source_text}
+
+اكتب تغريدة أو ثريد قصير احترافي.
+"""
+    res = ai.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return res.choices[0].message.content.strip()
+
+# ====== تقييم المحتوى ======
+def evaluate_content(ai, content):
+    prompt = f"""
+قيّم المحتوى التالي من 100 حسب:
+- قوة البداية
+- الدقة
+- الأنسنة
+- التفاعل
+
+المحتوى:
+{content}
+
+أعطني رقمًا فقط.
+"""
+    res = ai.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    try:
+        return int(res.choices[0].message.content.strip())
+    except:
+        return 0
+
+# ====== الحالة ======
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"replied": []}
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+if __name__ == "__main__":
+    run_bot()
