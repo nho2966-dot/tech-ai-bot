@@ -1,77 +1,54 @@
-# .github/workflows/config.yaml
-# إعدادات البوت – سيتم قراءته من داخل workflows/
-
+# ───────────────────────────────────────────────
+# إعدادات البوت والتشغيل
+# ───────────────────────────────────────────────
 bot:
-  name: "TechExpertMasterFinal"
-  version: "v88.2 Pro Growth Edition"
+  mode: "auto"
   dry_run: false
-  signature: " — تقنية عربية"
-  mode: "auto"                            # auto أو manual
+  signature: "— Tech AI Bot"
 
+# ───────────────────────────────────────────────
+# إعدادات واجهة برمجة التطبيقات (API)
+# ───────────────────────────────────────────────
 api:
   openrouter:
     api_key_env: "OPENROUTER_API_KEY"
+    default_model: "qwen/qwen-2.5-72b-instruct"
+    reply_model: "openai/gpt-4o-mini"
   twitter:
-    api_key_env:      "X_API_KEY"
-    api_secret_env:   "X_API_SECRET"
+    api_key_env: "X_API_KEY"
+    api_secret_env: "X_API_SECRET"
     access_token_env: "X_ACCESS_TOKEN"
     access_secret_env: "X_ACCESS_SECRET"
 
-limits:
-  min_hours_between_threads: 24
-  max_replies_per_run: 2
-  max_replies_per_day: 5
-
+# ───────────────────────────────────────────────
+# إعدادات توليد المحتوى (علاج اللغة والجفاف)
+# ───────────────────────────────────────────────
 content:
-  default_hashtags:
-    - "#ذكاء_اصطناعي"
-    - "#تقنية"
-
   pillars:
-    الذكاء الاصطناعي: "Generative AI, AI Agents, أخلاقيات الاستخدام"
-    الأمن السيبراني: "Zero Trust, Passkeys, Ransomware"
-    البرمجة: "Python/Rust, أدوات AI, Clean Code"
-    الحوسبة السحابية: "AWS/Azure/GCP, Cloud Security"
-    مبادرات سعودية AI: "سدايا, علّام, كورسات مجانية"
-    مقارنات AI: "Grok vs ChatGPT vs Gemini"
+    - "breaking_news"
+    - "ai_daily_life"
+    - "ai_tool"
+  # التعليمات اللغوية الصارمة (System Instruction)
+  system_instruction: >
+    أنت خبير تقني محترف ومبدع.
+    القاعدة الذهبية: اللغة العربية فقط. ممنوع استخدام الصينية أو الإنجليزية.
+    الأسلوب: تفاعلي، مشوق، وغير جاف.
+    اكتمال النص: يجب أن تكون التغريدة جملة كاملة تنتهي بفكرة مفيدة.
+    المد بالواو: تذكر ضم الشفتين جيداً عند كتابة كلمات مثل (تطوير، تكنولوجيا).
 
-media:
-  enabled: true
-  folder: "../media/"                     # مهم: المسار النسبي من workflows/ إلى media/
-  probability_first_tweet: 0.4
-  probability_reply: 0.25
-  files:
-    - "ai_infographic.png"
-    - "python_cheatsheet.jpg"
-    - "quick_tip.mp4"
-    - "grok_vs_chatgpt.jpg"
-    - "sdaia_banner.png"
-
-generation:
-  models_priority:
-    - "qwen/qwen-2.5-32b-instruct"
-    - "qwen/qwen-2.5-72b-instruct"
-    - "meta-llama/llama-3.1-70b-instruct"
-
-  max_tokens:
-    thread: 900
-    reply: 140
-
-  temperature: 0.65
-
-  thread_length:
-    min_tweets: 3
-    max_tweets: 5
-    min_chars_per_tweet: 80
+# ───────────────────────────────────────────────
+# محددات العمل والمسارات
+# ───────────────────────────────────────────────
+limits:
+  max_replies_per_run: 1
+  min_hours_between_threads: 24
+  wait_between_actions: 20
 
 paths:
-  state_file: "../../state.json"          # من workflows/ إلى state.json في الجذر
-  audit_log: "../../audit_log.jsonl"      # نفس الشيء
-
-reply:
-  cache_enabled: true
-  min_text_length_to_reply: 35
+  # تأكد أن هذه المسارات تشير لمكان الملفات الفعلي في الريبو
+  state_file: "./state.json"
+  audit_log: "./audit_log.jsonl"
 
 logging:
-  level: INFO
+  level: "INFO"
   format: "%(asctime)s | %(levelname)-5s | %(message)s"
