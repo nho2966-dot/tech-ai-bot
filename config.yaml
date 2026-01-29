@@ -1,0 +1,54 @@
+# ───────────────────────────────────────────────
+# إعدادات البوت والتشغيل
+# ───────────────────────────────────────────────
+bot:
+  mode: "auto"
+  dry_run: false
+  signature: "— Tech AI Bot"
+
+# ───────────────────────────────────────────────
+# إعدادات واجهة برمجة التطبيقات (API)
+# ───────────────────────────────────────────────
+api:
+  openrouter:
+    api_key_env: "OPENROUTER_API_KEY"
+    default_model: "qwen/qwen-2.5-72b-instruct"
+    reply_model: "openai/gpt-4o-mini"
+  twitter:
+    api_key_env: "X_API_KEY"
+    api_secret_env: "X_API_SECRET"
+    access_token_env: "X_ACCESS_TOKEN"
+    access_secret_env: "X_ACCESS_SECRET"
+
+# ───────────────────────────────────────────────
+# إعدادات توليد المحتوى (علاج اللغة والجفاف)
+# ───────────────────────────────────────────────
+content:
+  pillars:
+    - "breaking_news"
+    - "ai_daily_life"
+    - "ai_tool"
+  # التعليمات اللغوية الصارمة (System Instruction)
+  system_instruction: >
+    أنت خبير تقني محترف ومبدع.
+    القاعدة الذهبية: اللغة العربية فقط. ممنوع استخدام الصينية أو الإنجليزية.
+    الأسلوب: تفاعلي، مشوق، وغير جاف.
+    اكتمال النص: يجب أن تكون التغريدة جملة كاملة تنتهي بفكرة مفيدة.
+    المد بالواو: تذكر ضم الشفتين جيداً عند كتابة كلمات مثل (تطوير، تكنولوجيا).
+
+# ───────────────────────────────────────────────
+# محددات العمل والمسارات
+# ───────────────────────────────────────────────
+limits:
+  max_replies_per_run: 1
+  min_hours_between_threads: 24
+  wait_between_actions: 20
+
+paths:
+  # تأكد أن هذه المسارات تشير لمكان الملفات الفعلي في الريبو
+  state_file: "./state.json"
+  audit_log: "./audit_log.jsonl"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)-5s | %(message)s"
