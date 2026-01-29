@@ -1,17 +1,17 @@
 # config.yaml
-# إعدادات البوت التقني – يُقرأ عند بداية التشغيل
-# كل التغييرات هنا تنعكس مباشرة دون تعديل الكود
+# الموقع: في الجذر (root) بجانب main.py مباشرة
+# جميع المسارات نسبية من root المشروع (tech-ai-bot/)
 
 bot:
-  name: "TechExpertMasterFinal"
+  name: "Tech AI Bot"
   version: "v88.2 Pro Growth Edition"
-  dry_run: false                          # true = لا ينشر فعليًا (اختبار فقط)
-  signature: " — تقنية عربية"             # يُضاف في نهاية آخر تغريدة – "" لإلغائه
-  mode: "auto"                            # auto = نشر صامت | manual = عرض قبل النشر ثم نشر تلقائي
+  dry_run: false
+  signature: " — تقنية عربية"
+  mode: "auto"                            # auto أو manual
 
 api:
   openrouter:
-    api_key_env: "OPENROUTER_API_KEY"     # اسم المتغير البيئي الذي يحتوي على المفتاح
+    api_key_env: "OPENROUTER_API_KEY"
   twitter:
     api_key_env:      "X_API_KEY"
     api_secret_env:   "X_API_SECRET"
@@ -19,31 +19,29 @@ api:
     access_secret_env: "X_ACCESS_SECRET"
 
 limits:
-  min_hours_between_threads: 24           # الحد الأدنى بين الثريدات (ساعات)
-  max_replies_per_run: 2                  # أقصى ردود في كل دورة تشغيل
-  max_replies_per_day: 5                  # أقصى ردود يوميًا
+  min_hours_between_threads: 24
+  max_replies_per_run: 2
+  max_replies_per_day: 5
 
 content:
   default_hashtags:
     - "#ذكاء_اصطناعي"
     - "#تقنية"
-    # - "#سدايا"
-    # - "#برمجة"
 
-  pillars:                                # المواضيع المتاحة (يُختار واحد عشوائيًا)
+  pillars:
     الذكاء الاصطناعي: "Generative AI, AI Agents, أخلاقيات الاستخدام"
     الأمن السيبراني: "Zero Trust, Passkeys, Ransomware"
     البرمجة: "Python/Rust, أدوات AI, Clean Code"
     الحوسبة السحابية: "AWS/Azure/GCP, Cloud Security"
-    مبادرات سعودية AI: "سدايا, علّام, كورسات مجانية معتمدة"
-    مقارنات AI: "Grok vs ChatGPT vs Gemini, أفضل أدوات AI"
+    مبادرات سعودية AI: "سدايا, علّام, كورسات مجانية"
+    مقارنات AI: "Grok vs ChatGPT vs Gemini"
 
 media:
   enabled: true
-  folder: "media/"
-  probability_first_tweet: 0.4          # احتمال إرفاق ميديا في أول تغريدة من الثريد
-  probability_reply: 0.25               # احتمال إرفاق ميديا في الردود
-  files:                                # أسماء الملفات الموجودة داخل مجلد media/
+  folder: "media/"                        # المسار: tech-ai-bot/media/
+  probability_first_tweet: 0.4
+  probability_reply: 0.25
+  files:
     - "ai_infographic.png"
     - "python_cheatsheet.jpg"
     - "quick_tip.mp4"
@@ -51,16 +49,16 @@ media:
     - "sdaia_banner.png"
 
 generation:
-  models_priority:                      # يُجرب بالترتيب حتى ينجح
-    - "qwen/qwen-2.5-32b-instruct"      # الأسرع والأرخص
+  models_priority:
+    - "qwen/qwen-2.5-32b-instruct"
     - "qwen/qwen-2.5-72b-instruct"
     - "meta-llama/llama-3.1-70b-instruct"
 
   max_tokens:
-    thread: 900                         # أقصى توكن للثريد
-    reply: 140                          # أقصى توكن للردود
+    thread: 900
+    reply: 140
 
-  temperature: 0.65                     # درجة الإبداع (0.6–0.8 مناسبة عادةً)
+  temperature: 0.65
 
   thread_length:
     min_tweets: 3
@@ -68,13 +66,17 @@ generation:
     min_chars_per_tweet: 80
 
 paths:
-  state_file: "state.json"              # ملف حفظ حالة البوت
-  audit_log: "audit_log.jsonl"          # سجل الأحداث
+  state_file: "state.json"                # في الجذر: tech-ai-bot/state.json
+  audit_log: "audit_log.jsonl"            # في الجذر: tech-ai-bot/audit_log.jsonl
+  logs_folder: "logs/"                    # مجلد logs/bot.log
+  reply_agent: "src/reply_agent.py"       # إشارة إلى الملف إذا كان البوت يستخدمه
+  post_publisher: "src/post_publisher.py"
 
 reply:
-  cache_enabled: true                   # تفعيل الكاش للردود المتكررة
-  min_text_length_to_reply: 35          # أقل طول لنص المنشن ليتم الرد عليه
+  cache_enabled: true
+  min_text_length_to_reply: 35
 
 logging:
   level: INFO
   format: "%(asctime)s | %(levelname)-5s | %(message)s"
+  log_file: "logs/bot.log"                # مسار السجل حسب هيكلك
