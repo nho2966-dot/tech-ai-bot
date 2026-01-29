@@ -2,8 +2,8 @@ name: Tech AI Bot Runner
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
-  workflow_dispatch:
+    - cron: '0 */2 * * *' # يعمل كل ساعتين
+  workflow_dispatch:      # للتشغيل اليدوي
 
 jobs:
   build:
@@ -28,15 +28,17 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: |
-          # الدخول للمجلد الظاهر في الصورة وتشغيل الكود
-          cd tech-ai-bot
+          # البحث عن ملف main.py وتشغيله من مكانه الفعلي
+          MAIN_FILE=$(find . -name "main.py" | head -n 1)
+          DIR_PATH=$(dirname "$MAIN_FILE")
+          echo "🚀 Starting from: $DIR_PATH"
+          cd "$DIR_PATH"
           python main.py
 
       - name: Commit and Push State
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # نستخدم النجمة لضمان إضافة الملف مهما كان مكانه
-          git add **/state.json
-          git commit -m "🔄 Update State [skip ci]" || echo "No changes to commit"
+          git add **/state.json || echo "No state file"
+          git commit -m "🔄 Update State [skip ci]" || echo "No changes"
           git push
