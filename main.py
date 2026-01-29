@@ -1,38 +1,39 @@
-import os
 import json
-import logging
-import random
-import tweepy
+import yaml
+from core.trend_hunter import get_trending_topic
+from core.ai_writer import generate_content
+from core.tweet_optimizer import optimize
+from core.publisher import publish
+from utils.helpers import is_peak_time, choose_post_type
+from utils.logger import log
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
+with open("config.yaml") as f:
+    config = yaml.safe_load(f)
 
-STATE_FILE = "state.json"
+with open("state.json") as f:
+    state = json.load(f)
 
-RESPONSES = [
-    "خبر تقني مثير للاهتمام 👏 #ذكاء_اصطناعي",
-    "التكنولوجيا تتطور بسرعة مذهلة 🚀",
-    "معلومة تقنية رائعة 🤖",
-    "المستقبل الرقمي يقترب أكثر 💡",
-    "تقدم تقني يستحق المتابعة 🔥"
-]
+if not is_peak_time(config["posting"]["peak_hours"]):
+    log("⏰ خارج وقت الذروة – تم التخطي")
+    exit()
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return []
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f).get("replied", [])
-    except Exception:
-        return []
+topic = get_trending_topic(state["last_topics"])
+mode = choose_post_type() if config["posting"]["allow_threads"] else "tweet"
 
-def save_state(replied):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"replied": replied}, f, ensure_ascii=False, indent=2)
+log(f"🔥 Topic: {topic}")
+log(f"📝 Mode: {mode}")
 
-def run_bot():
-    logging.info("🚀 بدء تشغيل Tech AI Bot")
+content = generate_content(topic, mode)
 
-    ck = os.getenv("X_API_KEY", "").stri
+if mode == "thread":
+    content = [optimize(t) for t in content.split("\n") if t.strip()]
+else:
+    content = optimize(content)
+
+publish(content)
+
+state["last_topics"].append(topic)
+state["last_topics"] = state["last_topics"][-10:]
+
+with open("state.json", "w") as f:
+    json.dump(state, f, ensure_ascii=False, indent=2)
