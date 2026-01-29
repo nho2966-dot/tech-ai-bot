@@ -23,8 +23,12 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          cd tech-ai-bot
+        - name: Run Bot
+  run: |
+    pwd
+    ls -la
+    python main.py
+
           pip install -r requirements.txt
 
       - name: Run bot
