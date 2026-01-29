@@ -9,10 +9,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -20,35 +22,23 @@ jobs:
       - name: Install Dependencies
         run: pip install tweepy openai pyyaml
 
-      - name: Run Bot (Smart Search Mode)
+      - name: Run Bot
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          # ابحث عن المسار الحقيقي لملف main.py
-          MAIN_PATH=$(find . -name "main.py" | head -n 1)
-          
-          if [ -z "$MAIN_PATH" ]; then
-            echo "❌ لم يتم العثور على main.py في أي مكان!"
-            exit 1
-          fi
-          
-          echo "🚀 جاري تشغيل البوت من المسار الحقيقي: $MAIN_PATH"
-          
-          # استخراج المجلد الذي يحتوي على الملف والدخول إليه
-          DIR_PATH=$(dirname "$MAIN_PATH")
-          cd "$DIR_PATH"
-          
-          # تشغيل البوت
+          # الدخول للمجلد الظاهر في الصورة
+          cd tech-ai-bot
           python main.py
 
-      - name: Save State
+      - name: Sync & Push State
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "action@github.com"
-          git add **/state.json || echo "No state file yet"
-          git commit -m "🔄 Update State" || echo "Nothing to commit"
-          git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          git add tech-ai-bot/state.json
+          git commit -m "🔄 Update State [skip ci]" || echo "No changes"
+          git push origin main
