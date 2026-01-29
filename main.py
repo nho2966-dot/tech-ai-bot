@@ -1,106 +1,68 @@
 import os
-import time
 import json
-import hashlib
-from datetime import datetime
-from dotenv import load_dotenv
+import feedparser
 import tweepy
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
-# =========================
-# تحميل الإعدادات
-# =========================
+# --- تحميل المتغيرات ---
 load_dotenv()
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 
-X_API_KEY = os.getenv("X_API_KEY")
-X_API_SECRET = os.getenv("X_API_SECRET")
-X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
-X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
-BOT_USER_ID = os.getenv("BOT_USER_ID")
+# إعداد عميل X
+client = tweepy.Client(
+    bearer_token=BEARER_TOKEN,
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_SECRET
+)
 
-POST_COOLDOWN_SECONDS = 1800  # 30 دقيقة
-POST_LOG_FILE = "posted_tweets.json"
+# --- مصادر موثوقة للأخبار التقنية ---
+RSS_FEEDS = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://www.techcrunch.com/feed/",
+    "https://www.wired.com/feed/rss"
+]
 
-# =========================
-# تهيئة X Client
-# =========================
-def create_client():
+STATE_FILE = "posted_news.json"
+
+# تحميل سجل المنشورات
+try:
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
+        posted_news = json.load(f)
+except FileNotFoundError:
+    posted_news = []
+
+# --- جلب الأخبار ---
+news_items = []
+for feed_url in RSS_FEEDS:
+    feed = feedparser.parse(feed_url)
+    for entry in feed.entries:
+        published_date = datetime(*entry.published_parsed[:6])
+        if (datetime.now() - published_date) <= timedelta(days=7) and entry.link not in posted_news:
+            news_items.append({
+                "title": entry.title,
+                "url": entry.link,
+                "date": published_date.strftime("%Y-%m-%d")
+            })
+
+# --- حد أقصى للنشر يوميًا ---
+MAX_DAILY_POSTS = 3
+to_post = news_items[:MAX_DAILY_POSTS]
+
+# --- نشر الأخبار ---
+for news in to_post:
+    tweet_text = f"🚀 {news['title']}\nاقرأ المزيد من المصدر الرسمي: {news['url']}\n💬 شاركنا رأيك!"
     try:
-        client = tweepy.Client(
-            consumer_key=X_API_KEY,
-            consumer_secret=X_API_SECRET,
-            access_token=X_ACCESS_TOKEN,
-            access_token_secret=X_ACCESS_SECRET,
-            wait_on_rate_limit=True
-        )
-        # اختبار صحة التوكن
-        client.get_user(id=BOT_USER_ID)
-        return client
-    except tweepy.errors.Unauthorized:
-        print("❌ خطأ: بيانات اعتماد X غير صحيحة. تحقق من Secrets و BOT_USER_ID.")
-        return None
-
-client = create_client()
-if client is None:
-    exit(1)  # إيقاف البوت إذا كان التوكن غير صالح
-
-# =========================
-# أدوات مساعدة
-# =========================
-def load_posted_log():
-    if not os.path.exists(POST_LOG_FILE):
-        return {}
-    with open(POST_LOG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_posted_log(data):
-    with open(POST_LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def hash_content(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-# =========================
-# التحقق من إمكانية النشر
-# =========================
-def can_post(content_hash, log):
-    if content_hash in log:
-        return False
-    last_time = log.get("_last_post_time")
-    if last_time:
-        elapsed = time.time() - last_time
-        if elapsed < POST_COOLDOWN_SECONDS:
-            return False
-    return True
-
-# =========================
-# صياغة المحتوى
-# =========================
-def format_tweet(title, url):
-    return f"{title}\n\nالمصدر: {url}"
-
-# =========================
-# النشر الآمن
-# =========================
-def publish_tweet(client, text):
-    try:
-        response = client.create_tweet(text=text)
-        print(f"✅ تم النشر بنجاح: {response.data['id']}")
-        return response.data["id"]
-    except tweepy.errors.Unauthorized:
-        print("❌ خطأ: فشل النشر بسبب بيانات اعتماد غير صحيحة.")
-        return None
+        client.create_tweet(text=tweet_text)
+        print(f"تم النشر: {news['title']}")
+        posted_news.append(news["url"])
     except Exception as e:
-        print(f"❌ خطأ غير متوقع عند النشر: {e}")
-        return None
+        print(f"خطأ أثناء النشر: {e}")
 
-# =========================
-# منطق التنفيذ الرئيسي
-# =========================
-def main():
-    posted_log = load_posted_log()
-
-    # مثال: بيانات خبر تقني حديث
-    news_items = [
-        {
-            "title": "شركة آبل تكشف عن تحديث iOS 18 مع مزايا ذكاء اصطناعي محسّنة",
-            "url": "https://www.apple.com/newsro
+# --- تحديث سجل المنش
