@@ -1,9 +1,8 @@
-# config.yaml
-# الموقع: في الجذر (root) بجانب main.py مباشرة
-# جميع المسارات نسبية من root المشروع (tech-ai-bot/)
+# .github/workflows/config.yaml
+# إعدادات البوت – سيتم قراءته من داخل workflows/
 
 bot:
-  name: "Tech AI Bot"
+  name: "TechExpertMasterFinal"
   version: "v88.2 Pro Growth Edition"
   dry_run: false
   signature: " — تقنية عربية"
@@ -38,7 +37,7 @@ content:
 
 media:
   enabled: true
-  folder: "media/"                        # المسار: tech-ai-bot/media/
+  folder: "../media/"                     # مهم: المسار النسبي من workflows/ إلى media/
   probability_first_tweet: 0.4
   probability_reply: 0.25
   files:
@@ -66,11 +65,8 @@ generation:
     min_chars_per_tweet: 80
 
 paths:
-  state_file: "state.json"                # في الجذر: tech-ai-bot/state.json
-  audit_log: "audit_log.jsonl"            # في الجذر: tech-ai-bot/audit_log.jsonl
-  logs_folder: "logs/"                    # مجلد logs/bot.log
-  reply_agent: "src/reply_agent.py"       # إشارة إلى الملف إذا كان البوت يستخدمه
-  post_publisher: "src/post_publisher.py"
+  state_file: "../../state.json"          # من workflows/ إلى state.json في الجذر
+  audit_log: "../../audit_log.jsonl"      # نفس الشيء
 
 reply:
   cache_enabled: true
@@ -79,4 +75,3 @@ reply:
 logging:
   level: INFO
   format: "%(asctime)s | %(levelname)-5s | %(message)s"
-  log_file: "logs/bot.log"                # مسار السجل حسب هيكلك
