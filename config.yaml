@@ -1,8 +1,25 @@
-content:
-  system_instruction: >
-    أنت خبير تقني ذكي. تحدث بالعربية فقط. 
-api:
-  openrouter_model: "qwen/qwen-2.5-72b-instruct"
-  reply_model: "openai/gpt-4o-mini"
-paths:
-  state_file: "state.json"
+language: ar
+tone: friendly_human
+topics:
+  - artificial intelligence
+  - ai tools
+  - social media platforms
+  - tech news
+  - startups
+  - automation
+
+posting:
+  max_tweets_per_run: 2
+  allow_threads: true
+  hashtags_limit: 3
+  emoji: true
+
+sources:
+  - https://news.ycombinator.com
+  - https://techcrunch.com
+  - https://www.theverge.com
+  - https://arxiv.org
+
+style:
+  call_to_action: true
+  questions: true
