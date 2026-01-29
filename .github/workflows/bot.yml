@@ -2,8 +2,8 @@ name: Tech AI Bot Runner
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # يعمل كل ساعتين
-  workflow_dispatch: # للتشغيل اليدوي
+    - cron: '0 */2 * * *' # يعمل كل ساعتين تلقائياً
+  workflow_dispatch: # يتيح لك التشغيل اليدوي للتجربة
 
 jobs:
   build:
@@ -27,4 +27,16 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: python main.py
+        run: |
+          # الدخول للمجلد الذي يحتوي على الكود ثم التشغيل
+          cd tech-ai-bot
+          python main.py
+
+      - name: Commit and Push State
+        run: |
+          cd tech-ai-bot
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "🔄 Update State [skip ci]" || echo "No changes to commit"
+          git push
