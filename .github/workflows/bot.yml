@@ -2,8 +2,8 @@ name: Run Bot
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # يوميًا 9 صباحًا
-  workflow_dispatch:
+    - cron: '0 9 * * *'   # يوميًا الساعة 9 صباحًا
+  workflow_dispatch:      # تشغيل يدوي عند الحاجة
 
 jobs:
   run-bot:
@@ -19,20 +19,25 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # التأكد من تثبيت متطلبات المجلد الفرعي إذا وجدت
+          if [ -f src/requirements.txt ]; then pip install -r src/requirements.txt; fi
 
       - name: Run bot
-        run: python main.py
+        run: python src/main.py
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-- name: Commit state file
-  run: |
-    git config user.name "ai-bot"
-    git config user.email "bot@users.noreply.github.com"
-    git add posted_news.json
-    git commit -m "Update posted news state" || echo "No changes"
-    git push
+
+      - name: Commit state files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # إضافة كافة ملفات الحالة المذكورة في هيكل مشروعك
+          git add state.json utils/last_hash.txt utils/last_tweet_hash.txt
+          git commit -m "Update bot state and history [skip ci]" || echo "No changes to commit"
+          git push
