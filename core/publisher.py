@@ -19,3 +19,7 @@ def publish(content):
     else:
         client.create_tweet(text=content)
         log("🐦 Tweet published")
+def publish_with_media(self, post_content: str, image_path: str):
+    """نشر تغريدة مع صورة"""
+    media_id = self.client.upload_media(image_path)
+    self.client.create_tweet(text=post_content, media_ids=[media_id])
