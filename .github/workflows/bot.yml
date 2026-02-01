@@ -2,8 +2,8 @@ name: Run Bot
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # يوميًا الساعة 9 صباحًا
-  workflow_dispatch:      # تشغيل يدوي عند الحاجة
+    - cron: '0 9 * * *'   # يعمل تلقائياً كل يوم الساعة 9 صباحاً
+  workflow_dispatch:      # يتيح لك تشغيله يدوياً من تبويب Actions
 
 jobs:
   run-bot:
@@ -12,32 +12,44 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
+          cache: 'pip' # تسريع العمليات المستقبلية عبر تخزين المكتبات
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # التأكد من تثبيت متطلبات المجلد الفرعي إذا وجدت
-          if [ -f src/requirements.txt ]; then pip install -r src/requirements.txt; fi
 
       - name: Run bot
-        run: python src/main.py
+        run: python main.py
         env:
+          # تأكد من إضافة هذه الأسماء في GitHub Secrets
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          # إذا كان الكود يحتاج مفاتيح أخرى (مثل OpenAI) أضفها هنا
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-      - name: Commit state files
+      - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # إضافة كافة ملفات الحالة المذكورة في هيكل مشروعك
+          
+          # إضافة ملفات الحالة لضمان عدم تكرار النشر أو الردود
           git add state.json utils/last_hash.txt utils/last_tweet_hash.txt
-          git commit -m "Update bot state and history [skip ci]" || echo "No changes to commit"
-          git push
+          
+          # الالتزام بالتغييرات فقط في حال وجود تحديثات
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update bot state and logs [skip ci]"
+            git push
+          fi
