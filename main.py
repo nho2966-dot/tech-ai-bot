@@ -4,6 +4,7 @@ import json
 import hashlib
 import logging
 import requests
+import random
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
@@ -13,23 +14,30 @@ import feedparser
 from google import genai
 
 # =========================
-# CONFIGURATION
+# GLOBAL SOURCES GRID (مصادر عالمية موثوقة)
 # =========================
 
 SOURCES = [
-    "https://www.theverge.com/rss/index.xml",
-    "https://techcrunch.com/feed/",
-    "https://9to5mac.com/feed/",
+    "https://ai.googleblog.com/atom.xml",
+    "https://www.microsoft.com/en-us/research/feed/",
+    "https://engineering.fb.com/feed/",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+    "https://www.theguardian.com/technology/rss",
+    "https://www.reutersagency.com/feed/?best-topics=technology&post_type=best",
+    "https://www.technologyreview.com/feed/",
+    "https://spectrum.ieee.org/rss/fulltext",
+    "https://arstechnica.com/feed/",
+    "https://www.wired.com/feed/rss"
 ]
 
 STATE_FILE = "state.json"
-MAX_POSTS = 2 
-POST_DELAY = 60
+MAX_POSTS = 2
+POST_DELAY = 120
 
-BLACKLIST_TOPICS = ["politics", "war", "crime", "celebrity", "gossip", "election", "military", "sports"]
-TECH_KEYWORDS = ["ai", "apple", "google", "chip", "nvidia", "meta", "gpt", "ios", "android", "software", "hardware"]
+# فلاتر الاستبعاد الصارمة
+BLACKLIST_TOPICS = ["war", "politics", "election", "crime", "court", "lawsuit", "military", "celebrity"]
 
-class TechEliteBot:
+class TechEliteFinalBot:
 
     def __init__(self):
         self._init_logging()
@@ -38,9 +46,10 @@ class TechEliteBot:
         self.state = self._load_state()
 
     def _init_logging(self):
-        logging.basicConfig(level=logging.INFO, format="🚀 %(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M")
+        logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M")
 
     def _load_env(self):
+        # تأكد من إضافة المفاتيح في GitHub Secrets
         self.GEMINI_KEY = os.getenv("GEMINI_KEY")
         self.X_API_KEY = os.getenv("X_API_KEY")
         self.X_API_SECRET = os.getenv("X_API_SECRET")
@@ -75,7 +84,7 @@ class TechEliteBot:
     def _upload_media(self, url: str) -> Optional[str]:
         if not url: return None
         try:
-            filename = "temp_res.jpg"
+            filename = "media_content.jpg"
             res = requests.get(url, stream=True, timeout=10)
             if res.status_code == 200:
                 with open(filename, 'wb') as f:
@@ -91,46 +100,67 @@ class TechEliteBot:
             return res.text.strip()
         except: return None
 
-    def analyze_and_format(self, title: str, summary: str, source: str) -> Optional[str]:
-        """المحرك الإبداعي: صياغة التغريدة بنظام الطبقات الثلاث"""
-        prompt = (
-            f"أنت خبير تقني ومحلل استراتيجي بمتابعة عالمية. حلل الخبر الآتي بصيغة 'أنسنة' جذابة:\n"
-            f"العنوان: {title}\nالملخص: {summary}\n\n"
-            f"المطلوب صياغة تغريدة احترافية تلتزم بالآتي:\n"
-            f"1. ابدأ بوسم حالة مناسب مثل (🚀 إطلاق رسمي، 🕵️ تسريب، 💡 فكرة، 🔄 تحديث).\n"
-            f"2. الطبقة الأولى: ابدأ بسؤال تفاعلي يمس المتابع مباشرة.\n"
-            f"3. الطبقة الثانية: اشرح الخبر والفوائد العملية منه مع ذكر المصطلحات التقنية بالإنجليزية بين قوسين.\n"
-            f"4. الطبقة الثالثة: قدم 'نظرة مستقبلية' أو توقع ذكي بناءً على هذا الخبر.\n"
-            f"5. الخاتمة: دعوة للمشاركة + المصدر: {source}\n\n"
-            f"⚠️ ملاحظة: ممنوع اختلاق حقائق، وممنوع استخدام الإنجليزية إلا للمصطلحات."
+    def generate_content_with_verification(self, title: str, summary: str, source: str) -> Optional[str]:
+        """المرحلة 1: صياغة المحتوى مع تقييد صارم للمعلومات"""
+        draft_prompt = (
+            f"أنت محرر تقني مدقق. حول الخبر التالي إلى تغريدة عربية بشرية محفزة.\n"
+            f"الخبر: {title}\nالملخص: {summary}\n\n"
+            f"⚠️ شروط عدم الهلوسة:\n"
+            f"- لا تضف أي معلومة أو رقم غير موجود في النص أعلاه.\n"
+            f"- حافظ على الدقة التقنية والمصطلحات الإنجليزية بين قوسين.\n"
+            f"هيكل التغريدة:\n"
+            f"1. بداية خاطفة (Hook).\n"
+            f"2. شرح الفائدة العملية من الخبر.\n"
+            f"3. نصيحة احترافية (Pro Tip) مستوحاة من النص.\n"
+            f"4. سؤال تفاعلي للمتابعين + المصدر: {source}"
         )
-        return self.safe_gemini(prompt)
+        draft = self.safe_gemini(draft_prompt)
+        if not draft: return None
+
+        # المرحلة 2: التحقق المزدوج (Double Check)
+        verify_prompt = (
+            f"بصفتك مراقب جودة، قارن التغريدة بالنص الأصلي.\n"
+            f"التغريدة: {draft}\n"
+            f"النص الأصلي: {summary}\n\n"
+            f"هل التغريدة تحتوي على معلومة واحدة (حتى لو صغيرة) غير موجودة في النص؟\n"
+            f"أجب بكلمة 'سليم' للنشر، أو 'تعديل' إذا وجدت أي معلومة مختلقة."
+        )
+        check = self.safe_gemini(verify_prompt)
+        
+        return draft if check and "سليم" in check else None
 
     def run(self):
-        logging.info("Cycle Started - Elite Analysis Mode")
+        logging.info("Cycle Started - Anti-Hallucination Mode")
         posted = 0
-        for src in SOURCES:
+        random_sources = random.sample(SOURCES, len(SOURCES))
+        
+        for src in random_sources:
             feed = feedparser.parse(src)
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:15]:
                 if posted >= MAX_POSTS: break
+                
                 title, summary, link = entry.title.strip(), getattr(entry, "summary", ""), entry.link
                 h = hashlib.md5(title.encode()).hexdigest()
 
                 if h in self.state["hashes"]: continue
-                
-                # فحص السياسة والمحتوى غير التقني
-                check_prompt = f"هل هذا الخبر تقني بحت ولا علاقة له بالسياسة أو القضايا العامة؟ أجب بـ 'نعم' أو 'لا' فقط: {title}"
-                is_tech = self.safe_gemini(check_prompt)
-                if not is_tech or "نعم" not in is_tech: continue
 
-                media_url = None
-                if 'media_content' in entry: media_url = entry.media_content[0]['url']
-                
-                # صياغة المحتوى الاحترافي
-                text = self.analyze_and_format(title, summary, urlparse(link).netloc)
-                if not text or not any('\u0600' <= c <= '\u06FF' for c in text): continue
+                # فلترة المحتوى غير التقني والسياسي
+                check_prompt = f"هل هذا الخبر تقني/علمي بحت وبعيد عن السياسة؟ أجب بـ نعم/لا: {title}"
+                if "نعم" not in (self.safe_gemini(check_prompt) or ""): continue
+
+                # صياغة وتحقق
+                text = self.generate_content_with_verification(title, summary, urlparse(link).netloc)
+                if not text:
+                    logging.warning(f"⚠️ تم إلغاء تغريدة للاشتباه في دقتها: {title[:30]}")
+                    continue
 
                 try:
+                    media_url = None
+                    if 'media_content' in entry: media_url = entry.media_content[0]['url']
+                    elif 'links' in entry:
+                        for l in entry.links:
+                            if 'image' in l.get('type', ''): media_url = l.get('href')
+                    
                     media_id = self._upload_media(media_url)
                     self.x_client_v2.create_tweet(text=text[:280], media_ids=[media_id] if media_id else None)
                     
@@ -139,11 +169,8 @@ class TechEliteBot:
                     self._save_state()
                     posted += 1
                     time.sleep(POST_DELAY)
+                    logging.info(f"✅ تم التحقق والنشر: {title[:30]}")
                 except Exception as e: logging.error(f"X Error: {e}")
 
-        # الردود الذكية والملخص الأسبوعي
-        self.handle_replies()
-        self.handle_summary()
-
-    # (هنا تضاف دوال handle_replies و handle_summary من النسخة السابقة)
-    # ... سأختصرها لضمان عمل الكود الرئيسي ...
+if __name__ == "__main__":
+    TechEliteFinalBot().run()
