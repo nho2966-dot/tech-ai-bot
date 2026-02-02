@@ -1,27 +1,9 @@
-language: ar
-tone: friendly_human
+x_api_keys:
+  api_key: "${X_API_KEY}"
+  api_secret: "${X_API_SECRET}"
+  access_token: "${X_ACCESS_TOKEN}"
+  access_secret: "${X_ACCESS_SECRET}"
+  bearer_token: "${X_BEARER_TOKEN}"
 
-topics:
-  - artificial intelligence
-  - ai tools
-  - social media platforms
-  - tech news
-  - startups
-  - automation
-
-posting:
-  max_posts_per_run: 1
-  allow_threads: true
-  hashtags_limit: 3
-  emoji: true
-  peak_hours: [9, 13, 18, 21]
-
-style:
-  hook_required: true
-  call_to_action: true
-  questions: true
-
-sources:
-  hackernews: true
-  techcrunch: true
-  verge: true
+openai_config:
+  api_key: "${OPENAI_API_KEY}"
