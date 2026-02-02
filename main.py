@@ -3,156 +3,170 @@ import time
 import json
 import hashlib
 import logging
-import requests
-import random
+from datetime import datetime
 from typing import Optional
-from urllib.parse import urlparse
 
-import tweepy
 import feedparser
-from google import genai
-from openai import OpenAI
+import tweepy
+import requests
+from dotenv import load_dotenv
 
-SOURCES = [
-    "https://ai.googleblog.com/atom.xml",
-    "https://www.microsoft.com/en-us/research/feed/",
-    "https://engineering.fb.com/feed/",
-    "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
-    "https://arstechnica.com/feed/",
-    "https://www.wired.com/feed/rss"
+# ================== CONFIG ==================
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+MAX_AI_FAILURES = 3
+AI_BACKOFF_BASE = 15  # seconds
+CACHE_FILE = "ai_cache.json"
+
+RSS_FEEDS = [
+    "https://openai.com/blog/rss.xml",
+    "https://www.deepmind.com/blog/rss.xml",
+    "https://ai.googleblog.com/feeds/posts/default",
+    "https://www.theverge.com/ai/rss/index.xml",
 ]
 
-STATE_FILE = "state.json"
+TECH_KEYWORDS = [
+    "ai", "artificial intelligence", "llm", "machine learning",
+    "gpu", "chip", "processor", "nvidia", "amd",
+    "robot", "automation", "neural", "model"
+]
 
-class TechEliteFinalBot:
-    def __init__(self):
-        self._init_logging()
-        self._load_env()
-        self._init_clients()
-        self.state = self._load_state()
-        try:
-            # محاولة جلب ID الحساب للردود
-            me = self.x_client_v2.get_me()
-            self.my_user_id = me.data.id
-        except Exception as e:
-            logging.error(f"Could not get User ID: {e}")
-            self.my_user_id = None
+# ================== LOGGING ==================
+logging.basicConfig(
+    level=logging.INFO,
+    format="🛡️ %(asctime)s | %(message)s"
+)
 
-    def _init_logging(self):
-        logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s | %(message)s")
+# ================== CACHE ==================
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
-    def _load_env(self):
-        self.GEMINI_KEY = os.getenv("GEMINI_KEY")
-        self.QWEN_KEY = os.getenv("QWEN_API_KEY")
-        self.X_API_KEY = os.getenv("X_API_KEY")
-        self.X_API_SECRET = os.getenv("X_API_SECRET")
-        self.X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
-        self.X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
-        self.X_BEARER = os.getenv("X_BEARER_TOKEN")
+def save_cache(cache):
+    with open(CACHE_FILE, "w") as f:
+        json.dump(cache, f)
 
-    def _init_clients(self):
-        self.ai_gemini = genai.Client(api_key=self.GEMINI_KEY)
-        self.ai_qwen = OpenAI(api_key=self.QWEN_KEY, base_url="https://openrouter.ai/api/v1")
-        
-        auth = tweepy.OAuth1UserHandler(self.X_API_KEY, self.X_API_SECRET, self.X_ACCESS_TOKEN, self.X_ACCESS_SECRET)
-        self.x_api_v1 = tweepy.API(auth)
-        self.x_client_v2 = tweepy.Client(
-            bearer_token=self.X_BEARER,
-            consumer_key=self.X_API_KEY,
-            consumer_secret=self.X_API_SECRET,
-            access_token=self.X_ACCESS_TOKEN,
-            access_token_secret=self.X_ACCESS_SECRET
-        )
+CACHE = load_cache()
 
-    def _load_state(self):
-        if not os.path.exists(STATE_FILE): return {"hashes": [], "replied_ids": []}
-        try:
-            with open(STATE_FILE, "r") as f:
-                data = json.load(f)
-                if "replied_ids" not in data: data["replied_ids"] = []
-                return data
-        except: return {"hashes": [], "replied_ids": []}
+# ================== UTILS ==================
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
-    def _save_state(self):
-        with open(STATE_FILE, "w") as f: json.dump(self.state, f)
+def is_technical(text: str) -> bool:
+    t = text.lower()
+    return any(k in t for k in TECH_KEYWORDS)
 
-    def safe_ai_request(self, title: str, summary: str, source: str, is_reply=False) -> Optional[str]:
-        instruction = (
-            "أنت خبير تقني عالمي. صغ تغريدة عربية بناءً على المعلومات المرفقة فقط.\n"
-            "⚠️ قواعد صارمة جداً:\n"
-            "1. يمنع منعاً باتاً استخدام أي حرف أو رمز أو مصطلح صيني.\n"
-            "2. الالتزام بالعربية الرصينة والمصطلحات الإنجليزية (بين قوسين).\n"
-            "3. لا تخترع ميزات غير موجودة في النص (منع الهلوسة).\n"
-            "4. الأسلوب بشري، تفاعلي، مشوق."
-        )
-        if is_reply:
-            instruction = "أنت مساعد ذكي على X. رد على المتابع بذكاء ودقة تقنية بالعربية فقط، دون أي صينية."
+# ================== AI ==================
+def ask_gemini(prompt: str) -> Optional[str]:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
 
-        user_content = f"الموضوع: {title}\nالتفاصيل: {summary}\nالمصدر: {source}"
+    r = requests.post(url, json=payload, timeout=15)
+    if r.status_code == 200:
+        return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    elif r.status_code == 429:
+        logging.warning("Gemini rate limit hit.")
+        return None
+    else:
+        logging.error(f"Gemini error: {r.text}")
+        return None
 
-        # 1. جمناي (الخيار الأول)
-        try:
-            time.sleep(10)
-            res = self.ai_gemini.models.generate_content(model="gemini-2.0-flash", contents=f"{instruction}\n\n{user_content}")
-            if res.text: return res.text.strip()
-        except:
-            logging.warning("Switching to Qwen due to Gemini limit...")
+def ask_openrouter(prompt: str) -> Optional[str]:
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com",
+        "X-Title": "Tech AI Bot"
+    }
 
-        # 2. كوين (الاحتياطي)
-        try:
-            if not self.QWEN_KEY: return None
-            completion = self.ai_qwen.chat.completions.create(
-                model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": instruction}, {"role": "user", "content": user_content}],
-                temperature=0.1
-            )
-            return completion.choices[0].message.content.strip()
-        except Exception as e:
-            logging.error(f"AI Failure: {e}")
-            return None
+    payload = {
+        "model": "qwen/qwen-2.5-72b-instruct",
+        "messages": [
+            {"role": "system", "content": "You are a professional technology news analyst."},
+            {"role": "user", "content": prompt}
+        ]
+    }
 
-    def handle_mentions(self):
-        if not self.my_user_id: return
-        logging.info("🔍 Scanning Mentions...")
-        try:
-            mentions = self.x_client_v2.get_users_mentions(id=self.my_user_id, max_results=10)
-            if not mentions.data: return
+    r = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=20
+    )
 
-            for tweet in mentions.data:
-                if tweet.id in self.state["replied_ids"]: continue
-                
-                reply = self.safe_ai_request("Interaction", tweet.text, "User Mention", is_reply=True)
-                if reply:
-                    self.x_client_v2.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                    self.state["replied_ids"].append(tweet.id)
-                    self._save_state()
-                    logging.info(f"✅ Replied to: {tweet.id}")
-        except Exception as e:
-            logging.error(f"Mentions Error: {e}")
+    if r.status_code == 200:
+        return r.json()["choices"][0]["message"]["content"]
+    else:
+        logging.error(f"OpenRouter error: {r.text}")
+        return None
 
-    def run(self):
-        self.handle_mentions()
-        
-        posted = 0
-        for src in random.sample(SOURCES, len(SOURCES)):
-            if posted >= 1: break
-            feed = feedparser.parse(src)
-            for entry in feed.entries[:5]:
-                h = hashlib.md5(entry.title.encode()).hexdigest()
-                if h in self.state["hashes"]: continue
+def ai_analyze(text: str) -> Optional[str]:
+    h = hash_text(text)
+    if h in CACHE:
+        return CACHE[h]
 
-                tweet = self.safe_ai_request(entry.title, getattr(entry, "summary", ""), urlparse(entry.link).netloc)
-                if tweet:
-                    try:
-                        self.x_client_v2.create_tweet(text=tweet[:280])
-                        self.state["hashes"].append(h)
-                        self._save_state()
-                        posted += 1
-                        logging.info(f"✅ Published: {entry.title[:30]}")
-                        break
-                    except Exception as e:
-                        logging.error(f"X Post Error: {e}")
-                        continue
+    prompt = f"""
+Summarize this news professionally in Arabic.
+Only if it is verified technical AI or hardware news.
+If not technical, reply with: SKIP
+
+{text}
+"""
+
+    failures = 0
+    backoff = AI_BACKOFF_BASE
+
+    # Try Gemini
+    res = ask_gemini(prompt)
+    if res:
+        CACHE[h] = res
+        save_cache(CACHE)
+        return res
+
+    # Fallback OpenRouter
+    res = ask_openrouter(prompt)
+    if res:
+        CACHE[h] = res
+        save_cache(CACHE)
+        return res
+
+    return None
+
+# ================== TWITTER ==================
+auth = tweepy.OAuth1UserHandler(
+    os.getenv("TWITTER_API_KEY"),
+    os.getenv("TWITTER_API_SECRET"),
+    os.getenv("TWITTER_ACCESS_TOKEN"),
+    os.getenv("TWITTER_ACCESS_SECRET")
+)
+twitter = tweepy.API(auth)
+
+# ================== MAIN ==================
+def run():
+    logging.info("Scanning feeds...")
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:3]:
+            text = f"{entry.title}\n{entry.summary}"
+
+            if not is_technical(text):
+                continue
+
+            analysis = ai_analyze(text)
+            if not analysis or "SKIP" in analysis:
+                continue
+
+            tweet = f"{analysis[:260]}\n\n🔗 {entry.link}"
+            twitter.update_status(tweet)
+            logging.info("Tweet posted.")
+            time.sleep(30)
 
 if __name__ == "__main__":
-    TechEliteFinalBot().run()
+    run()
