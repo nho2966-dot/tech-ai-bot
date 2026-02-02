@@ -1,147 +1,164 @@
 import tweepy
-import os
-import hashlib
-import time
+import os, json, time, hashlib
 import feedparser
-import json
 from google import genai
 from datetime import datetime
+from urllib.parse import urlparse
+from collections import defaultdict
 
-# مصادر تقنية عالمية موثوقة
-SOURCES = [
-    "https://www.theverge.com/rss/index.xml",
-    "https://9to5mac.com/feed/",
-    "https://techcrunch.com/feed/"
+# ================= CONFIG =================
+
+SOURCES = {
+    "https://www.theverge.com/rss/index.xml": 0.9,
+    "https://techcrunch.com/feed/": 0.9,
+    "https://9to5mac.com/feed/": 0.85
+}
+
+TECH_KEYWORDS = [
+    "ai", "artificial intelligence", "machine learning", "chip", "gpu", 
+    "processor", "llm", "openai", "google", "apple", "microsoft", 
+    "meta", "smartphone", "iphone", "android", "laptop", "cybersecurity"
 ]
 
-class TechProfessionalBot:
+NON_TECH = ["politics", "celebrity", "music", "movie", "crime", "war"]
+BREAKING_THRESHOLD = 2    
+PUBLISH_LIMIT = 2         
+STATE_FILE = "state.json"
+
+# ================= BOT =================
+
+class TechNewsroomBot:
+
     def __init__(self):
-        # قراءة المفاتيح بناءً على صورة الـ Secrets الخاصة بك
-        gemini_key = os.getenv('GEMINI_KEY')
-        x_api_key = os.getenv('X_API_KEY')
-        x_api_secret = os.getenv('X_API_SECRET')
-        x_access_token = os.getenv('X_ACCESS_TOKEN')
-        x_access_secret = os.getenv('X_ACCESS_SECRET')
-        x_bearer = os.getenv('X_BEARER_TOKEN')
+        # استخدام المفاتيح كما هي في الـ Secrets الخاصة بك
+        self.ai = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
-        if not all([gemini_key, x_api_key, x_access_token]):
-            raise ValueError("❌ نقص في مفاتيح التشفير! تأكد من إعدادات GitHub Secrets")
-
-        # توثيق X
-        self.x_v2 = tweepy.Client(
-            bearer_token=x_bearer,
-            consumer_key=x_api_key,
-            consumer_secret=x_api_secret,
-            access_token=x_access_token,
-            access_token_secret=x_access_secret
+        self.x = tweepy.Client(
+            bearer_token=os.getenv("X_BEARER_TOKEN"),
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        
-        auth_v1 = tweepy.OAuth1UserHandler(x_api_key, x_api_secret, x_access_token, x_access_secret)
-        self.x_v1 = tweepy.API(auth_v1)
-        
-        # محرك Gemini 2.0
-        self.ai = genai.Client(api_key=gemini_key)
-        
-        self.state_file = 'state.json'
+
         self.state = self.load_state()
 
+    # ---------- STATE ----------
     def load_state(self):
-        """تحميل الذاكرة مع نظام تصحيح تلقائي للهيكل"""
-        default_state = {"hashes": [], "replied_ids": [], "blacklist": []}
-        if os.path.exists(self.state_file):
+        base = {
+            "published_hashes": [],
+            "events": {},
+            "replied": [],
+            "blacklist": []
+        }
+        if os.path.exists(STATE_FILE):
             try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # التأكد من وجود كل المفاتيح المطلوبة لمنع الـ KeyError
-                    for key in default_state:
-                        if key not in data:
-                            data[key] = default_state[key]
-                    return data
-            except:
-                return default_state
-        return default_state
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    base.update(json.load(f))
+            except: pass
+        return base
 
     def save_state(self):
-        with open(self.state_file, 'w', encoding='utf-8') as f:
-            json.dump(self.state, f, ensure_ascii=False, indent=4)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.state, f, ensure_ascii=False, indent=2)
 
-    def get_news(self):
-        news = []
-        titles_seen = set()
-        for url in SOURCES:
-            try:
-                feed = feedparser.parse(url)
-                for entry in feed.entries[:5]:
-                    title = entry.title.strip()
-                    if title.lower() not in titles_seen:
-                        news.append(entry)
-                        titles_seen.add(title.lower())
-            except: continue
-        return news
+    # ---------- FILTERS ----------
+    def is_technical(self, text):
+        t = text.lower()
+        if any(n in t for n in NON_TECH): return False
+        return any(k in t for k in TECH_KEYWORDS)
 
-    def post_with_fallback(self, content, reply_to=None):
+    # ---------- FACT EXTRACTION ----------
+    def extract_facts(self, title, summary):
+        prompt = f"استخرج فقط الحقائق التقنية الأساسية (الجهة، الحدث، المجال) باختصار شديد جداً من: {title} {summary}"
         try:
-            if reply_to:
-                self.x_v2.create_tweet(text=content, in_reply_to_tweet_id=reply_to)
-            else:
-                self.x_v2.create_tweet(text=content)
-            return True
-        except Exception as e:
-            print(f"⚠️ V2 Failed: {e}")
-            try:
-                if reply_to:
-                    self.x_v1.update_status(status=content, in_reply_to_status_id=reply_to, auto_populate_reply_metadata=True)
-                else:
-                    self.x_v1.update_status(status=content)
-                return True
-            except Exception as e2:
-                print(f"❌ Critical Failure: {e2}")
-                return False
+            res = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return res.text.strip()
+        except: return title
 
-    def run_cycle(self):
-        print(f"🚀 بدء التشغيل: {datetime.now()}")
-        
-        news_items = self.get_news()
-        published_count = 0
-        for item in news_items:
-            if published_count >= 2: break
-            
-            content_hash = hashlib.md5(item.title.encode()).hexdigest()
-            # الآن لن يحدث خطأ KeyError بفضل نظام التصحيح في load_state
-            if content_hash in self.state['hashes']: continue
+    def event_fingerprint(self, facts):
+        return hashlib.sha256(facts.encode()).hexdigest()
 
-            prompt = f"صغ هذا الخبر بأسلوب احترافي لمتابعي التقنية: {item.title}"
-            try:
-                ai_content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text.strip()
-                if self.post_with_fallback(ai_content[:280]):
-                    self.state['hashes'].append(content_hash)
-                    published_count += 1
-                    self.save_state()
-                    time.sleep(60)
-            except Exception as e:
-                print(f"⚠️ AI Error: {e}")
+    def decide_type(self, fingerprint):
+        count = self.state["events"].get(fingerprint, 0)
+        return "BREAKING 🚨" if count >= BREAKING_THRESHOLD else "UPDATE 💡"
 
-        # الردود الذكية
+    # ---------- REPLIES SYSTEM ----------
+    def handle_interactions(self):
         try:
-            me_info = self.x_v2.get_me()
-            me_id = me_info.data.id
-            mentions = self.x_v2.get_users_mentions(id=me_id).data or []
+            me = self.x.get_me().data.id
+            mentions = self.x.get_users_mentions(id=me).data or []
             
             for tweet in mentions:
                 t_id = str(tweet.id)
-                if t_id in self.state['replied_ids'] or tweet.author_id == me_id:
+                u_id = str(tweet.author_id)
+                
+                if t_id in self.state["replied"] or u_id == str(me) or u_id in self.state["blacklist"]:
                     continue
+
+                # تحليل المشاعر (Sentiment Analysis)
+                sentiment_prompt = f"حلل النبرة: '{tweet.text}'. إذا كانت هجومية أو بذيئة رد بكلمة 'BLOCK' فقط، وإذا كانت تقنية رد بـ 'REPLY'."
+                check = self.ai.models.generate_content(model="gemini-2.0-flash", contents=sentiment_prompt).text
                 
-                reply_prompt = f"رد باختصار تقني مفيد على: {tweet.text}"
-                reply_msg = self.ai.models.generate_content(model="gemini-2.0-flash", contents=reply_prompt).text.strip()
+                if "BLOCK" in check:
+                    self.state["blacklist"].append(u_id)
+                    continue
+
+                reply_prompt = f"بصفتك خبير تقني، رد باختصار شديد وذكاء على: {tweet.text}"
+                reply_text = self.ai.models.generate_content(model="gemini-2.0-flash", contents=reply_prompt).text
                 
-                if self.post_with_fallback(reply_msg[:280], reply_to=tweet.id):
-                    self.state['replied_ids'].append(t_id)
-                    self.save_state()
-                    time.sleep(30)
-        except Exception as e:
-            print(f"ℹ️ Mentions Log: {e}")
+                self.x.create_tweet(text=reply_text.strip()[:280], in_reply_to_tweet_id=tweet.id)
+                self.state["replied"].append(t_id)
+                self.save_state()
+                time.sleep(10)
+        except Exception as e: print(f"Interaction Log: {e}")
+
+    # ---------- MAIN LOOP ----------
+    def run(self):
+        print(f"🚀 Tech Newsroom Online | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        raw_items = []
+        for src in SOURCES:
+            try:
+                raw_items.extend(feedparser.parse(src).entries[:5])
+            except: continue
+
+        published = 0
+        for item in raw_items:
+            if published >= PUBLISH_LIMIT: break
+
+            summary = getattr(item, "summary", "")
+            combined = item.title + " " + summary
+
+            if not self.is_technical(combined): continue
+
+            facts = self.extract_facts(item.title, summary)
+            fingerprint = self.event_fingerprint(facts)
+
+            # تحديث عداد الحدث
+            self.state["events"][fingerprint] = self.state["events"].get(fingerprint, 0) + 1
+            
+            if fingerprint in self.state["published_hashes"]: continue
+
+            # قرار التحرير
+            editorial_label = self.decide_type(fingerprint)
+            
+            # صياغة التغريدة النهائية
+            publish_prompt = f"صغ تغريدة احترافية لجمهور X حول هذا الحدث: {facts}. ابدأ بـ {editorial_label} وأضف سطر 'لماذا يهمك؟'."
+            final_tweet = self.ai.models.generate_content(model="gemini-2.0-flash", contents=publish_prompt).text.strip()
+
+            try:
+                self.x.create_tweet(text=final_tweet[:280])
+                self.state["published_hashes"].append(fingerprint)
+                published += 1
+                self.save_state()
+                print(f"✅ Published: {editorial_label}")
+                time.sleep(30)
+            except Exception as e: print(f"Publish Error: {e}")
+
+        # معالجة الردود
+        self.handle_interactions()
 
 if __name__ == "__main__":
-    bot = TechProfessionalBot()
-    bot.run_cycle()
+    bot = TechNewsroomBot()
+    bot.run()
