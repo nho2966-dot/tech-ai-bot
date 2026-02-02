@@ -1,31 +1,72 @@
-import google.generativeai as genai
 import os
+from google import genai
+try:
+    from groq import Groq
+except ImportError:
+    pass # سيتم التعامل معها داخل الكود
 
 class AIWriter:
     def __init__(self):
-        self.api_key = os.environ.get("GEMINI_API_KEY")
-        if not self.api_key:
-            raise ValueError("❌ GEMINI_API_KEY غير موجود")
+        # تحميل المفاتيح
+        self.gemini_key = os.environ.get("GEMINI_API_KEY")
+        self.groq_key = os.environ.get("GROQ_API_KEY") # خيار احتياطي
         
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # تهيئة العميل الأساسي (Gemini)
+        if self.gemini_key:
+            self.gemini_client = genai.Client(api_key=self.gemini_key)
+        
+        # تهيئة العميل الاحتياطي (Groq)
+        if self.groq_key:
+            self.groq_client = Groq(api_key=self.groq_key)
 
     def generate_practical_content(self, news_item, content_type='tweet'):
-        prompts = {
-            'tweet': f"اشرح هذا الخبر ببساطة مع نصيحة عملية: {news_item['summary']}",
-            'tool': f"اشرح هذه الأداة التقنية وكيف توفر وقت المستخدم: {news_item['summary']}",
-            'security': f"حلل الخبر أمنياً وأعطِ نصيحة حماية سهلة: {news_item['summary']}",
-            'thread': f"حول هذا الخبر لثريد تعليمي بسيط: {news_item['summary']}"
-        }
+        """النظام يحاول مع جيميناي، إذا فشل ينتقل لجروك"""
+        instruction = "خبير تقني بأسلوب بشري بسيط. لغة بيضاء. لا تعقيد لغوي. ركز على القيمة العملية."
+        prompt = f"{instruction}\n\n الموضوع: {news_item['summary']} \n نوع المحتوى: {content_type}"
 
-        prompt = prompts.get(content_type, prompts['tweet'])
+        # المحاولة الأولى: Gemini 2.0 Flash (الأقوى والأحدث)
+        if self.gemini_key:
+            try:
+                print("🪄 محاولة توليد المحتوى عبر Gemini...")
+                response = self.gemini_client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt
+                )
+                return response.text.strip()
+            except Exception as e:
+                print(f"⚠️ جيميناي واجه مشكلة: {e}")
+
+        # المحاولة الثانية (الاحتياطية): Groq Llama 3 (السرعة القصوى)
+        if self.groq_key:
+            try:
+                print("🚀 محاولة التوليد عبر الخيار الاحتياطي (Groq)...")
+                completion = self.groq_client.chat.completions.create(
+                    model="llama3-70b-8192",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return completion.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"❌ جميع خيارات الذكاء الاصطناعي فشلت: {e}")
         
-        system_instruction = "أنت خبير تقني بأسلوب بشري بسيط جداً. لغتك العربية سليمة وغير متكلفة. ركز على الفائدة العملية فقط."
-        
-        response = self.model.generate_content(f"{system_instruction}\n\n{prompt}")
-        return response.text.strip()
+        return "عذراً، المحرك حالياً خارج الخدمة."
 
     def generate_smart_reply(self, mention_text, username):
-        prompt = f"رد على المتابع {username} بأسلوب تقني ودود وقصير جداً على هذه التغريدة: {mention_text}"
-        response = self.model.generate_content(prompt)
-        return response.text.strip()
+        """ردود ذكية مع نظام الفشل التلقائي (Fallback)"""
+        prompt = f"رد باختصار وود كخبير تقني على {username}: {mention_text}"
+        
+        try:
+            # محاولة جيميناي
+            response = self.gemini_client.models.generate_content(
+                model="gemini-2.0-flash", contents=prompt
+            )
+            return response.text.strip()
+        except:
+            # إذا فشل، جرب جروك فوراً
+            try:
+                completion = self.groq_client.chat.completions.create(
+                    model="llama3-8b-8192",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return completion.choices[0].message.content.strip()
+            except:
+                return "شكراً لتفاعلك! سألقي نظرة وأرد عليك قريباً. 🛠️"
