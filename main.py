@@ -28,8 +28,14 @@ class TechEliteBot:
         logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s | %(message)s")
 
     def _init_clients(self):
+        # استخدام المسمى الصحيح للمفتاح كما في إعداداتك
         self.ai_gemini = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-        self.ai_qwen = OpenAI(api_key=os.getenv("QWEN_API_KEY"), base_url="https://openrouter.ai/api/v1")
+        
+        # ربط مفتاح OpenRouter
+        self.ai_qwen = OpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"), 
+            base_url="https://openrouter.ai/api/v1"
+        )
         
         self.x_client_v2 = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
@@ -53,71 +59,35 @@ class TechEliteBot:
 
     def safe_ai_request(self, title: str, summary: str, is_reply=False) -> str:
         instruction = (
-            "أنت خبير تقني. صغ تغريدة عربية بناءً على النص فقط.\n"
-            "⚠️ قواعد: لا رموز صينية، لا هلوسة، مصطلحات إنجليزية بين قوسين."
+            "أنت خبير تقني رصين. صغ تغريدة عربية بناءً على المعلومات المرفقة فقط.\n"
+            "⚠️ قواعد صارمة: يمنع أي حرف صيني، يمنع اختراع ميزات (لا للهلوسة)، "
+            "استخدم العربية مع مصطلحات إنجليزية تقنية بين قوسين."
         )
         if is_reply:
-            instruction = "رد على متابع بذكاء ودقة تقنية بالعربية فقط، وتجنب الصينية."
+            instruction = "أنت مساعد ذكي على X. رد على المتابع بذكاء ودقة تقنية بالعربية فقط، وتجنب الصينية تماماً."
 
         prompt = f"المحتوى: {title} {summary}"
 
+        # المحاولة 1: جمناي (مع تأخير لتجنب 429)
         try:
-            time.sleep(5)
-            res = self.ai_gemini.models.generate_content(model="gemini-2.0-flash", contents=f"{instruction}\n\n{prompt}")
+            time.sleep(15) 
+            res = self.ai_gemini.models.generate_content(
+                model="gemini-1.5-flash", 
+                contents=f"{instruction}\n\n{prompt}"
+            )
             if res.text: return res.text.strip()
-        except:
-            logging.warning("Gemini Limit... Switching to Qwen")
+        except Exception as e:
+            logging.warning(f"جمناي غير متاح حالياً: {e}. يتم الانتقال إلى Qwen...")
 
+        # المحاولة 2: كوين (عبر OpenRouter)
         try:
             completion = self.ai_qwen.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": instruction}, {"role": "user", "content": prompt}],
-                temperature=0.1
-            )
-            return completion.choices[0].message.content.strip()
-        except: return None
-
-    def handle_mentions(self):
-        if not self.my_user_id: return
-        try:
-            mentions = self.x_client_v2.get_users_mentions(id=self.my_user_id, max_results=5)
-            if not mentions or not mentions.data: return
-            for tweet in mentions.data:
-                conn = sqlite3.connect(DB_FILE)
-                if conn.execute("SELECT id FROM news WHERE link=?", (f"m_{tweet.id}",)).fetchone():
-                    conn.close()
-                    continue
-                
-                reply = self.safe_ai_request("رد", tweet.text, is_reply=True)
-                if reply:
-                    self.x_client_v2.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                    conn.execute("INSERT INTO news (link) VALUES (?)", (f"m_{tweet.id}",))
-                    conn.commit()
-                conn.close()
-        except: pass
-
-    def process_and_post(self):
-        RSS_FEEDS = ["https://techcrunch.com/feed/", "https://www.theverge.com/rss/index.xml"]
-        for url in RSS_FEEDS:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
-                conn = sqlite3.connect(DB_FILE)
-                if conn.execute("SELECT id FROM news WHERE link=?", (entry.link,)).fetchone():
-                    conn.close()
-                    continue
-                
-                tweet_text = self.safe_ai_request(entry.title, getattr(entry, "summary", ""))
-                if tweet_text:
-                    try:
-                        self.x_client_v2.create_tweet(text=tweet_text[:280])
-                        conn.execute("INSERT INTO news (link) VALUES (?)", (entry.link,))
-                        conn.commit()
-                        conn.close()
-                        logging.info("✅ Posted Successfully")
-                        return
-                    except: conn.close()
-
-if __name__ == "__main__":
-    bot = TechEliteBot()
-    bot.handle_mentions()
-    bot.process_and_post()
+                messages=[
+                    {"role": "system", "content": instruction},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/nho2966-dot/tech-ai-bot", # اختياري لـ OpenRouter
+                    "X-Title": "Tech AI Bot"
