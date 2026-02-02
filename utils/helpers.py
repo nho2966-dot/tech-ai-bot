@@ -1,48 +1,28 @@
-from datetime import datetime
-import random
-import feedparser
+import feedparser, json, os
 
-def get_verified_news(sources):
-    """جلب الأخبار والتحقق من تكرارها لضمان الموثوقية"""
-    all_news = []
-    seen_titles = {} # لتتبع تكرار الخبر في مصادر مختلفة
+SOURCES = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://9to5mac.com/feed/",
+    "https://techcrunch.com/feed/",
+    "https://www.wired.com/feed/category/security/rss"
+]
 
-    for url in sources:
+def get_verified_news():
+    titles = {}
+    verified = []
+    for url in SOURCES:
         feed = feedparser.parse(url)
         for entry in feed.entries:
-            title = entry.title.lower()
-            # استخراج الكلمات المفتاحية الأساسية من العنوان
-            keywords = set(title.split())
-            
-            # محرك التحقق: إذا ظهرت كلمات العنوان في مصدر آخر، تزداد الموثوقية
-            found_match = False
-            for seen_title in seen_titles:
-                # إذا تشابه العنوان بنسبة كبيرة مع خبر آخر
-                common_words = keywords.intersection(set(seen_title.split()))
-                if len(common_words) > 3: # تشابه في 4 كلمات أساسية أو أكثر
-                    seen_titles[seen_title]['count'] += 1
-                    seen_titles[seen_title]['sources'].append(url)
-                    found_match = True
-                    break
-            
-            if not found_match:
-                seen_titles[title] = {
-                    'entry': entry,
-                    'count': 1,
-                    'sources': [url],
-                    'time': datetime.now()
-                }
+            t = entry.title.lower()
+            titles[t] = titles.get(t, 0) + 1
+            if titles[t] == 1: verified.append(entry)
+    # نختار الأخبار التي ظهرت في أكثر من مصدر لضمان الموثوقية 100%
+    return [e for e in verified if titles[e.title.lower()] > 1]
 
-    # فلترة الأخبار: اختيار الأخبار التي ظهرت في أكثر من مصدر (موثوقة) 
-    # أو أخبار من مصادر "عالية الثقة" حتى لو كانت وحيدة
-    verified_news = []
-    for title, data in seen_titles.items():
-        is_breaking = any(word in title for word in ['breaking', 'urgent', 'عاجل'])
-        
-        # شرط النشر: إما خبر مكرر (تأكيد) أو خبر عاجل من مصدر موثوق
-        if data['count'] > 1 or is_breaking:
-            status = "حقيقة مؤكدة ✅" if data['count'] > 1 else "سبق قيد التحقق 🚨"
-            data['entry']['verification_status'] = status
-            verified_news.append(data['entry'])
-            
-    return verified_news
+def load_state():
+    if not os.path.exists('utils/state.json'):
+        return {"posted_hashes": [], "replied_ids": [], "blacklist": []}
+    with open('utils/state.json', 'r') as f: return json.load(f)
+
+def save_state(state):
+    with open('utils/state.json', 'w') as f: json.dump(state, f)
