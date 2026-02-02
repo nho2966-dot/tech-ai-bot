@@ -4,13 +4,13 @@ on:
   schedule:
     - cron: '0 9 * * *'   # 9 صباحاً
     - cron: '0 18 * * *'  # 6 مساءً
-  workflow_dispatch:      # تشغيل يدوياً
+  workflow_dispatch:      # تشغيل يدوي
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # للسماح بتحديث الذاكرة state.json
+      contents: write # هام جداً لحفظ الذاكرة
 
     steps:
       - name: Checkout repository
@@ -19,24 +19,23 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11" # تحديث النسخة لضمان الاستقرار
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # تثبيت المكتبات المتوافقة مع الكود الاحترافي
           pip install google-genai requests python-dotenv tweepy feedparser PyYAML
 
       - name: Run bot
         run: python main.py
         env:
-          # توحيد أسماء المتغيرات مع كود البوت
+          # مطابقة تامة لأسماء المفاتيح في صورتك
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Save State and History
         if: always()
@@ -44,7 +43,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # الحفظ في المسار الصحيح (نفس المسار المذكور في الكود)
           if [ -f state.json ]; then
             git add state.json
             if git diff --cached --quiet; then
@@ -53,6 +51,4 @@ jobs:
               git commit -m "Update Bot State: [skip ci]"
               git push
             fi
-          else
-            echo "State file not found, skipping commit."
           fi
