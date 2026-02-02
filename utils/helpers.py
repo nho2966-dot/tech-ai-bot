@@ -1,15 +1,24 @@
 from datetime import datetime
 import random
 
-def is_peak_time(peak_hours):
-    return datetime.now().hour in peak_hours
+def get_dynamic_priority(news_item):
+    """تحديد أولوية الخبر بناءً على الكلمات المفتاحية للسبق الصحفي"""
+    urgent_keywords = ['breaking', 'urgent', 'apple', 'nvidia', 'openai', 'leaks', 'عاجل', 'تسريبات']
+    title = news_item['title'].lower()
+    
+    # إذا كان الخبر يحتوي على كلمة عاجلة، نعطيه أولوية القصوى
+    if any(word in title for word in urgent_keywords):
+        return "urgent_tweet" # تغريدة عاجلة فورية
+    return "normal"
 
-def choose_post_type():
-    return random.choice(["tweet", "thread"])
-SOURCES = [
-    "https://www.theverge.com/rss/index.xml",      # المصدر الأول عالمياً
-    "https://9to5mac.com/feed/",                   # أخبار أبل العاجلة
-    "https://techcrunch.com/feed/",                # أخبار الشركات والشركات الناشئة
-    "https://www.bloomberg.com/feeds/technology/sitemap_news.xml", # أخبار اقتصاد التقنية الموثوقة
-    "https://www.reutersagency.com/feed/?best-topics=technology" # وكالة رويترز (للأخبار المؤكدة 100%)
-]
+def choose_post_type(priority):
+    """اختيار التنسيق بناءً على الأولوية"""
+    if priority == "urgent_tweet":
+        return "tweet" # السبق الصحفي يفضل أن يكون تغريدة سريعة
+    return random.choice(["tweet", "thread", "tool", "poll"])
+
+def is_peak_time():
+    """تحديد أوقات الذروة في منطقتنا (مثلاً من 4 عصراً إلى 10 مساءً)"""
+    current_hour = datetime.now().hour
+    peak_hours = range(16, 23) 
+    return current_hour in peak_hours
