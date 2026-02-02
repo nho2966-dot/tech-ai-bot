@@ -1,6 +1,6 @@
-openai>=1.0.0
-requests>=2.31.0
-python-dotenv>=1.0.0
-tweepy>=4.14.0
-feedparser>=6.0.12
+google-generativeai
+requests
+python-dotenv
+tweepy
+feedparser
 PyYAML
