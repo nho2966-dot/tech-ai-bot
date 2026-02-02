@@ -1,6 +1,7 @@
-google-generativeai
+google-genai
+groq
+tweepy
 requests
 python-dotenv
-tweepy
 feedparser
 PyYAML
