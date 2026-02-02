@@ -5,5 +5,5 @@ x_api_keys:
   access_secret: "${X_ACCESS_SECRET}"
   bearer_token: "${X_BEARER_TOKEN}"
 
-openai_config:
-  api_key: "${OPENAI_API_KEY}"
+gemini_config:
+  api_key: "${GEMINI_API_KEY}"
