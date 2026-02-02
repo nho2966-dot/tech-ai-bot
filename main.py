@@ -8,107 +8,118 @@ from core.ai_writer import AIWriter
 from core.publisher import Publisher
 from core.trend_hunter import TrendHunter
 
-# 1. إعدادات الذاكرة ومنع التكرار
+# --- 1. إعدادات النظام والذاكرة ---
 STATE_FILE = 'utils/state.json'
+CONFIG_FILE = 'utils/config.yaml'
+
+def load_config():
+    """تحميل الإعدادات واستبدال متغيرات النظام (Secrets) بالقيم الحقيقية"""
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError("❌ ملف config.yaml غير موجود في مجلد utils")
+        
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+        content = f.read()
+        # استبدال متغيرات البيئة مثل ${X_API_KEY} بقيمها من GitHub Secrets
+        for key, value in os.environ.items():
+            content = content.replace(f"${{{key}}}", value)
+        return yaml.safe_load(content)
 
 def load_state():
+    """تحميل ذاكرة الوكيل لمنع التكرار"""
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {"posted_hashes": [], "replied_users": {}, "last_run": ""}
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {"posted_hashes": [], "replied_ids": [], "last_run": ""}
+    return {"posted_hashes": [], "replied_ids": [], "last_run": ""}
 
 def save_state(state):
+    """حفظ التحديثات في الذاكرة"""
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-def get_content_type_by_day():
-    """تحديد نوع المحتوى بناءً على خطة الأسبوع الذكية"""
+def get_scheduled_type():
+    """تحديد نوع المحتوى بناءً على اليوم (خطة المحتوى الأسبوعية)"""
     day = datetime.datetime.now().strftime('%A')
     schedule = {
-        'Sunday': 'thread',      # رادار الأسبوع (تلخيص)
-        'Monday': 'tool',        # مختبر الأدوات (قيمة عملية)
-        'Tuesday': 'poll',       # استطلاع رأي (تفاعل)
-        'Wednesday': 'security', # الرادار الأمني (حماية)
-        'Thursday': 'thread',    # كيف تعمل التقنية؟ (عمق)
-        'Friday': 'myth',        # كشف الخرافات (تصحيح)
-        'Saturday': 'tips'       # تلميحات سريعة (لايف هاكس)
+        'Sunday': 'thread',      # رادار الأسبوع
+        'Monday': 'tool',        # مختبر الأدوات (اليوم)
+        'Tuesday': 'poll',       # استطلاع رأي
+        'Wednesday': 'security', # الرادار الأمني
+        'Thursday': 'thread',    # كيف تعمل التقنية؟
+        'Friday': 'myth',        # كشف الخرافات
+        'Saturday': 'tips'       # تلميحات سريعة
     }
     return schedule.get(day, 'tweet')
 
-# 2. المنطق الرئيسي للوكيل
+# --- 2. المنطق الرئيسي للوكيل ---
 def main():
     print(f"🚀 بدء تشغيل الوكيل التقني - {datetime.datetime.now()}")
     
-    # تحميل الإعدادات والذاكرة
     try:
-        with open('utils/config.yaml', 'r') as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        print("❌ ملف config.yaml غير موجود")
-        return
-
-    state = load_state()
-    bot = AIWriter()
-    pub = Publisher(config['x_api_keys'])
-    hunter = TrendHunter()
-
-    # جلب الأخبار والتحقق من جودتها
-    news_items = hunter.fetch_verified_news()
-    if not news_items:
-        print("⚠️ لم يتم العثور على أخبار جديدة ذات قيمة.")
-        return
-
-    # اختيار نوع المحتوى حسب اليوم
-    scheduled_type = get_content_type_by_day()
-    
-    for item in news_items:
-        # إنشاء بصمة فريدة للخبر لمنع التكرار
-        content_id = hashlib.md5(item['title'].encode()).hexdigest()
+        # تحميل الإعدادات والذاكرة
+        config = load_config()
+        state = load_state()
         
-        if content_id in state['posted_hashes']:
-            continue # الخبر تم نشره مسبقاً
+        # تهيئة الأدوات
+        bot = AIWriter()
+        pub = Publisher(config['x_api_keys'])
+        hunter = TrendHunter()
 
-        print(f"📝 معالجة محتوى من نوع: {scheduled_type} للخبر: {item['title']}")
-        
-        # توليد المحتوى (بشري، بسيط، ذو قيمة عملية)
-        final_content = bot.generate_practical_content(item, content_type=scheduled_type)
-        
-        # إضافة رابط المصدر أو التوثيق لزيادة المتانة
-        if 'link' in item:
-            final_content += f"\n\nللتفاصيل والتوثيق الرسمي 👇\n{item['link']}"
+        # 1. جلب الأخبار وفلترتها (شرط الارتباط 100% بالخبر)
+        news_items = hunter.fetch_verified_news()
+        if not news_items:
+            print("⚠️ لا توجد أخبار جديدة تلبي معايير الجودة.")
+            return
 
-        # النشر عبر X (دعم الوسائط بفضل الاشتراك)
-        try:
+        # 2. تحديد نوع المنشور حسب الخطة
+        post_type = get_scheduled_type()
+        
+        for item in news_items:
+            # منع تكرار المحتوى عبر الـ Hash
+            content_id = hashlib.md5(item['title'].encode()).hexdigest()
+            if content_id in state['posted_hashes']:
+                continue
+
+            print(f"📝 صياغة محتوى من نوع: {post_type}")
+            
+            # توليد المحتوى بأسلوب بشري بسيط وقيمة عملية
+            content = bot.generate_practical_content(item, content_type=post_type)
+            
+            # إضافة الروابط التعليمية لتعزيز المتانة
+            if 'link' in item:
+                content += f"\n\nللتوسع والتوثيق الرسمي 👇\n{item['link']}"
+
+            # 3. النشر (دعم الوسائط بفضل اشتراك X)
             success = pub.post_content(
-                text=final_content, 
+                text=content, 
                 media_url=item.get('media'),
-                is_poll=(scheduled_type == 'poll')
+                is_poll=(post_type == 'poll')
             )
             
             if success:
                 state['posted_hashes'].append(content_id)
-                state['last_run'] = str(datetime.date.today())
-                print("✅ تم النشر بنجاح وتحديث الذاكرة.")
-                break # نكتفي بنشر واحد عالي الجودة في كل دورة
-        except Exception as e:
-            print(f"❌ فشل النشر: {e}")
+                state['posted_hashes'] = state['posted_hashes'][-500:] # حفظ آخر 500 فقط
+                print("✅ تم النشر بنجاح.")
+                break # نشر واحد دسم في كل دورة
 
-    # 3. معالجة الردود الذكية (Smart Replies)
-    # فحص المنشنز والرد عليها بأسلوب خبير بسيط
-    try:
+        # 4. معالجة الردود الذكية باحترافية وبساطة
+        print("🔍 فحص المنشنز للرد عليها...")
         mentions = pub.get_recent_mentions()
         for mention in mentions:
             if str(mention.id) not in state.get('replied_ids', []):
-                reply_text = bot.generate_smart_reply(mention.text, mention.user.screen_name)
-                pub.reply_to_tweet(reply_text, mention.id)
-                if 'replied_ids' not in state: state['replied_ids'] = []
-                state['replied_ids'].append(str(mention.id))
-    except Exception as e:
-        print(f"⚠️ خطأ أثناء معالجة الردود: {e}")
+                reply = bot.generate_smart_reply(mention.text, mention.user.screen_name)
+                if pub.reply_to_tweet(reply, mention.id):
+                    state.setdefault('replied_ids', []).append(str(mention.id))
+                    print(f"💬 تم الرد على {mention.user.screen_name}")
 
-    # حفظ حالة الوكيل النهائية
-    save_state(state)
+        # حفظ الحالة النهائية
+        save_state(state)
+        
+    except Exception as e:
+        print(f"❌ حدث خطأ غير متوقع: {str(e)}")
 
 if __name__ == "__main__":
     main()
