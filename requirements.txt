@@ -5,3 +5,8 @@ requests
 python-dotenv
 feedparser
 PyYAML
+openai
+
+
+
+
