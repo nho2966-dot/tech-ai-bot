@@ -93,6 +93,65 @@ class TechEliteFinalBot:
         return None
 
     def safe_ai_request(self, title: str, summary: str, source: str) -> Optional[str]:
+        # تم إصلاح القوس المفقود في السطر التالي
         prompt = (
-            f"حلل الخبر التقني التالي بعناية شديدة:\n"
-            f"العنوان: {title}\nالمصادر: {summary
+            f"حلل الخبر التقني التالي بعناية:\n"
+            f"العنوان: {title}\n"
+            f"المحتوى: {summary}\n\n"
+            f"مهمتك:\n"
+            f"1. استبعد أي محتوى غير تقني أو سياسي بكلمة 'تخطي'.\n"
+            f"2. صغ تغريدة عربية بشرية (Hook + حقيقة تقنية دقيقة + Pro Tip + سؤال تفاعلي).\n"
+            f"3. المصطلحات بالإنجليزية بين قوسين والمصدر: {source}\n"
+            f"⚠️ التزم بالحقائق المذكورة فقط لمنع الهلوسة."
+        )
+        try:
+            time.sleep(2)
+            res = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            output = res.text.strip()
+            if "تخطي" in output or len(output) < 30: return None
+            return output
+        except Exception as e:
+            logging.error(f"AI Error: {e}")
+            return None
+
+    def run(self):
+        logging.info("Cycle Started - Anti-Hallucination Fixed Mode")
+        posted = 0
+        random_sources = random.sample(SOURCES, len(SOURCES))
+        
+        for src in random_sources:
+            if posted >= MAX_POSTS: break
+            feed = feedparser.parse(src)
+            
+            for entry in feed.entries[:10]:
+                if posted >= MAX_POSTS: break
+                
+                title = entry.title.strip()
+                summary = getattr(entry, "summary", "")
+                h = hashlib.md5(title.encode()).hexdigest()
+
+                if h in self.state["hashes"]: continue
+
+                tweet_text = self.safe_ai_request(title, summary, urlparse(entry.link).netloc)
+                
+                if tweet_text:
+                    try:
+                        media_url = None
+                        if 'media_content' in entry: media_url = entry.media_content[0]['url']
+                        elif 'links' in entry:
+                            for l in entry.links:
+                                if 'image' in l.get('type', ''): media_url = l.get('href')
+                        
+                        media_id = self._upload_media(media_url)
+                        self.x_client_v2.create_tweet(text=tweet_text[:280], media_ids=[media_id] if media_id else None)
+                        
+                        self.state["hashes"].append(h)
+                        self._save_state()
+                        posted += 1
+                        logging.info(f"✅ Published: {title[:30]}")
+                        time.sleep(POST_DELAY)
+                    except Exception as e:
+                        logging.error(f"X Error: {e}")
+
+if __name__ == "__main__":
+    TechEliteFinalBot().run()
