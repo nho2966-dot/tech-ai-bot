@@ -16,24 +16,34 @@ SOURCES = [
 
 class TechProfessionalBot:
     def __init__(self):
-        # الربط المزدوج مع X (الأساسي والاحتياطي)
+        # قراءة المفاتيح بناءً على صورة الـ Secrets الخاصة بك
+        gemini_key = os.getenv('GEMINI_KEY')
+        x_api_key = os.getenv('X_API_KEY')
+        x_api_secret = os.getenv('X_API_SECRET')
+        x_access_token = os.getenv('X_ACCESS_TOKEN')
+        x_access_secret = os.getenv('X_ACCESS_SECRET')
+        x_bearer = os.getenv('X_BEARER_TOKEN')
+
+        # التحقق من وجود المفاتيح الحيوية
+        if not all([gemini_key, x_api_key, x_access_token]):
+            raise ValueError("❌ نقص في مفاتيح التشفير! تأكد من إعدادات GitHub Secrets")
+
+        # توثيق X (نظام مزدوج V1 + V2)
         self.x_v2 = tweepy.Client(
-            bearer_token=os.getenv('X_BEARER_TOKEN'),
-            consumer_key=os.getenv('X_API_KEY'),
-            consumer_secret=os.getenv('X_API_SECRET'),
-            access_token=os.getenv('X_ACCESS_TOKEN'),
-            access_token_secret=os.getenv('X_ACCESS_TOKEN_SECRET')
+            bearer_token=x_bearer,
+            consumer_key=x_api_key,
+            consumer_secret=x_api_secret,
+            access_token=x_access_token,
+            access_token_secret=x_access_secret
         )
-        # نظام V1.1 للتحقق ورفع الصور إن وجد
-        auth_v1 = tweepy.OAuth1UserHandler(
-            os.getenv('X_API_KEY'), os.getenv('X_API_SECRET'),
-            os.getenv('X_ACCESS_TOKEN'), os.getenv('X_ACCESS_TOKEN_SECRET')
-        )
+        
+        auth_v1 = tweepy.OAuth1UserHandler(x_api_key, x_api_secret, x_access_token, x_access_secret)
         self.x_v1 = tweepy.API(auth_v1)
         
-        # محرك الذكاء الاصطناعي (Gemini 2.0 Flash)
-        self.ai = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+        # محرك Gemini 2.0
+        self.ai = genai.Client(api_key=gemini_key)
         
+        # إدارة الذاكرة لتجنب التكرار
         self.state_file = 'state.json'
         self.state = self.load_state()
 
@@ -50,12 +60,11 @@ class TechProfessionalBot:
             json.dump(self.state, f, ensure_ascii=False, indent=4)
 
     def get_news(self):
-        """جلب الأخبار مع نظام فلترة للمصداقية"""
         news = []
         titles_seen = set()
         for url in SOURCES:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:5]: # أول 5 أخبار من كل مصدر
+            for entry in feed.entries[:5]:
                 title = entry.title.strip()
                 if title.lower() not in titles_seen:
                     news.append(entry)
@@ -63,7 +72,7 @@ class TechProfessionalBot:
         return news
 
     def post_with_fallback(self, content, reply_to=None):
-        """محاولة النشر بذكاء عبر النظام المتاح"""
+        """نظام النشر الذكي بتبديل آلي للأنظمة"""
         try:
             if reply_to:
                 self.x_v2.create_tweet(text=content, in_reply_to_tweet_id=reply_to)
@@ -71,7 +80,7 @@ class TechProfessionalBot:
                 self.x_v2.create_tweet(text=content)
             return True
         except Exception as e:
-            print(f"⚠️ V2 failed, trying V1... Error: {e}")
+            print(f"⚠️ V2 Failed, trying V1... {e}")
             try:
                 if reply_to:
                     self.x_v1.update_status(status=content, in_reply_to_status_id=reply_to, auto_populate_reply_metadata=True)
@@ -79,54 +88,32 @@ class TechProfessionalBot:
                     self.x_v1.update_status(status=content)
                 return True
             except Exception as e2:
-                print(f"❌ Both systems failed: {e2}")
+                print(f"❌ Critical Failure: {e2}")
                 return False
 
     def run_cycle(self):
-        print(f"🚀 بدء دورة العمل: {datetime.now()}")
+        print(f"🚀 دورة تشغيل احترافية: {datetime.now()}")
         
-        # 1. معالجة الأخبار (نشر محدود لتجنب الإزعاج)
+        # 1. معالجة الأخبار (بحد أقصى خبرين دسمين لمنع الإزعاج)
         news_items = self.get_news()
         published_count = 0
         
         for item in news_items:
-            if published_count >= 2: break # حد أقصى خبرين دسمين في كل دورة
+            if published_count >= 2: break
             
             content_hash = hashlib.md5(item.title.encode()).hexdigest()
             if content_hash in self.state['hashes']: continue
 
-            # صياغة محترفة للخبر أو تفنيد الإشاعة
-            prompt = f"حلل وصغ هذا الخبر لمتابعين مهتمين بالتقنية في X. إذا كان إشاعة فندها، وإذا كان سبقاً صغه بأسلوب عاجل. الخبر: {item.title}"
+            # صياغة محترفة عبر AI
+            prompt = f"صغ هذا الخبر التقني بأسلوب احترافي لمشتركي X، ركز على الفائدة المباشرة: {item.title}"
             ai_content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text.strip()
             
-            # منع التغريدات الطويلة جداً التي قد تزعج البعض
-            final_text = ai_content[:500] 
-
-            if self.post_with_fallback(final_text):
+            if self.post_with_fallback(ai_content[:280]):
                 self.state['hashes'].append(content_hash)
                 published_count += 1
                 self.save_state()
-                time.sleep(60) # راحة دقيقة بين الأخبار
+                time.sleep(60) # فاصل زمني دقيقة بين التغريدات
 
-        # 2. التفاعل الذكي (الردود)
+        # 2. الردود الذكية (تجاهل الذات والردود المكررة)
         try:
-            me = self.x_v2.get_me().data.id
-            mentions = self.x_v2.get_users_mentions(id=me).data or []
-            
-            for tweet in mentions:
-                t_id = str(tweet.id)
-                if t_id in self.state['replied_ids'] or str(tweet.author_id) == str(me): continue
-                
-                # الرد عبر AI
-                reply_prompt = f"رد باختصار وذكاء تقني (لا يتجاوز 200 حرف) على هذا الاستفسار: {tweet.text}"
-                reply_msg = self.ai.models.generate_content(model="gemini-2.0-flash", contents=reply_prompt).text.strip()
-                
-                if self.post_with_fallback(reply_msg, reply_to=tweet.id):
-                    self.state['replied_ids'].append(t_id)
-                    self.save_state()
-                    time.sleep(30) # راحة بين الردود
-        except: pass
-
-if __name__ == "__main__":
-    bot = TechProfessionalBot()
-    bot.run_cycle()
+            me_info = self.
