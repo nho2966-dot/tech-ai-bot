@@ -1,6 +1,7 @@
+flask
 tweepy
 feedparser
-google-genai
 python-dotenv
-openai
 requests
+google-genai
+openai
