@@ -31,7 +31,7 @@ SOURCES = [
 ]
 
 STATE_FILE = "state.json"
-MAX_POSTS = 2  # التركيز على النوعية لا الكمية
+MAX_POSTS = 2 
 POST_DELAY = 120 
 
 class TechEliteFinalBot:
@@ -86,5 +86,13 @@ class TechEliteFinalBot:
                 with open(filename, 'wb') as f:
                     for chunk in res: f.write(chunk)
                 media = self.x_api_v1.media_upload(filename)
-                os.remove(filename)
+                if os.path.exists(filename): os.remove(filename)
                 return media.media_id
+        except Exception as e:
+            logging.error(f"Media Upload Error: {e}")
+        return None
+
+    def safe_ai_request(self, title: str, summary: str, source: str) -> Optional[str]:
+        prompt = (
+            f"حلل الخبر التقني التالي بعناية شديدة:\n"
+            f"العنوان: {title}\nالمصادر: {summary
