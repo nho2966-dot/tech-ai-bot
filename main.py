@@ -46,12 +46,20 @@ class TechProfessionalBot:
         self.state = self.load_state()
 
     def load_state(self):
+        """تحميل الذاكرة مع نظام تصحيح تلقائي للهيكل"""
+        default_state = {"hashes": [], "replied_ids": [], "blacklist": []}
         if os.path.exists(self.state_file):
             try:
                 with open(self.state_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except: pass
-        return {"hashes": [], "replied_ids": [], "blacklist": []}
+                    data = json.load(f)
+                    # التأكد من وجود كل المفاتيح المطلوبة لمنع الـ KeyError
+                    for key in default_state:
+                        if key not in data:
+                            data[key] = default_state[key]
+                    return data
+            except:
+                return default_state
+        return default_state
 
     def save_state(self):
         with open(self.state_file, 'w', encoding='utf-8') as f:
@@ -61,12 +69,14 @@ class TechProfessionalBot:
         news = []
         titles_seen = set()
         for url in SOURCES:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
-                title = entry.title.strip()
-                if title.lower() not in titles_seen:
-                    news.append(entry)
-                    titles_seen.add(title.lower())
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:5]:
+                    title = entry.title.strip()
+                    if title.lower() not in titles_seen:
+                        news.append(entry)
+                        titles_seen.add(title.lower())
+            except: continue
         return news
 
     def post_with_fallback(self, content, reply_to=None):
@@ -91,24 +101,27 @@ class TechProfessionalBot:
     def run_cycle(self):
         print(f"🚀 بدء التشغيل: {datetime.now()}")
         
-        # 1. نشر الأخبار
         news_items = self.get_news()
         published_count = 0
         for item in news_items:
             if published_count >= 2: break
+            
             content_hash = hashlib.md5(item.title.encode()).hexdigest()
+            # الآن لن يحدث خطأ KeyError بفضل نظام التصحيح في load_state
             if content_hash in self.state['hashes']: continue
 
             prompt = f"صغ هذا الخبر بأسلوب احترافي لمتابعي التقنية: {item.title}"
-            ai_content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text.strip()
-            
-            if self.post_with_fallback(ai_content[:280]):
-                self.state['hashes'].append(content_hash)
-                published_count += 1
-                self.save_state()
-                time.sleep(60)
+            try:
+                ai_content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text.strip()
+                if self.post_with_fallback(ai_content[:280]):
+                    self.state['hashes'].append(content_hash)
+                    published_count += 1
+                    self.save_state()
+                    time.sleep(60)
+            except Exception as e:
+                print(f"⚠️ AI Error: {e}")
 
-        # 2. الردود الذكية (تم تصحيح السطر المقطوع هنا)
+        # الردود الذكية
         try:
             me_info = self.x_v2.get_me()
             me_id = me_info.data.id
@@ -127,7 +140,7 @@ class TechProfessionalBot:
                     self.save_state()
                     time.sleep(30)
         except Exception as e:
-            print(f"ℹ️ {e}")
+            print(f"ℹ️ Mentions Log: {e}")
 
 if __name__ == "__main__":
     bot = TechProfessionalBot()
