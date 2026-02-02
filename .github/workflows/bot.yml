@@ -1,12 +1,36 @@
-- name: Install dependencies
+name: Run Tech AI Bot
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # تشغيل تلقائي 9 صباحاً
+    - cron: '0 18 * * *'  # تشغيل تلقائي 6 مساءً لزيادة التفاعل
+  workflow_dispatch:       # تشغيل يدوي عند الحاجة
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # ضروري للسماح للبوت بحفظ الذاكرة (state.json)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install PyYAML # إضافة احتياطية للتأكد من وجود المكتبة
+          # التأكد من وجود جميع المكتبات بما فيها PyYAML
+          pip install openai requests python-dotenv tweepy feedparser PyYAML
 
       - name: Run bot
         run: python main.py
         env:
+          # ربط السيكرتس التي حفظتها بمتغيرات النظام
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -15,19 +39,20 @@
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Save State and History
-        if: always()
+        if: always() # سيحاول الحفظ حتى لو فشل البوت لضمان استقرار الذاكرة
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # إنشاء المجلد والملف في حال عدم وجودهما لمنع خطأ الـ Git
+          # إنشاء مجلد utils وملف state.json إذا لم يكونا موجودين
           mkdir -p utils
-          if [ ! -f utils/state.json ]; then echo "{}" > utils/state.json; fi
+          if [ ! -f utils/state.json ]; then echo '{"posted_hashes": [], "replied_users": {}, "last_run": ""}' > utils/state.json; fi
           
           git add utils/state.json
           
+          # الحفظ فقط إذا حدث تغيير فعلي في الذاكرة
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes in state to commit."
           else
             git commit -m "Update Bot State: [skip ci]"
             git push
