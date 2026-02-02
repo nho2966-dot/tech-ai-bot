@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tech News Dashboard</title>
+<style>
+body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+th { background-color: #333; color: white; }
+tr:nth-child(even) { background-color: #eee; }
+.success { color: green; font-weight: bold; }
+.failed { color: red; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Tech News Dashboard</h1>
+<table>
+<tr>
+<th>Title</th>
+<th>Source</th>
+<th>Published</th>
+<th>Twitter Status</th>
+<th>AI Summary</th>
+</tr>
+{% for title, link, source, published, status, summary in news %}
+<tr>
+<td><a href="{{ link }}" target="_blank">{{ title }}</a></td>
+<td>{{ source }}</td>
+<td>{{ published }}</td>
+<td class="{{ 'success' if 'Success' in status else 'failed' }}">{{ status }}</td>
+<td>{{ summary }}</td>
+</tr>
+{% endfor %}
+</table>
+</body>
+</html>
