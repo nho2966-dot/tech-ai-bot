@@ -1,18 +1,22 @@
-name: run-bot
+name: Tech Bot Run (3 Times Peak Hours)
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # يعمل كل 4 ساعات (6 مرات يومياً)
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً عند الحاجة
+    # سيتم التشغيل في أوقات الذروة (بتوقيت UTC):
+    # 06:00 UTC (9:00 AM KSA) - ذروة الصباح
+    # 13:00 UTC (4:00 PM KSA) - ذروة العصر
+    # 18:00 UTC (9:00 PM KSA) - ذروة المساء
+    - cron: '0 6,13,18 * * *'
+  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -20,22 +24,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install tweepy feedparser google-genai python-dotenv
+          pip install tweepy feedparser google-genai python-dotenv openai requests
 
       - name: Run Bot
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
-
-      - name: Commit State
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "actions@github.com"
-          git add state.json
-          git commit -m "Update bot state" || exit 0
-          git push
