@@ -69,10 +69,67 @@ class TechEliteBot:
         except Exception:
             logging.warning("Gemini Limit... Switching to Qwen")
 
-        # 2. محاولة كوين (تم إصلاح القوس هنا)
+        # 2. محاولة كوين (تم مراجعة صياغة المصفوفة بدقة)
         try:
             completion = self.ai_qwen.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[
                     {"role": "system", "content": instruction},
-                    {"role
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1
+            )
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            logging.error(f"AI Error: {e}")
+            return None
+
+    def handle_mentions(self):
+        if not self.my_user_id: return
+        try:
+            mentions = self.x_client_v2.get_users_mentions(id=self.my_user_id, max_results=5)
+            if not mentions or not mentions.data: return
+            for tweet in mentions.data:
+                conn = sqlite3.connect(DB_FILE)
+                if conn.execute("SELECT id FROM news WHERE link=?", (f"m_{tweet.id}",)).fetchone():
+                    conn.close()
+                    continue
+                reply = self.safe_ai_request("رد", tweet.text, is_reply=True)
+                if reply:
+                    self.x_client_v2.create_tweet(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                    conn.execute("INSERT INTO news (link) VALUES (?)", (f"m_{tweet.id}",))
+                    conn.commit()
+                conn.close()
+        except Exception as e:
+            logging.error(f"Mentions Error: {e}")
+
+    def process_and_post(self):
+        RSS_FEEDS = ["https://techcrunch.com/feed/", "https://www.theverge.com/rss/index.xml"]
+        random.shuffle(RSS_FEEDS)
+        for url in RSS_FEEDS:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:5]:
+                conn = sqlite3.connect(DB_FILE)
+                # التأكد من عدم تكرار النشر
+                res = conn.execute("SELECT id FROM news WHERE link=?", (entry.link,)).fetchone()
+                if res:
+                    conn.close()
+                    continue
+                
+                tweet_text = self.safe_ai_request(entry.title, getattr(entry, "summary", ""))
+                if tweet_text:
+                    try:
+                        self.x_client_v2.create_tweet(text=tweet_text[:280])
+                        conn.execute("INSERT INTO news (link) VALUES (?)", (entry.link,))
+                        conn.commit()
+                        conn.close()
+                        logging.info("✅ Posted successfully")
+                        return
+                    except Exception as e:
+                        logging.error(f"Post Error: {e}")
+                        conn.close()
+        logging.info("No new news to post.")
+
+if __name__ == "__main__":
+    bot = TechEliteBot()
+    bot.handle_mentions()
