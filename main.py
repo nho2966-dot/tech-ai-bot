@@ -7,17 +7,16 @@ import json
 from google import genai
 from datetime import datetime
 
-# --- الإعدادات والمصادر ---
+# مصادر تقنية عالمية موثوقة
 SOURCES = [
     "https://www.theverge.com/rss/index.xml",
     "https://9to5mac.com/feed/",
-    "https://techcrunch.com/feed/",
-    "https://www.wired.com/feed/category/security/rss"
+    "https://techcrunch.com/feed/"
 ]
 
-class TechPressEngine:
+class TechProfessionalBot:
     def __init__(self):
-        # توثيق X (V1 + V2)
+        # الربط المزدوج مع X (الأساسي والاحتياطي)
         self.x_v2 = tweepy.Client(
             bearer_token=os.getenv('X_BEARER_TOKEN'),
             consumer_key=os.getenv('X_API_KEY'),
@@ -25,112 +24,109 @@ class TechPressEngine:
             access_token=os.getenv('X_ACCESS_TOKEN'),
             access_token_secret=os.getenv('X_ACCESS_TOKEN_SECRET')
         )
+        # نظام V1.1 للتحقق ورفع الصور إن وجد
         auth_v1 = tweepy.OAuth1UserHandler(
             os.getenv('X_API_KEY'), os.getenv('X_API_SECRET'),
             os.getenv('X_ACCESS_TOKEN'), os.getenv('X_ACCESS_TOKEN_SECRET')
         )
         self.x_v1 = tweepy.API(auth_v1)
         
-        # توثيق Gemini
+        # محرك الذكاء الاصطناعي (Gemini 2.0 Flash)
         self.ai = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
         
-        # الذاكرة المحلية (State)
         self.state_file = 'state.json'
         self.state = self.load_state()
 
     def load_state(self):
         if os.path.exists(self.state_file):
-            with open(self.state_file, 'r') as f: return json.load(f)
+            try:
+                with open(self.state_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except: pass
         return {"hashes": [], "replied_ids": [], "blacklist": []}
 
     def save_state(self):
-        with open(self.state_file, 'w') as f: json.dump(self.state, f)
+        with open(self.state_file, 'w', encoding='utf-8') as f:
+            json.dump(self.state, f, ensure_ascii=False, indent=4)
 
-    def get_verified_news(self):
-        """رصد الأخبار والتحقق المتقاطع"""
-        found_titles = {}
+    def get_news(self):
+        """جلب الأخبار مع نظام فلترة للمصداقية"""
+        news = []
+        titles_seen = set()
         for url in SOURCES:
             feed = feedparser.parse(url)
-            for entry in feed.entries:
-                t = entry.title.strip().lower()
-                found_titles[t] = found_titles.get(t, [])
-                found_titles[t].append(entry)
-        
-        # اختيار الأخبار التي ظهرت في أكثر من مصدر (تأكيد) أو عاجل
-        return [entries[0] for t, entries in found_titles.items() if len(entries) > 1 or "breaking" in t]
+            for entry in feed.entries[:5]: # أول 5 أخبار من كل مصدر
+                title = entry.title.strip()
+                if title.lower() not in titles_seen:
+                    news.append(entry)
+                    titles_seen.add(title.lower())
+        return news
 
-    def smart_publish(self, content):
-        """نظام النشر المزدوج الاحترافي"""
-        h = hashlib.md5(content.encode()).hexdigest()
-        if h in self.state['hashes']: return False
-
+    def post_with_fallback(self, content, reply_to=None):
+        """محاولة النشر بذكاء عبر النظام المتاح"""
         try:
-            self.x_v2.create_tweet(text=content)
-            self.state['hashes'].append(h)
-            self.save_state()
+            if reply_to:
+                self.x_v2.create_tweet(text=content, in_reply_to_tweet_id=reply_to)
+            else:
+                self.x_v2.create_tweet(text=content)
             return True
         except Exception as e:
+            print(f"⚠️ V2 failed, trying V1... Error: {e}")
             try:
-                self.x_v1.update_status(status=content)
-                self.state['hashes'].append(h)
-                self.save_state()
+                if reply_to:
+                    self.x_v1.update_status(status=content, in_reply_to_status_id=reply_to, auto_populate_reply_metadata=True)
+                else:
+                    self.x_v1.update_status(status=content)
                 return True
-            except:
-                print(f"❌ فشل النشر: {e}")
+            except Exception as e2:
+                print(f"❌ Both systems failed: {e2}")
                 return False
 
-    def handle_mentions(self):
-        """الردود الذكية وفلترة المشاعر والقائمة السوداء"""
+    def run_cycle(self):
+        print(f"🚀 بدء دورة العمل: {datetime.now()}")
+        
+        # 1. معالجة الأخبار (نشر محدود لتجنب الإزعاج)
+        news_items = self.get_news()
+        published_count = 0
+        
+        for item in news_items:
+            if published_count >= 2: break # حد أقصى خبرين دسمين في كل دورة
+            
+            content_hash = hashlib.md5(item.title.encode()).hexdigest()
+            if content_hash in self.state['hashes']: continue
+
+            # صياغة محترفة للخبر أو تفنيد الإشاعة
+            prompt = f"حلل وصغ هذا الخبر لمتابعين مهتمين بالتقنية في X. إذا كان إشاعة فندها، وإذا كان سبقاً صغه بأسلوب عاجل. الخبر: {item.title}"
+            ai_content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text.strip()
+            
+            # منع التغريدات الطويلة جداً التي قد تزعج البعض
+            final_text = ai_content[:500] 
+
+            if self.post_with_fallback(final_text):
+                self.state['hashes'].append(content_hash)
+                published_count += 1
+                self.save_state()
+                time.sleep(60) # راحة دقيقة بين الأخبار
+
+        # 2. التفاعل الذكي (الردود)
         try:
             me = self.x_v2.get_me().data.id
             mentions = self.x_v2.get_users_mentions(id=me).data or []
             
             for tweet in mentions:
                 t_id = str(tweet.id)
-                u_id = str(tweet.author_id)
+                if t_id in self.state['replied_ids'] or str(tweet.author_id) == str(me): continue
                 
-                if u_id == str(me) or t_id in self.state['replied_ids'] or u_id in self.state['blacklist']:
-                    continue
-
-                # تحليل المشاعر قبل الرد (نظام الحماية)
-                analysis_prompt = f"حلل نبرة هذا النص: '{tweet.text}'. إذا كان سباً أو إهانة رد بكلمة 'BAD'، غير ذلك رد بـ 'GOOD'."
-                sentiment = self.ai.models.generate_content(model="gemini-2.0-flash", contents=analysis_prompt).text
+                # الرد عبر AI
+                reply_prompt = f"رد باختصار وذكاء تقني (لا يتجاوز 200 حرف) على هذا الاستفسار: {tweet.text}"
+                reply_msg = self.ai.models.generate_content(model="gemini-2.0-flash", contents=reply_prompt).text.strip()
                 
-                if "BAD" in sentiment:
-                    self.state['blacklist'].append(u_id)
-                    self.save_state()
-                    continue
-
-                # توليد الرد
-                reply_prompt = f"رد باختصار كخبير تقني على: {tweet.text}"
-                reply_text = self.ai.models.generate_content(model="gemini-2.0-flash", contents=reply_prompt).text
-                
-                if self.smart_publish_reply(reply_text.strip(), tweet.id):
+                if self.post_with_fallback(reply_msg, reply_to=tweet.id):
                     self.state['replied_ids'].append(t_id)
                     self.save_state()
-        except Exception as e:
-            print(f"⚠️ خطأ في المنشنز: {e}")
-
-    def smart_publish_reply(self, text, reply_id):
-        try:
-            self.x_v2.create_tweet(text=text, in_reply_to_tweet_id=reply_id)
-            return True
-        except: return False
-
-    def run(self):
-        print(f"🛡️ المحرك يعمل... {datetime.now()}")
-        # 1. نشر الأخبار
-        news = self.get_verified_news()
-        for item in news[:3]: # نشر أفضل 3 أخبار فقط في الدورة
-            prompt = f"صغ هذا الخبر كسبق صحفي أو تفنيد إشاعة لمشتركي X: {item.title}\n{item.summary}"
-            content = self.ai.models.generate_content(model="gemini-2.0-flash", contents=prompt).text
-            if self.smart_publish(content.strip()):
-                print(f"✅ تم نشر: {item.title[:30]}...")
-                time.sleep(30) # فجوة زمنية بسيطة
-
-        # 2. معالجة التفاعل
-        self.handle_mentions()
+                    time.sleep(30) # راحة بين الردود
+        except: pass
 
 if __name__ == "__main__":
-    bot = TechPressEngine()
-    bot.run()
+    bot = TechProfessionalBot()
+    bot.run_cycle()
