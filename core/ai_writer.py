@@ -1,93 +1,68 @@
-import os
 from google import genai
+import os
 try:
     from groq import Groq
 except ImportError:
-    pass # سيتم التعامل معها داخل الكود
+    pass
 
 class AIWriter:
     def __init__(self):
-        # تحميل المفاتيح
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
-        self.groq_key = os.environ.get("GROQ_API_KEY") # خيار احتياطي
+        self.groq_key = os.environ.get("GROQ_API_KEY")
         
-        # تهيئة العميل الأساسي (Gemini)
         if self.gemini_key:
             self.gemini_client = genai.Client(api_key=self.gemini_key)
-        
-        # تهيئة العميل الاحتياطي (Groq)
         if self.groq_key:
             self.groq_client = Groq(api_key=self.groq_key)
 
-    def generate_practical_content(self, news_item, content_type='tweet'):
-        """النظام يحاول مع جيميناي، إذا فشل ينتقل لجروك"""
-        instruction = "خبير تقني بأسلوب بشري بسيط. لغة بيضاء. لا تعقيد لغوي. ركز على القيمة العملية."
-        prompt = f"{instruction}\n\n الموضوع: {news_item['summary']} \n نوع المحتوى: {content_type}"
+    def verify_and_generate(self, news_item):
+        """رصد السبق وتفنيد الإشاعات بذكاء اصطناعي مزدوج"""
+        
+        # برومبت متخصص للتحقق (Fact-Checking)
+        fact_check_prompt = f"""
+        بصفتك خبيراً تقنياً ومحققاً في الأخبار العاجلة:
+        الخبر: {news_item['title']}
+        المحتوى: {news_item['summary']}
+        
+        المهمة:
+        1. إذا كان الخبر من مصدر رسمي (أبل، جوجل، سامسونج، رويترز) صغه كـ "سبق صحفي 🚨".
+        2. إذا كان الخبر متداولاً كإشاعة غير مؤكدة، فندها بناءً على المنطق التقني صغه كـ "تفنيد إشاعة 🔍".
+        3. اجعل الأسلوب بشرياً بسيطاً (لغة بيضاء) بعيداً عن التكلف.
+        4. ركز على ما سيحدث خلال الـ 24 ساعة القادمة.
+        """
 
-        # المحاولة الأولى: Gemini 2.0 Flash (الأقوى والأحدث)
+        # المحاولة الأولى: Gemini (للتحليل العميق والتفنيد)
         if self.gemini_key:
             try:
-                print("🪄 محاولة توليد المحتوى عبر Gemini...")
+                print("🔍 جاري التحقق من الخبر عبر Gemini...")
                 response = self.gemini_client.models.generate_content(
                     model="gemini-2.0-flash",
-                    contents=prompt
+                    contents=fact_check_prompt
                 )
                 return response.text.strip()
             except Exception as e:
-                print(f"⚠️ جيميناي واجه مشكلة: {e}")
+                print(f"⚠️ تنبيه: Gemini واجه ضغطاً، الانتقال للمحرك الاحتياطي: {e}")
 
-        # المحاولة الثانية (الاحتياطية): Groq Llama 3 (السرعة القصوى)
+        # المحاولة الثانية: Groq (للسرعة في حال تعطل Gemini)
         if self.groq_key:
             try:
-                print("🚀 محاولة التوليد عبر الخيار الاحتياطي (Groq)...")
+                print("🚀 صياغة السبق الصحفي عبر المحرك الاحتياطي...")
                 completion = self.groq_client.chat.completions.create(
                     model="llama3-70b-8192",
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": fact_check_prompt}]
                 )
                 return completion.choices[0].message.content.strip()
             except Exception as e:
-                print(f"❌ جميع خيارات الذكاء الاصطناعي فشلت: {e}")
+                print(f"❌ فشل المحركين في التحقق: {e}")
         
-        return "عذراً، المحرك حالياً خارج الخدمة."
+        return None
 
     def generate_smart_reply(self, mention_text, username):
-        """ردود ذكية مع نظام الفشل التلقائي (Fallback)"""
-        prompt = f"رد باختصار وود كخبير تقني على {username}: {mention_text}"
-        
+        """ردود ذكية استهدافية"""
+        prompt = f"رد باختصار وذكاء تقني على {username} بخصوص: {mention_text}"
         try:
-            # محاولة جيميناي
-            response = self.gemini_client.models.generate_content(
-                model="gemini-2.0-flash", contents=prompt
-            )
-            return response.text.strip()
+            # محاولة الرد عبر أسرع موديل متاح لضمان السبق في التفاعل
+            res = self.gemini_client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return res.text.strip()
         except:
-            # إذا فشل، جرب جروك فوراً
-            try:
-                completion = self.groq_client.chat.completions.create(
-                    model="llama3-8b-8192",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                return completion.choices[0].message.content.strip()
-            except:
-                return "شكراً لتفاعلك! سألقي نظرة وأرد عليك قريباً. 🛠️"
-def analyze_and_verify(self, news_item):
-        """تحليل الخبر وتفنيد ما إذا كان إشاعة أو حقيقة"""
-        instruction = """
-        بصفتك محققاً تقنيًا، حلل الخبر التالي:
-        1. هل المصدر الأساسي موثوق؟
-        2. هل هناك تناقضات منطقية؟
-        3. إذا كان إشاعة، فندها بالأدلة التقنية.
-        4. إذا كان حقيقة، صغها كسبق صحفي سريع.
-        """
-        
-        prompt = f"{instruction}\n\nالخبر المرصود: {news_item['title']} - {news_item['summary']}"
-        
-        # نستخدم Gemini هنا لقدرته العالية على التحليل المنطقي
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt
-            )
-            return response.text.strip()
-        except:
-            return None # في حال الفشل ننتقل للمحرك الاحتياطي
+            return "نقطة مثيرة للاهتمام! سأتابع المستجدات وأوافيك بالجديد. 🛠️"
