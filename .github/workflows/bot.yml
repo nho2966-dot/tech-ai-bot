@@ -1,19 +1,24 @@
-name: Tech Bot Run (3 Times Peak Hours)
+name: Tech Bot Ultimate Run
 
 on:
   schedule:
-    # سيتم التشغيل في أوقات الذروة (بتوقيت UTC):
-    # 06:00 UTC (9:00 AM KSA) - ذروة الصباح
-    # 13:00 UTC (4:00 PM KSA) - ذروة العصر
-    # 18:00 UTC (9:00 PM KSA) - ذروة المساء
+    # التشغيل في أوقات الذروة (بتوقيت UTC):
+    # 06:00 UTC (09:00 AM بتوقيت السعودية)
+    # 13:00 UTC (04:00 PM بتوقيت السعودية)
+    # 18:00 UTC (09:00 PM بتوقيت السعودية)
     - cron: '0 6,13,18 * * *'
-  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
+  workflow_dispatch: # يتيح لك تشغيله يدوياً من واجهة GitHub
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    
+    # نمنح الصلاحيات اللازمة للقراءة والكتابة
+    permissions:
+      contents: write
+    
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -21,18 +26,30 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install tweepy feedparser google-genai python-dotenv openai requests
 
-      - name: Run Bot
+      - name: Run Tech Bot
         env:
+          # مفاتيح الذكاء الاصطناعي
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          
+          # مفاتيح منصة X (تويتر)
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
         run: python main.py
+
+      # خطوة إضافية لحفظ حالة قاعدة البيانات (تمنع تكرار التغريدات)
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add news.db
+          git commit -m "Update news database [skip ci]" || echo "No changes to commit"
+          git push
