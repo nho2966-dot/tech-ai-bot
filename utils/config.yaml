@@ -1,0 +1,9 @@
+x_api_keys:
+  api_key: "${X_API_KEY}"
+  api_secret: "${X_API_SECRET}"
+  access_token: "${X_ACCESS_TOKEN}"
+  access_secret: "${X_ACCESS_SECRET}"
+  bearer_token: "${X_BEARER_TOKEN}"
+
+openai_config:
+  api_key: "${OPENAI_API_KEY}"
