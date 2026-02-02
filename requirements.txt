@@ -1,12 +1,6 @@
-google-genai
-groq
 tweepy
-requests
-python-dotenv
 feedparser
-PyYAML
+google-genai
+python-dotenv
 openai
-
-
-
-
+requests
