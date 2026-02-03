@@ -8,7 +8,6 @@ from google import genai
 load_dotenv()
 DB_FILE = "news.db"
 
-# 1️⃣ الدليل التحريري والبرومبت المؤسسي
 AUTHORITY_PROMPT = """
 أنت رئيس تحرير في وكالة (TechElite). صُغ المحتوى بناءً على [النوع الإلزامي] المرفق.
 القواعد: ممنوع الاستنتاج، ممنوع صفات المدح، التزام تام بالحقائق، النبرة باردة ورصينة، المصطلحات الإنجليزية بين قوسين (Term).
@@ -43,8 +42,6 @@ class TechEliteAuthority:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        auth = tweepy.OAuth1UserHandler(os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"), os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET"))
-        self.x_api_v1 = tweepy.API(auth)
         self.gemini_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
 
@@ -110,9 +107,7 @@ class TechEliteAuthority:
                 res = self.x_client.create_tweet(text=t[:278], in_reply_to_tweet_id=last_id)
                 last_id = res.data["id"]
                 time.sleep(12)
-            except Exception as e:
-                logging.error(f"Tweet Fail: {e}")
-                break
+            except Exception: break
         return True
 
     def run_cycle(self):
@@ -150,7 +145,7 @@ class TechEliteAuthority:
 
     def _generate_ai(self, prompt, context):
         try:
-            # تم تعديل مسار الموديل لضمان التوافق التام ومنع خطأ 404
+            # التعديل الحاسم هنا لمواكبة الـ SDK الجديد
             res = self.gemini_client.models.generate_content(
                 model='gemini-1.5-flash', 
                 contents=f"{prompt}\n\n{context}"
