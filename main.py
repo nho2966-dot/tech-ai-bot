@@ -46,14 +46,14 @@ class TechEliteBot:
         or_api = os.getenv("OPENROUTER_API_KEY")
         self.ai_qwen = OpenAI(api_key=or_api, base_url="https://openrouter.ai/api/v1") if or_api else None
         
-        # X Client (V2)
+        # X Client (V2) - مفاتيحك المعتمدة
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            wait_on_rate_limit=False # تم التعطيل للتعامل معها يدوياً وتوفير الوقت
         )
 
     def ai_ask(self, system_prompt, user_content):
@@ -74,7 +74,7 @@ class TechEliteBot:
             except: return None
 
     def handle_mentions(self):
-        """الرد الذكي مع ضمان عدم تكرار الرد"""
+        """الرد الذكي مع معالجة ذكية للحد الأقصى من الطلبات"""
         logging.info("🔍 فحص الردود الذكية...")
         try:
             me = self.x_client.get_me().data.id
@@ -86,7 +86,7 @@ class TechEliteBot:
                 exists = conn.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone()
                 
                 if not exists:
-                    prompt = "أنت خبير تقني سعودي فخم. رد على هذا الاستفسار بأسلوب ذكي ومختصر."
+                    prompt = "أنت خبير تقني سعودي فخم. رد بذكاء واختصار."
                     reply_text = self.ai_ask("خبير تقني", tweet.text)
                     if reply_text:
                         self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
@@ -94,11 +94,13 @@ class TechEliteBot:
                         conn.commit()
                         logging.info(f"✅ تم الرد على: {tweet.id}")
                 conn.close()
+        except tweepy.TooManyRequests:
+            logging.warning("⚠️ تم بلوغ حد طلبات X، سيتم تخطي الردود في هذه الدورة.")
         except Exception as e:
             logging.error(f"❌ Mentions Error: {e}")
 
     def post_thread(self, thread_content):
-        """تحويل النص المولد إلى ثريد مترابط"""
+        """تحويل النص إلى ثريد مترابط"""
         tweets = [t.strip() for t in re.split(r'\n\d+\. ', thread_content) if t.strip()]
         last_tweet_id = None
         for i, tweet in enumerate(tweets[:4]):
@@ -129,7 +131,7 @@ class TechEliteBot:
         """تشغيل الدورة الكاملة مع منع الإغراق"""
         self.handle_mentions()
 
-        # احتمال 20% للاستطلاعات لكسر الروتين
+        # احتمال 20% للاستطلاعات
         if random.random() < 0.2:
             if self.create_poll(): return
 
@@ -148,10 +150,9 @@ class TechEliteBot:
                     continue
 
                 if any(w in e.title.lower() for w in targets):
-                    prompt = "أنت خبير تقني سعودي فخم. اكتب ثريد من 3 تغريدات مرقمة عن هذا الخبر."
+                    prompt = "أنت خبير تقني سعودي فخم. اكتب ثريد من 3 تغريدات مرقمة عن هذا الخبر بأسلوب Elite."
                     content = self.ai_ask(prompt, f"{e.title}\n{e.description}")
                     if content and self.post_thread(content):
-                        # الإدخال الصريح لمنع أخطاء عدد الأعمدة
                         conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit()
                         conn.close()
@@ -159,9 +160,14 @@ class TechEliteBot:
                         return
                 conn.close()
 
-        # خطة الطوارئ: نصيحة تقنية
+        # خطة الطوارئ
         backup = self.ai_ask("خبير تقني", "قدم نصيحة تقنية ذكية جداً في تغريدة واحدة.")
-        if backup: self.x_client.create_tweet(text=backup[:280])
+        if backup: 
+            try:
+                self.x_client.create_tweet(text=backup[:280])
+                logging.info("✅ تم النشر الاحتياطي.")
+            except Exception as e:
+                logging.error(f"❌ Backup Post Error: {e}")
 
 if __name__ == "__main__":
     bot = TechEliteBot()
