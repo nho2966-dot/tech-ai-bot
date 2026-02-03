@@ -15,7 +15,6 @@ from google import genai
 # ================== إعدادات عامة ==================
 load_dotenv()
 DB_FILE = "news.db"
-POST_LIMIT_PER_RUN = 1
 
 # مصادر التسريبات والأخبار الاستراتيجية
 RSS_SOURCES = [
@@ -24,8 +23,6 @@ RSS_SOURCES = [
     {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
     {"name": "Android Authority", "url": "https://www.androidauthority.com/feed/"}
 ]
-
-TECH_KEYWORDS = ["AI", "GPT", "Apple", "Nvidia", "Leak", "Rumor", "تسريب", "OpenAI", "Google"]
 
 class TechEliteBot:
     def __init__(self):
@@ -39,7 +36,7 @@ class TechEliteBot:
         conn.close()
 
     def _init_clients(self):
-        # إصلاح خطأ 404 بتحديد الإصدار المستقر v1
+        # 1. إعداد Gemini (مطابق لاسم GEMINI_KEY في الصورة)
         try:
             self.gemini_client = genai.Client(
                 api_key=os.getenv("GEMINI_KEY"),
@@ -48,28 +45,31 @@ class TechEliteBot:
         except Exception as e:
             logging.error(f"Gemini Init Error: {e}")
 
-        self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
+        # 2. إعداد OpenRouter كبديل (OPENROUTER_API_KEY)
+        self.ai_qwen = OpenAI(
+            api_key=os.getenv("OPENROUTER_API_KEY"), 
+            base_url="https://openrouter.ai/api/v1"
+        )
         
-        # إعداد عميل X مع التأكد من استخدام الصلاحيات كاملة
+        # 3. إعداد عميل X (Twitter) - مطابقة تامة لمسمياتك في الصورة
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
-            consumer_key=os.getenv("TWITTER_API_KEY"),
-            consumer_secret=os.getenv("TWITTER_API_SECRET"),
-            access_token=os.getenv("TWITTER_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("TWITTER_ACCESS_TOKEN_SECRET"),
-            wait_on_rate_limit=True
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
     def ai_ask(self, system_prompt, user_content):
-        # محاولة Gemini أولاً (بعد الإصلاح)
+        """محاولة Gemini ثم التبديل لـ Qwen في حال الفشل"""
         try:
             response = self.gemini_client.models.generate_content(
                 model='gemini-1.5-flash',
                 contents=f"{system_prompt}\n\n{user_content}"
             )
             return response.text.strip()
-        except:
-            # التبديل لـ Qwen (الذي نجح في السجلات السابقة)
+        except Exception as e:
+            logging.warning(f"⚠️ Gemini Error, using Qwen: {e}")
             try:
                 c = self.ai_qwen.chat.completions.create(
                     model="qwen/qwen-2.5-72b-instruct",
@@ -80,13 +80,14 @@ class TechEliteBot:
                 return None
 
     def post_backup_content(self):
+        """خطة الطوارئ عند عدم وجود أخبار"""
         logging.info("🔄 جاري نشر محتوى تفاعلي احتياطي...")
-        prompt = "قدم نصيحة تقنية ذكية جداً (Elite) أو استطلاع رأي عن صراع الذكاء الاصطناعي الحالي."
+        prompt = "اكتب تغريدة تفاعلية (نصيحة أو سؤال) عن مستقبل Nvidia و Apple في 2026. اجعلها بأسلوب Elite."
         content = self.ai_ask("خبير تقني سعودي محترف.", prompt)
         if content:
             try:
                 self.x_client.create_tweet(text=content[:280])
-                logging.info("✅ تم النشر الاحتياطي بنجاح.")
+                logging.info("✅ تم النشر الاحتياطي.")
             except Exception as e:
                 logging.error(f"X Backup Error: {e}")
 
@@ -104,23 +105,22 @@ class TechEliteBot:
                 conn.close()
                 if exists: continue
 
-                # التركيز على التسريبات والعمالقة
+                # فلاتر التسريبات والعمالقة
                 is_leak = any(w in e.title.lower() for w in ["leak", "rumor", "تسريب", "internal"])
                 is_major = any(w in e.title.lower() for w in ["apple", "nvidia", "google", "openai", "ai"])
 
                 if is_leak or is_major:
-                    prompt = "صغ هذا الخبر/التسريب بأسلوب (Elite) مع إيموجي ومصطلحات تقنية."
+                    prompt = "صغ الخبر بأسلوب (Elite) مع إيموجي ومصطلحات تقنية إنجليزية. إذا كان تسريباً ابدأ بـ 🚨."
                     tweet_text = self.ai_ask(prompt, e.title)
                     
                     if tweet_text:
                         try:
-                            # محاولة النشر
                             self.x_client.create_tweet(text=tweet_text[:280])
                             conn = sqlite3.connect(DB_FILE)
                             conn.execute("INSERT INTO news VALUES (?, ?, ?, ?)", (h, e.title, "", datetime.utcnow().isoformat()))
                             conn.commit()
                             conn.close()
-                            logging.info(f"🚀 تم النشر: {e.title[:30]}")
+                            logging.info(f"🚀 تم نشر الخبر: {e.title[:30]}")
                             news_posted = True
                             return
                         except Exception as ex:
