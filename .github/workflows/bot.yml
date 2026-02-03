@@ -1,24 +1,27 @@
-name: build-and-run
+name: tech-elite-bot-3-daily
 
 on:
   schedule:
-    # النشر الاستراتيجي: 4 مرات يومياً (كل 6 ساعات) لمنع الإغراق
-    - cron: '0 */6 * * *' 
-  workflow_dispatch: # متاح للتشغيل اليدوي عند الحاجة
+    # النشر 3 مرات يومياً بتوقيت السعودية (KSA)
+    # 10:00 UTC = 1:00 PM KSA
+    # 17:30 UTC = 8:30 PM KSA
+    # 20:30 UTC = 11:30 PM KSA
+    - cron: '0 10 * * *'
+    - cron: '30 17 * * *'
+    - cron: '30 20 * * *'
+  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
+
+permissions:
+  contents: write
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    
-    # تصريح الكتابة ضروري لتحديث قاعدة البيانات في المستودع
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # سحب التاريخ الكامل لتجنب مشاكل الـ Push
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,32 +33,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install tweepy feedparser google-genai python-dotenv openai
 
-      - name: Run Tech-Elite Bot
-        run: python main.py
+      - name: Run Bot
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python main.py
 
-      - name: Sync and Push Database Changes
+      - name: Save Database Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # استراتيجية صمام الأمان: سحب أي تغييرات خارجية قبل الرفع
-          git pull origin main --rebase
-          
-          # إضافة تحديثات قاعدة البيانات فقط
           git add news.db
-          
-          # التحقق من وجود تغييرات قبل الـ Commit لتجنب الخطأ
-          if git diff --staged --quiet; then
-            echo "No changes in database to commit."
-          else
-            git commit -m "🛡️ Database Auto-Update [Skip CI]"
-            git push origin main
-          fi
+          git commit -m "💾 حفظ حالة النشر [skip ci]" || exit 0
+          git push origin main
