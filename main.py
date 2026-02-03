@@ -33,7 +33,6 @@ class TechEliteBot:
         self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
 
     def run_cycle(self):
-        # مصادر تقنية متنوعة لضمان شمولية البحث
         sources = [
             "https://www.theverge.com/rss/index.xml",
             "https://9to5mac.com/feed/",
@@ -44,40 +43,46 @@ class TechEliteBot:
         
         for url in sources:
             feed = feedparser.parse(url)
-            # فحص آخر 15 خبر للعثور على الأنسب
             for e in feed.entries[:15]:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
-                    # التركيز على التوجهات التقنية (AI, Apple, Nvidia, Chips)
-                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "leak", "m4", "m5", "openai"]):
+                    # الكلمات المستهدفة حسب اهتماماتك التقنية
+                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "m4", "m5", "leak", "ios"]):
                         
-                        prompt = "أنت محرر تقني نخبوي. حلل هذا الخبر وصغ ثريد بلهجة سعودية بيضاء فخمة. ركز على الجانب التقني العميق والمستقبلي. اجعله 3 نقاط مركزة جداً."
+                        # البرومبت المطور لمنع "الإزعاج" اللغوي وتثبيت اللهجة السعودية
+                        prompt = (
+                            "أنت خبير ومحلل تقني سعودي محترف. صغ الخبر التالي كثريد (Thread) بلهجة سعودية بيضاء فخمة وواضحة. "
+                            "الشروط: 1- ابدأ مباشرة بتحليل الخبر. 2- استخدم اللغة العربية فقط (ممنوع الإنجليزية في التحية أو الخاتمة). "
+                            "3- ممنوع استخدام عبارات مترجمة حرفياً أو غريبة. 4- اجعل المحتوى في 3 نقاط تقنية مركزة جداً."
+                        )
                         
                         try:
-                            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\n{e.title}")
+                            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\nالخبر: {e.title}\nالتفاصيل: {e.description}")
                             ai_text = res.text
                         except:
-                            res = self.ai_qwen.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role":"user","content":f"{prompt}\n\n{e.title}"}])
+                            res = self.ai_qwen.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role":"user","content":f"{prompt}\n\nالخبر: {e.title}"}])
                             ai_text = res.choices[0].message.content
                         
                         if ai_text and self.post_thread(ai_text, e.title):
                             conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                             conn.commit()
                             conn.close()
-                            return # نشر خبر واحد فقط لكل فترة ذروة
+                            return 
                 conn.close()
 
     def post_thread(self, content, title):
+        # تنظيف النص وتقسيمه
         tweets = [t.strip() for t in re.split(r'\n\s*\d+[\/\.\)]\s*|\n\n', content.strip()) if len(t.strip()) > 15]
-        max_tweets = tweets[:3] # ثريد قصير جداً (3 تغريدات) لراحة المتابع
+        max_tweets = tweets[:3] # لضمان عدم إزعاج المتابعين
         
         last_id = None
         for i, tweet in enumerate(max_tweets):
+            # تنسيق الترقيم بشكل احترافي
             text = f"{i+1}/ {tweet}"
             if i == len(max_tweets) - 1:
-                text += "\n\n#تقنية #سبق_تقني"
+                text += "\n\n#تقنية #أخبار_التقنية" # وسوم هادئة
             
             if len(text) > 280: text = text[:277] + "..."
             
@@ -85,7 +90,9 @@ class TechEliteBot:
                 res = self.x_client.create_tweet(text=text, in_reply_to_tweet_id=last_id)
                 last_id = res.data['id']
                 time.sleep(5)
-            except: break
+            except Exception as e:
+                logging.error(f"Post error: {e}")
+                break
         return True
 
 if __name__ == "__main__":
