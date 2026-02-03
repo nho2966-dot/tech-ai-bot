@@ -58,7 +58,6 @@ class TechEliteBot:
 
         ai_tags = re.findall(r'#\w+', ai_suggested_content or "")
         for t in ai_tags: tags.add(t)
-
         return " ".join(list(tags)[:7])
 
     def calculate_credibility(self, source_name, entry):
@@ -98,11 +97,9 @@ class TechEliteBot:
         
         last_part = tweets[-1] if tweets and "#" in tweets[-1] else ""
         final_tags = self.extract_hybrid_tags(title, description, last_part)
-        
         if tweets and "#" in tweets[-1]: tweets.pop()
 
         last_id = None
         for i, tweet in enumerate(tweets[:5]):
             text = f"{i+1}/ {tweet}"
-            if i == len(tweets[:5]) - 1: text += f"\n\n{final_tags}"
-            if len(text
+            if i == len(tweets[:5]) - 1
