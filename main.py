@@ -4,7 +4,7 @@ import logging
 import hashlib
 import random
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import tweepy
 import feedparser
@@ -30,10 +30,11 @@ class TechEliteBot:
         self._init_clients()
 
     def _init_db(self):
-        """إنشاء الجداول وضمان تحديث الهيكل لتفادي أخطاء السجلات"""
         conn = sqlite3.connect(DB_FILE)
         conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, replied_at TEXT)")
+        # جدول جديد لمتابعة الاستطلاعات ونشر نتائجها
+        conn.execute("CREATE TABLE IF NOT EXISTS polls (poll_id TEXT PRIMARY KEY, question TEXT, status TEXT)")
         try:
             conn.execute("SELECT replied_at FROM replies LIMIT 1")
         except sqlite3.OperationalError:
@@ -42,22 +43,16 @@ class TechEliteBot:
         conn.close()
 
     def _init_clients(self):
-        # Gemini (المحرك الأساسي)
         g_api = os.getenv("GEMINI_KEY")
         self.gemini_client = genai.Client(api_key=g_api, http_options={'api_version': 'v1'}) if g_api else None
-        
-        # OpenRouter (المحرك البديل)
-        or_api = os.getenv("OPENROUTER_API_KEY")
-        self.ai_qwen = OpenAI(api_key=or_api, base_url="https://openrouter.ai/api/v1") if or_api else None
-        
-        # إعداد X (Twitter)
+        self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
+        # نحتاج V1.1 لبعض بيانات الاستطلاع المتقدمة و V2 للنشر
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=False
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
     def ai_ask(self, system_prompt, user_content):
@@ -76,50 +71,43 @@ class TechEliteBot:
                 return res.choices[0].message.content.strip()
             except: return None
 
-    def handle_mentions(self):
-        """الردود الذكية مع منع الرد على النفس نهائياً"""
-        logging.info("🔍 فحص الردود الذكية...")
-        try:
-            me = self.x_client.get_me().data
-            my_id = me.id
-            mentions = self.x_client.get_users_mentions(id=my_id, max_results=5, expansions=['author_id']).data
-            
-            if not mentions: return
-
-            for tweet in mentions:
-                # منع الرد على النفس
-                if tweet.author_id == my_id:
-                    continue
-
-                conn = sqlite3.connect(DB_FILE)
-                exists = conn.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone()
+    def check_poll_results(self):
+        """فحص الاستطلاعات المنتهية ونشر ثريد حول الخيار الفائز"""
+        logging.info("📊 فحص نتائج الاستطلاعات...")
+        conn = sqlite3.connect(DB_FILE)
+        active_polls = conn.execute("SELECT poll_id, question FROM polls WHERE status='active'").fetchall()
+        
+        for poll_id, question in active_polls:
+            try:
+                # جلب بيانات الاستطلاع من X
+                tweet = self.x_client.get_tweet(poll_id, expansions='attachments.poll_ids').data
+                poll_data = self.x_client.get_poll(tweet.attachments['poll_ids'][0]).data
                 
-                if not exists:
-                    prompt = "أنت خبير تقني سعودي فخم. رد بذكاء واختصار ومصطلحات تقنية دقيقة باللغة العربية."
-                    reply_text = self.ai_ask("خبير تقني", tweet.text)
-                    if reply_text:
-                        self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
-                        conn.execute("INSERT INTO replies (tweet_id, replied_at) VALUES (?, ?)", (str(tweet.id), datetime.now().isoformat()))
-                        conn.commit()
-                        logging.info(f"✅ تم الرد على المنشن: {tweet.id}")
-                conn.close()
-        except tweepy.TooManyRequests:
-            logging.warning("⚠️ حد طلبات X ممتلئ.")
-        except Exception as e:
-            logging.error(f"❌ Mentions Error: {e}")
+                # التحقق إذا انتهى الاستطلاع (X يعيد 'closed')
+                if poll_data['voting_status'] == 'closed':
+                    options = poll_data['options']
+                    winner = max(options, key=lambda x: x['votes'])
+                    
+                    if winner['votes'] > 0:
+                        logging.info(f"🏆 الفائز في الاستطلاع: {winner['label']}")
+                        prompt = f"الجمهور اختار '{winner['label']}' في استطلاع رأي حول '{question}'. اكتب ثريد تقني سعودي فخم (4 تغريدات) يحلل هذا الخيار بعمق."
+                        content = self.ai_ask("محرر تقني سعودي خبير", prompt)
+                        if content and self.post_thread(content):
+                            conn.execute("UPDATE polls SET status='completed' WHERE poll_id=?", (poll_id,))
+                            conn.commit()
+            except Exception as e:
+                logging.error(f"❌ Poll Result Error: {e}")
+        conn.close()
 
     def post_thread(self, thread_content):
-        """خوارزمية ذكية لتقسيم الثريد دون بتر الكلمات"""
+        """خوارزمية القواعد الذهبية للثريد"""
         clean_content = re.sub(r'^(1/|1\.|1\))\s*', '', thread_content.strip())
         raw_parts = re.split(r'\n\s*\d+[\/\.\)]\s*', clean_content)
-        
         tweets = []
         for part in raw_parts:
             text = part.strip()
             if len(text) > 10:
-                # قص النص عند آخر مسافة قبل 270 حرفاً لضمان عدم بتر الكلمات
-                if len(text) > 270:
-                    text = text[:267].rsplit(' ', 1)[0] + "..."
+                if len(text) > 270: text = text[:267].rsplit(' ', 1)[0] + "..."
                 tweets.append(text)
 
         last_tweet_id = None
@@ -131,38 +119,40 @@ class TechEliteBot:
                 else:
                     response = self.x_client.create_tweet(text=formatted_tweet, in_reply_to_tweet_id=last_tweet_id)
                 last_tweet_id = response.data['id']
-                logging.info(f"🧵 الجزء {i+1} تم.")
-            except Exception as e:
-                logging.error(f"❌ خطأ ثريد: {e}")
-                break
+            except: break
         return True
 
     def create_poll(self):
-        prompt = 'ابتكر استطلاع رأي تقني بالعربي. النتيجة JSON حصراً: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
+        """إنشاء استطلاع وحفظه في القاعدة لمتابعته"""
+        prompt = 'ابتكر استطلاع رأي تقني سعودي فخم (مقارنة بين تقنيتين). النتيجة JSON: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
         raw = self.ai_ask("خبير استراتيجيات", prompt)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             if match:
                 data = eval(match.group())
-                self.x_client.create_tweet(text=data['q'], poll_options=data['o'], poll_duration_minutes=1440)
+                res = self.x_client.create_tweet(text=data['q'], poll_options=data['o'], poll_duration_minutes=1440)
+                poll_id = res.data['id']
+                # حفظ الاستطلاع للمتابعة
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("INSERT INTO polls (poll_id, question, status) VALUES (?, ?, ?)", (poll_id, data['q'], 'active'))
+                conn.commit()
+                conn.close()
                 return True
         except: return False
 
     def run_cycle(self):
+        # 1. الرد على المنشن
         self.handle_mentions()
-        if random.random() < 0.2:
+        
+        # 2. فحص نتائج الاستطلاعات السابقة (إذا اكتملت ينشر ثريد)
+        self.check_poll_results()
+
+        # 3. نشر استطلاع جديد (احتمال 15% لكل دورة لزيادة التفاعل)
+        if random.random() < 0.15:
             if self.create_poll(): return
 
-        # القواعد الذهبية (الصرامة اللغوية السعودية)
-        system_instruction = """أنت محرر تقني سعودي خبير (Elite Tech Editor). 
-        يجب أن تكون الكتابة باللغة العربية الفخمة حصراً.
-        حول الخبر إلى Thread احترافي وفق القواعد:
-        1. التغريدة الأولى: Hook جذاب بالعربي يخطف الأنظار.
-        2. المصطلحات: المصطلح بالعربي واتبعه بالإنجليزي بين قوسين، مثال: الذكاء الاصطناعي (AI).
-        3. اللغة: يمنع منعاً باتاً كتابة تغريدة كاملة بالإنجليزية.
-        4. التقسيم: 3-4 تغريدات مرقمة (1/، 2/...).
-        5. الإيموجي: بحكمة لتعزيز المعنى التقني."""
-
+        # 4. النشر العادي من RSS (ثريدات)
+        system_instruction = """أنت محرر تقني سعودي خبير. حول الخبر إلى Thread احترافي بالعربي الفخمة (مصطلحات إنجليزية بين قوسين)."""
         random.shuffle(RSS_SOURCES)
         targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac", "samsung", "waymo"]
 
@@ -177,7 +167,6 @@ class TechEliteBot:
 
                 if any(w in e.title.lower() for w in targets):
                     content = self.ai_ask(system_instruction, f"{e.title}\n{e.description}")
-                    # تأكد أن المحتوى ليس فارغاً ويحتوي على حروف عربية
                     if content and any(char in content for char in "أبتثجحخدذرزسشصضطظعغفقكلمنهوي"):
                         if self.post_thread(content):
                             conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
@@ -185,9 +174,6 @@ class TechEliteBot:
                             conn.close()
                             return
                 conn.close()
-
-        backup = self.ai_ask("خبير تقني سعودي", "نصيحة تقنية ذكية جداً بالعربي في تغريدة واحدة.")
-        if backup: self.x_client.create_tweet(text=backup[:280])
 
 if __name__ == "__main__":
     bot = TechEliteBot()
