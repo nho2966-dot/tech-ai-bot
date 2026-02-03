@@ -2,16 +2,23 @@ name: build-and-run
 
 on:
   schedule:
-    # يعمل 4 مرات في اليوم (الساعة 12 صباحاً، 6 صباحاً، 12 ظهراً، 6 مساءً بالتوقيت العالمي)
+    # النشر الاستراتيجي: 4 مرات يومياً (كل 6 ساعات) لمنع الإغراق
     - cron: '0 */6 * * *' 
-  workflow_dispatch: # يترك لك خيار التشغيل اليدوي عند الحاجة
+  workflow_dispatch: # متاح للتشغيل اليدوي عند الحاجة
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
+    
+    # تصريح الكتابة ضروري لتحديث قاعدة البيانات في المستودع
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # سحب التاريخ الكامل لتجنب مشاكل الـ Push
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -23,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tweepy feedparser google-genai python-dotenv openai
 
-      - name: Run bot
+      - name: Run Tech-Elite Bot
         run: python main.py
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
@@ -34,10 +41,21 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
 
-      - name: Commit Database Changes
+      - name: Sync and Push Database Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # استراتيجية صمام الأمان: سحب أي تغييرات خارجية قبل الرفع
+          git pull origin main --rebase
+          
+          # إضافة تحديثات قاعدة البيانات فقط
           git add news.db
-          git commit -m "🛡️ Update local database" || echo "No changes to commit"
-          git push
+          
+          # التحقق من وجود تغييرات قبل الـ Commit لتجنب الخطأ
+          if git diff --staged --quiet; then
+            echo "No changes in database to commit."
+          else
+            git commit -m "🛡️ Database Auto-Update [Skip CI]"
+            git push origin main
+          fi
