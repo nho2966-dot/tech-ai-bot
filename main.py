@@ -30,21 +30,23 @@ class TechEliteBot:
         self._init_clients()
 
     def _init_db(self):
+        """إنشاء الجداول وضمان ثبات الهيكل"""
         conn = sqlite3.connect(DB_FILE)
         conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, replied_at TEXT)")
+        conn.commit()
         conn.close()
 
     def _init_clients(self):
-        # إعداد Gemini (المحرك الأساسي)
+        # Gemini (المحرك الأساسي)
         g_api = os.getenv("GEMINI_KEY")
         self.gemini_client = genai.Client(api_key=g_api, http_options={'api_version': 'v1'}) if g_api else None
         
-        # إعداد OpenRouter (المحرك البديل Qwen)
+        # OpenRouter (المحرك البديل)
         or_api = os.getenv("OPENROUTER_API_KEY")
         self.ai_qwen = OpenAI(api_key=or_api, base_url="https://openrouter.ai/api/v1") if or_api else None
         
-        # إعداد X (مطابقة لمسميات Secrets الخاصة بك)
+        # X Client (V2)
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -55,15 +57,14 @@ class TechEliteBot:
         )
 
     def ai_ask(self, system_prompt, user_content):
-        """توليد محتوى ذكي مع نظام تبديل تلقائي عند الفشل"""
+        """محاولة Gemini ثم البديل Qwen"""
         try:
             response = self.gemini_client.models.generate_content(
                 model='gemini-1.5-flash',
                 contents=f"{system_prompt}\n\n{user_content}"
             )
             return response.text.strip()
-        except Exception as e:
-            logging.warning(f"⚠️ Gemini Fallback: {e}")
+        except Exception:
             try:
                 res = self.ai_qwen.chat.completions.create(
                     model="qwen/qwen-2.5-72b-instruct",
@@ -73,7 +74,7 @@ class TechEliteBot:
             except: return None
 
     def handle_mentions(self):
-        """الرد الذكي على المنشن بأسلوب النخبة"""
+        """الرد الذكي مع ضمان عدم تكرار الرد"""
         logging.info("🔍 فحص الردود الذكية...")
         try:
             me = self.x_client.get_me().data.id
@@ -83,26 +84,24 @@ class TechEliteBot:
             for tweet in mentions:
                 conn = sqlite3.connect(DB_FILE)
                 exists = conn.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone()
-                conn.close()
-
+                
                 if not exists:
-                    prompt = "أنت خبير تقني سعودي محترف. رد على هذا الاستفسار بأسلوب Elite، مختصر وذكي."
-                    reply_text = self.ai_ask(prompt, tweet.text)
+                    prompt = "أنت خبير تقني سعودي فخم. رد على هذا الاستفسار بأسلوب ذكي ومختصر."
+                    reply_text = self.ai_ask("خبير تقني", tweet.text)
                     if reply_text:
                         self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
-                        conn = sqlite3.connect(DB_FILE)
-                        conn.execute("INSERT INTO replies VALUES (?, ?)", (str(tweet.id), datetime.now().isoformat()))
+                        conn.execute("INSERT INTO replies (tweet_id, replied_at) VALUES (?, ?)", (str(tweet.id), datetime.now().isoformat()))
                         conn.commit()
-                        conn.close()
                         logging.info(f"✅ تم الرد على: {tweet.id}")
+                conn.close()
         except Exception as e:
             logging.error(f"❌ Mentions Error: {e}")
 
     def post_thread(self, thread_content):
-        """تحويل النص إلى ثريد مترابط"""
+        """تحويل النص المولد إلى ثريد مترابط"""
         tweets = [t.strip() for t in re.split(r'\n\d+\. ', thread_content) if t.strip()]
         last_tweet_id = None
-        for i, tweet in enumerate(tweets[:4]): # حد أقصى 4 تغريدات للثريد
+        for i, tweet in enumerate(tweets[:4]):
             try:
                 text = f"{i+1}/ {tweet}"
                 if i == 0:
@@ -114,26 +113,28 @@ class TechEliteBot:
         return True
 
     def create_poll(self):
-        """إنشاء استطلاع رأي تفاعلي"""
-        prompt = 'ابتكر استطلاع رأي تقني فخم. أعطني النتيجة كـ JSON: {"q": "السؤال", "o": ["خيار1", "2", "3", "4"]}'
+        """إنشاء استطلاع رأي تقني"""
+        prompt = 'ابتكر استطلاع رأي تقني. النتيجة كـ JSON حصراً: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
         raw = self.ai_ask("خبير استراتيجيات", prompt)
         try:
-            data = eval(re.search(r'\{.*\}', raw, re.DOTALL).group())
-            self.x_client.create_tweet(text=data['q'], poll_options=data['o'], poll_duration_minutes=1440)
-            logging.info("📊 تم نشر الاستطلاع.")
-            return True
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                data = eval(match.group())
+                self.x_client.create_tweet(text=data['q'], poll_options=data['o'], poll_duration_minutes=1440)
+                logging.info("📊 تم نشر الاستطلاع.")
+                return True
         except: return False
 
     def run_cycle(self):
-        """تشغيل الدورة: ردود -> ثم (نشر خبر/ثريد/أو استطلاع)"""
+        """تشغيل الدورة الكاملة مع منع الإغراق"""
         self.handle_mentions()
 
-        # اختيار عشوائي لمنع النمط المتكرر (20% استطلاع، 80% أخبار/ثريدات)
+        # احتمال 20% للاستطلاعات لكسر الروتين
         if random.random() < 0.2:
             if self.create_poll(): return
 
         random.shuffle(RSS_SOURCES)
-        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu"]
+        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac"]
 
         for src in RSS_SOURCES:
             feed = feedparser.parse(src["url"])
@@ -141,23 +142,25 @@ class TechEliteBot:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 exists = conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone()
-                conn.close()
-                if exists: continue
+                
+                if exists:
+                    conn.close()
+                    continue
 
                 if any(w in e.title.lower() for w in targets):
-                    # طلب ثريد إذا كان المحتوى دسم
-                    prompt = "أنت خبير تقني. اكتب ثريد من 3 تغريدات مرقمة عن هذا الخبر بأسلوب فخم جداً."
+                    prompt = "أنت خبير تقني سعودي فخم. اكتب ثريد من 3 تغريدات مرقمة عن هذا الخبر."
                     content = self.ai_ask(prompt, f"{e.title}\n{e.description}")
                     if content and self.post_thread(content):
-                        conn = sqlite3.connect(DB_FILE)
-                        conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
+                        # الإدخال الصريح لمنع أخطاء عدد الأعمدة
+                        conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit()
                         conn.close()
-                        logging.info(f"🚀 تم نشر الثريد: {e.title[:30]}")
-                        return # منع الإغراق
+                        logging.info(f"🚀 تم نشر الخبر بنجاح.")
+                        return
+                conn.close()
 
-        # محتوى احتياطي إذا لم يجد شيئاً
-        backup = self.ai_ask("خبير تقني", "نصيحة تقنية للنخبة في تغريدة.")
+        # خطة الطوارئ: نصيحة تقنية
+        backup = self.ai_ask("خبير تقني", "قدم نصيحة تقنية ذكية جداً في تغريدة واحدة.")
         if backup: self.x_client.create_tweet(text=backup[:280])
 
 if __name__ == "__main__":
