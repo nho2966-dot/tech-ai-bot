@@ -30,6 +30,7 @@ class TechEliteBot:
         self._init_clients()
 
     def _init_db(self):
+        """إنشاء الجداول وضمان تحديث الهيكل لتفادي أخطاء السجلات"""
         conn = sqlite3.connect(DB_FILE)
         conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, replied_at TEXT)")
@@ -41,9 +42,15 @@ class TechEliteBot:
         conn.close()
 
     def _init_clients(self):
+        # Gemini (المحرك الأساسي)
         g_api = os.getenv("GEMINI_KEY")
         self.gemini_client = genai.Client(api_key=g_api, http_options={'api_version': 'v1'}) if g_api else None
-        self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
+        
+        # OpenRouter (المحرك البديل)
+        or_api = os.getenv("OPENROUTER_API_KEY")
+        self.ai_qwen = OpenAI(api_key=or_api, base_url="https://openrouter.ai/api/v1") if or_api else None
+        
+        # إعداد X (Twitter)
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -80,7 +87,7 @@ class TechEliteBot:
             if not mentions: return
 
             for tweet in mentions:
-                # القاعدة الذهبية الجديدة: منع الرد على النفس
+                # منع الرد على النفس
                 if tweet.author_id == my_id:
                     continue
 
@@ -88,13 +95,13 @@ class TechEliteBot:
                 exists = conn.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone()
                 
                 if not exists:
-                    prompt = "أنت خبير تقني سعودي فخم. رد بذكاء واختصار ومصطلحات تقنية دقيقة."
+                    prompt = "أنت خبير تقني سعودي فخم. رد بذكاء واختصار ومصطلحات تقنية دقيقة باللغة العربية."
                     reply_text = self.ai_ask("خبير تقني", tweet.text)
                     if reply_text:
                         self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
                         conn.execute("INSERT INTO replies (tweet_id, replied_at) VALUES (?, ?)", (str(tweet.id), datetime.now().isoformat()))
                         conn.commit()
-                        logging.info(f"✅ تم الرد على المستخدم: {tweet.author_id}")
+                        logging.info(f"✅ تم الرد على المنشن: {tweet.id}")
                 conn.close()
         except tweepy.TooManyRequests:
             logging.warning("⚠️ حد طلبات X ممتلئ.")
@@ -103,7 +110,6 @@ class TechEliteBot:
 
     def post_thread(self, thread_content):
         """خوارزمية ذكية لتقسيم الثريد دون بتر الكلمات"""
-        # تنظيف وتحضير الأجزاء
         clean_content = re.sub(r'^(1/|1\.|1\))\s*', '', thread_content.strip())
         raw_parts = re.split(r'\n\s*\d+[\/\.\)]\s*', clean_content)
         
@@ -111,7 +117,7 @@ class TechEliteBot:
         for part in raw_parts:
             text = part.strip()
             if len(text) > 10:
-                # قص النص عند آخر مسافة قبل 270 حرفاً لمنع بتر الكلمات
+                # قص النص عند آخر مسافة قبل 270 حرفاً لضمان عدم بتر الكلمات
                 if len(text) > 270:
                     text = text[:267].rsplit(' ', 1)[0] + "..."
                 tweets.append(text)
@@ -132,7 +138,7 @@ class TechEliteBot:
         return True
 
     def create_poll(self):
-        prompt = 'ابتكر استطلاع رأي تقني. النتيجة JSON حصراً: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
+        prompt = 'ابتكر استطلاع رأي تقني بالعربي. النتيجة JSON حصراً: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
         raw = self.ai_ask("خبير استراتيجيات", prompt)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
@@ -147,15 +153,18 @@ class TechEliteBot:
         if random.random() < 0.2:
             if self.create_poll(): return
 
-        system_instruction = """أنت محرر تقني خبير. حول الخبر إلى Thread احترافي:
-        1. التغريدة الأولى: Hook جذاب.
-        2. التقسيم: 3-4 تغريدات مرقمة.
-        3. المصطلحات: إنجليزي بجانب العربي.
-        4. الإيموجي: بحكمة.
-        5. الاستقلالية: كل تغريدة مفهومة بذاتها."""
+        # القواعد الذهبية (الصرامة اللغوية السعودية)
+        system_instruction = """أنت محرر تقني سعودي خبير (Elite Tech Editor). 
+        يجب أن تكون الكتابة باللغة العربية الفخمة حصراً.
+        حول الخبر إلى Thread احترافي وفق القواعد:
+        1. التغريدة الأولى: Hook جذاب بالعربي يخطف الأنظار.
+        2. المصطلحات: المصطلح بالعربي واتبعه بالإنجليزي بين قوسين، مثال: الذكاء الاصطناعي (AI).
+        3. اللغة: يمنع منعاً باتاً كتابة تغريدة كاملة بالإنجليزية.
+        4. التقسيم: 3-4 تغريدات مرقمة (1/، 2/...).
+        5. الإيموجي: بحكمة لتعزيز المعنى التقني."""
 
         random.shuffle(RSS_SOURCES)
-        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac", "samsung"]
+        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac", "samsung", "waymo"]
 
         for src in RSS_SOURCES:
             feed = feedparser.parse(src["url"])
@@ -168,14 +177,16 @@ class TechEliteBot:
 
                 if any(w in e.title.lower() for w in targets):
                     content = self.ai_ask(system_instruction, f"{e.title}\n{e.description}")
-                    if content and self.post_thread(content):
-                        conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
-                        conn.commit()
-                        conn.close()
-                        return
+                    # تأكد أن المحتوى ليس فارغاً ويحتوي على حروف عربية
+                    if content and any(char in content for char in "أبتثجحخدذرزسشصضطظعغفقكلمنهوي"):
+                        if self.post_thread(content):
+                            conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
+                            conn.commit()
+                            conn.close()
+                            return
                 conn.close()
 
-        backup = self.ai_ask("خبير تقني", "نصيحة تقنية ذكية جداً في تغريدة واحدة.")
+        backup = self.ai_ask("خبير تقني سعودي", "نصيحة تقنية ذكية جداً بالعربي في تغريدة واحدة.")
         if backup: self.x_client.create_tweet(text=backup[:280])
 
 if __name__ == "__main__":
