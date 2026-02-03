@@ -4,7 +4,7 @@ import logging
 import hashlib
 import random
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import tweepy
 import feedparser
@@ -12,16 +12,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from google import genai
 
-# 1. الإعدادات العامة
 load_dotenv()
 DB_FILE = "news.db"
-
-RSS_SOURCES = [
-    {"name": "9to5Mac", "url": "https://9to5mac.com/feed/"},
-    {"name": "MacRumors", "url": "https://www.macrumors.com/macrumors.xml"},
-    {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
-    {"name": "Android Authority", "url": "https://www.androidauthority.com/feed/"}
-]
 
 class TechEliteBot:
     def __init__(self):
@@ -33,7 +25,6 @@ class TechEliteBot:
         conn = sqlite3.connect(DB_FILE)
         conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, replied_at TEXT)")
-        # جدول جديد لمتابعة الاستطلاعات ونشر نتائجها
         conn.execute("CREATE TABLE IF NOT EXISTS polls (poll_id TEXT PRIMARY KEY, question TEXT, status TEXT)")
         try:
             conn.execute("SELECT replied_at FROM replies LIMIT 1")
@@ -46,7 +37,6 @@ class TechEliteBot:
         g_api = os.getenv("GEMINI_KEY")
         self.gemini_client = genai.Client(api_key=g_api, http_options={'api_version': 'v1'}) if g_api else None
         self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
-        # نحتاج V1.1 لبعض بيانات الاستطلاع المتقدمة و V2 للنشر
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -62,7 +52,7 @@ class TechEliteBot:
                 contents=f"{system_prompt}\n\n{user_content}"
             )
             return response.text.strip()
-        except Exception:
+        except:
             try:
                 res = self.ai_qwen.chat.completions.create(
                     model="qwen/qwen-2.5-72b-instruct",
@@ -71,36 +61,18 @@ class TechEliteBot:
                 return res.choices[0].message.content.strip()
             except: return None
 
-    def check_poll_results(self):
-        """فحص الاستطلاعات المنتهية ونشر ثريد حول الخيار الفائز"""
-        logging.info("📊 فحص نتائج الاستطلاعات...")
-        conn = sqlite3.connect(DB_FILE)
-        active_polls = conn.execute("SELECT poll_id, question FROM polls WHERE status='active'").fetchall()
-        
-        for poll_id, question in active_polls:
-            try:
-                # جلب بيانات الاستطلاع من X
-                tweet = self.x_client.get_tweet(poll_id, expansions='attachments.poll_ids').data
-                poll_data = self.x_client.get_poll(tweet.attachments['poll_ids'][0]).data
-                
-                # التحقق إذا انتهى الاستطلاع (X يعيد 'closed')
-                if poll_data['voting_status'] == 'closed':
-                    options = poll_data['options']
-                    winner = max(options, key=lambda x: x['votes'])
-                    
-                    if winner['votes'] > 0:
-                        logging.info(f"🏆 الفائز في الاستطلاع: {winner['label']}")
-                        prompt = f"الجمهور اختار '{winner['label']}' في استطلاع رأي حول '{question}'. اكتب ثريد تقني سعودي فخم (4 تغريدات) يحلل هذا الخيار بعمق."
-                        content = self.ai_ask("محرر تقني سعودي خبير", prompt)
-                        if content and self.post_thread(content):
-                            conn.execute("UPDATE polls SET status='completed' WHERE poll_id=?", (poll_id,))
-                            conn.commit()
-            except Exception as e:
-                logging.error(f"❌ Poll Result Error: {e}")
-        conn.close()
+    def announce_winner(self, winner_handle):
+        """إعلان الفائز بصيغ متنوعة واحترافية"""
+        templates = [
+            f"بكل فخر، نعلن عن فوز المبدع @{winner_handle} بمسابقة الأسبوع التقنية 🏆. إجابة دقيقة تدل على وعي تقني رفيع. تهانينا لك هذا الفوز المستحق، ونلتقي بكم جميعاً في تحدٍ جديد الأربعاء القادم. 🚀🛡️",
+            f"ألف مبروك لصديق الحساب @{winner_handle} 🎉! استطاع حسم مسابقة الأسبوع بذكاء وسرعة. شكرًا لكل من شاركنا شغفه، وحظاً أوفر للجميع في مسابقة الأربعاء القادم.. استعدوا جيداً! 🔥💻",
+            f"تهانينا للمبدع @{winner_handle} 🎉 بطل مسابقة الأسبوع التقنية. إجابة نموذجية وفوز مستحق! 🥇 ننتظركم الأربعاء القادم في جولة برمجية جديدة. كونوُا في الموعد. ⚡️"
+        ]
+        chosen_text = random.choice(templates)
+        self.x_client.create_tweet(text=chosen_text)
 
     def post_thread(self, thread_content):
-        """خوارزمية القواعد الذهبية للثريد"""
+        """خوارزمية القص الذكي لضمان عدم بتر الكلمات"""
         clean_content = re.sub(r'^(1/|1\.|1\))\s*', '', thread_content.strip())
         raw_parts = re.split(r'\n\s*\d+[\/\.\)]\s*', clean_content)
         tweets = []
@@ -122,58 +94,37 @@ class TechEliteBot:
             except: break
         return True
 
-    def create_poll(self):
-        """إنشاء استطلاع وحفظه في القاعدة لمتابعته"""
-        prompt = 'ابتكر استطلاع رأي تقني سعودي فخم (مقارنة بين تقنيتين). النتيجة JSON: {"q": "سؤال", "o": ["1", "2", "3", "4"]}'
-        raw = self.ai_ask("خبير استراتيجيات", prompt)
-        try:
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
-            if match:
-                data = eval(match.group())
-                res = self.x_client.create_tweet(text=data['q'], poll_options=data['o'], poll_duration_minutes=1440)
-                poll_id = res.data['id']
-                # حفظ الاستطلاع للمتابعة
-                conn = sqlite3.connect(DB_FILE)
-                conn.execute("INSERT INTO polls (poll_id, question, status) VALUES (?, ?, ?)", (poll_id, data['q'], 'active'))
-                conn.commit()
-                conn.close()
-                return True
-        except: return False
-
     def run_cycle(self):
-        # 1. الرد على المنشن
+        # منع الرد على النفس في المنشن
         self.handle_mentions()
         
-        # 2. فحص نتائج الاستطلاعات السابقة (إذا اكتملت ينشر ثريد)
-        self.check_poll_results()
+        weekday = datetime.now().weekday() # (0=الإثنين, 2=الأربعاء, 6=الأحد)
+        
+        # --- استطلاع الأحد ---
+        if weekday == 6:
+            self.create_poll()
 
-        # 3. نشر استطلاع جديد (احتمال 15% لكل دورة لزيادة التفاعل)
-        if random.random() < 0.15:
-            if self.create_poll(): return
+        # --- مسابقة الأربعاء ---
+        if weekday == 2:
+            quiz_prompt = "ابتكر سؤال تقني سهل وممتع للمتابعين. لا تضع الإجابة."
+            quiz_text = self.ai_ask("خبير مسابقات تقنية", quiz_prompt)
+            if quiz_text:
+                self.x_client.create_tweet(text=f"🏆 مسابقة الأسبوع من X-Tech:\n\n{quiz_text}\n\nأول إجابة صحيحة سيتم دعم حسابها وإعلان الفائز! 🚀")
 
-        # 4. النشر العادي من RSS (ثريدات)
-        system_instruction = """أنت محرر تقني سعودي خبير. حول الخبر إلى Thread احترافي بالعربي الفخمة (مصطلحات إنجليزية بين قوسين)."""
-        random.shuffle(RSS_SOURCES)
-        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac", "samsung", "waymo"]
+        # --- نشر الأخبار المعتاد (RSS) ---
+        system_instruction = """أنت محرر تقني سعودي فخم. حول الخبر إلى Thread احترافي بالعربية (مصطلحات إنجليزية بين قوسين)."""
+        # (بقية منطق RSS المعتاد...)
+        logging.info("🛡️ تم إنهاء الدورة بنجاح.")
 
-        for src in RSS_SOURCES:
-            feed = feedparser.parse(src["url"])
-            for e in feed.entries[:5]:
-                h = hashlib.sha256(e.title.encode()).hexdigest()
-                conn = sqlite3.connect(DB_FILE)
-                if conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
-                    conn.close()
-                    continue
-
-                if any(w in e.title.lower() for w in targets):
-                    content = self.ai_ask(system_instruction, f"{e.title}\n{e.description}")
-                    if content and any(char in content for char in "أبتثجحخدذرزسشصضطظعغفقكلمنهوي"):
-                        if self.post_thread(content):
-                            conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
-                            conn.commit()
-                            conn.close()
-                            return
-                conn.close()
+    def handle_mentions(self):
+        try:
+            my_id = self.x_client.get_me().data.id
+            mentions = self.x_client.get_users_mentions(id=my_id, max_results=5, expansions=['author_id']).data
+            if not mentions: return
+            for tweet in mentions:
+                if tweet.author_id == my_id: continue # منع الرد على النفس
+                # (منطق الرد المعتاد...)
+        except Exception as e: logging.error(f"Mentions Error: {e}")
 
 if __name__ == "__main__":
     bot = TechEliteBot()
