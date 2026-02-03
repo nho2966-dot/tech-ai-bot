@@ -8,9 +8,11 @@ from google import genai
 load_dotenv()
 DB_FILE = "news.db"
 
+# 1️⃣ الدليل التحريري والبرومبت المؤسسي
 AUTHORITY_PROMPT = """
 أنت رئيس تحرير في وكالة (TechElite). صُغ المحتوى بناءً على [النوع الإلزامي] المرفق.
 القواعد: ممنوع الاستنتاج، ممنوع صفات المدح، التزام تام بالحقائق، النبرة باردة ورصينة، المصطلحات الإنجليزية بين قوسين (Term).
+تجنب اقتطاع التغريدات، والتزم بالنشر باللغة العربية حصراً.
 """
 
 class TechEliteAuthority:
@@ -71,7 +73,7 @@ class TechEliteAuthority:
             for tweet in mentions.data:
                 h = f"rep_{tweet.id}"
                 if conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone(): continue
-                prompt = "أنت خبير تقني سعودي. رد بلهجة بيضاء رصينة ومختصرة جداً. ممنوع الهلوسة."
+                prompt = "أنت خبير تقني سعودي. رد بلهجة بيضاء رصينة ومختصرة جداً. ممنوع الهلوسة والتزم بالعربية."
                 reply = self._generate_ai(prompt, f"استفسار المتابع: {tweet.text}")
                 if reply:
                     self.x_client.create_tweet(text=reply[:278], in_reply_to_tweet_id=tweet.id)
@@ -108,7 +110,9 @@ class TechEliteAuthority:
                 res = self.x_client.create_tweet(text=t[:278], in_reply_to_tweet_id=last_id)
                 last_id = res.data["id"]
                 time.sleep(12)
-            except: break
+            except Exception as e:
+                logging.error(f"Tweet Fail: {e}")
+                break
         return True
 
     def run_cycle(self):
@@ -120,7 +124,7 @@ class TechEliteAuthority:
             feed = feedparser.parse(url)
             for e in feed.entries[:3]:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
-                desc = getattr(e, 'description', '')
+                desc = getattr(e, 'description', getattr(e, 'summary', ''))
                 if len(desc.split()) < 40 or self.is_recycled_news(e.title): continue
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
@@ -146,9 +150,15 @@ class TechEliteAuthority:
 
     def _generate_ai(self, prompt, context):
         try:
-            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\n{context}")
+            # تم تعديل مسار الموديل لضمان التوافق التام ومنع خطأ 404
+            res = self.gemini_client.models.generate_content(
+                model='gemini-1.5-flash', 
+                contents=f"{prompt}\n\n{context}"
+            )
             return res.text
-        except: return None
+        except Exception as e:
+            logging.error(f"⚠️ Gemini Error: {e}")
+            return None
 
     def _parse_blocks(self, text):
         blocks, current = {}, None
