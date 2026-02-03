@@ -32,67 +32,107 @@ class TechEliteBot:
         self.gemini_client = genai.Client(api_key=g_api) if g_api else None
         self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
 
+    # --- نظام الردود الذكية (مع استبعاد الرد الذاتي) ---
+    def handle_smart_replies(self):
+        try:
+            me = self.x_client.get_me().data
+            mentions = self.x_client.get_users_mentions(id=me.id, max_results=10, expansions=['author_id'])
+            if not mentions.data: return
+
+            for tweet in mentions.data:
+                # 1. منع الرد على النفس
+                if str(tweet.author_id) == str(me.id): continue
+                
+                # 2. فحص هل تم الرد سابقاً
+                conn = sqlite3.connect(DB_FILE)
+                if conn.execute("SELECT 1 FROM news WHERE hash=?", (f"rep_{tweet.id}",)).fetchone():
+                    conn.close(); continue
+                
+                # 3. توليد رد ذكي (سعودي + مصطلحات بين قوسين)
+                prompt = (
+                    "أنت خبير تقني سعودي حيوي. رد على هذا المنشن بذكاء وحماس بلهجة سعودية بيضاء. "
+                    "استخدم العربية والمصطلحات الإنجليزية بين قوسين فقط. "
+                    "اجعل الرد يبدو كأنه من شخص حقيقي وغير مقتطع."
+                )
+                reply_text = self._generate_ai(prompt, f"التغريدة: {tweet.text}")
+                
+                if reply_text:
+                    # ضمان عدم الاقتطاع
+                    final_reply = reply_text[:275] if len(reply_text) > 280 else reply_text
+                    self.x_client.create_tweet(text=final_reply, in_reply_to_tweet_id=tweet.id)
+                    conn.execute("INSERT INTO news VALUES (?, ?, ?)", (f"rep_{tweet.id}", "reply", datetime.now().isoformat()))
+                    conn.commit()
+                conn.close()
+                time.sleep(5)
+        except Exception as e: logging.error(f"Reply Error: {e}")
+
+    # --- نظام النشر المتنوع (أخبار، استطلاعات، مسابقات) ---
     def run_cycle(self):
-        sources = [
-            "https://www.theverge.com/rss/index.xml",
-            "https://9to5mac.com/feed/",
-            "https://www.macrumors.com/macrumors.xml",
-            "https://techcrunch.com/feed/"
-        ]
-        random.shuffle(sources)
+        self.handle_smart_replies() # معالجة الردود أولاً
         
+        ctype = random.choices(['news', 'poll', 'quiz'], weights=[70, 15, 15])[0]
+        
+        if ctype == 'news':
+            self.post_tech_news()
+        elif ctype == 'poll':
+            self.post_interactive("صغ استطلاع رأي تقني حماسي بلهجة سعودية عن مقارنة منتجين. خيارات قصيرة.")
+        else: # quiz
+            self.post_interactive("صغ تحدي/مسابقة تقنية للأذكياء بلهجة سعودية حماسية عن معلومة غريبة.")
+
+    def post_tech_news(self):
+        sources = ["https://www.theverge.com/rss/index.xml", "https://9to5mac.com/feed/", "https://techcrunch.com/feed/"]
+        random.shuffle(sources)
         for url in sources:
             feed = feedparser.parse(url)
-            for e in feed.entries[:15]:
+            for e in feed.entries[:10]:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
-                
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
-                    # الكلمات المستهدفة حسب اهتماماتك التقنية
-                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "m4", "m5", "leak", "ios"]):
-                        
-                        # البرومبت المطور لمنع "الإزعاج" اللغوي وتثبيت اللهجة السعودية
+                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "leak", "openai", "ios", "m4"]):
                         prompt = (
-                            "أنت خبير ومحلل تقني سعودي محترف. صغ الخبر التالي كثريد (Thread) بلهجة سعودية بيضاء فخمة وواضحة. "
-                            "الشروط: 1- ابدأ مباشرة بتحليل الخبر. 2- استخدم اللغة العربية فقط (ممنوع الإنجليزية في التحية أو الخاتمة). "
-                            "3- ممنوع استخدام عبارات مترجمة حرفياً أو غريبة. 4- اجعل المحتوى في 3 نقاط تقنية مركزة جداً."
+                            "أنت صانع محتوى تقني سعودي. صغ الخبر كثريد حماسي بلهجة بيضاء. "
+                            "التركيز: الجانب التطبيقي وكيف يؤثر على المستخدم. "
+                            "اللغة: العربية والمصطلحات الإنجليزية بين قوسين فقط. "
+                            "الهيكلية: 1. Hook خاطف. 2. تحليل تطبيقي. 3. مثال واقعي. 4. سؤال تفاعلي."
                         )
-                        
-                        try:
-                            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\nالخبر: {e.title}\nالتفاصيل: {e.description}")
-                            ai_text = res.text
-                        except:
-                            res = self.ai_qwen.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role":"user","content":f"{prompt}\n\nالخبر: {e.title}"}])
-                            ai_text = res.choices[0].message.content
-                        
-                        if ai_text and self.post_thread(ai_text, e.title):
+                        content = self._generate_ai(prompt, f"الخبر: {e.title}\n{e.description}")
+                        if content and self.post_thread(content, e.link):
                             conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
-                            conn.commit()
-                            conn.close()
-                            return 
+                            conn.commit(); conn.close(); return
                 conn.close()
 
-    def post_thread(self, content, title):
-        # تنظيف النص وتقسيمه
-        tweets = [t.strip() for t in re.split(r'\n\s*\d+[\/\.\)]\s*|\n\n', content.strip()) if len(t.strip()) > 15]
-        max_tweets = tweets[:3] # لضمان عدم إزعاج المتابعين
-        
+    def post_interactive(self, prompt_instr):
+        content = self._generate_ai(prompt_instr + " (لهجة سعودية، مصطلحات إنجليزية بين قوسين، لغة عربية)", "تفاعل")
+        if content:
+            safe_text = content[:270] + "\n#تقنية #تفاعل"
+            self.x_client.create_tweet(text=safe_text)
+
+    def _generate_ai(self, prompt, context):
+        try: # Gemini Primary
+            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\nالسياق: {context}")
+            return res.text
+        except: # Qwen Backup
+            res = self.ai_qwen.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role":"user","content":f"{prompt}\n\nالسياق: {context}"}])
+            return res.choices[0].message.content
+
+    def post_thread(self, content, url):
+        # تقسيم النص بذكاء مع منع الاقتطاع
+        tweets = [t.strip() for t in re.split(r'\n\s*\d+[\/\.\)]\s*|\n\n', content.strip()) if len(t.strip()) > 10]
         last_id = None
-        for i, tweet in enumerate(max_tweets):
-            # تنسيق الترقيم بشكل احترافي
-            text = f"{i+1}/ {tweet}"
-            if i == len(max_tweets) - 1:
-                text += "\n\n#تقنية #أخبار_التقنية" # وسوم هادئة
+        for i, tweet in enumerate(tweets[:3]):
+            text = tweet
+            if i == len(tweets[:3]) - 1: 
+                text += f"\n\n🔗 المصدر: {url}\n#تقنية"
             
-            if len(text) > 280: text = text[:277] + "..."
+            # منع الاقتطاع المشوه (قص عند أقرب مسافة)
+            if len(text) > 280:
+                text = text[:277].rsplit(' ', 1)[0] + "..."
             
             try:
                 res = self.x_client.create_tweet(text=text, in_reply_to_tweet_id=last_id)
                 last_id = res.data['id']
-                time.sleep(5)
-            except Exception as e:
-                logging.error(f"Post error: {e}")
-                break
+                time.sleep(6)
+            except: break
         return True
 
 if __name__ == "__main__":
