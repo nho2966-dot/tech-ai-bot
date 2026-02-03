@@ -33,6 +33,10 @@ class TechEliteBot:
         conn = sqlite3.connect(DB_FILE)
         conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
         conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, replied_at TEXT)")
+        try:
+            conn.execute("SELECT replied_at FROM replies LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE replies ADD COLUMN replied_at TEXT")
         conn.commit()
         conn.close()
 
@@ -66,50 +70,64 @@ class TechEliteBot:
             except: return None
 
     def handle_mentions(self):
+        """الردود الذكية مع منع الرد على النفس نهائياً"""
         logging.info("🔍 فحص الردود الذكية...")
         try:
-            me = self.x_client.get_me().data.id
-            mentions = self.x_client.get_users_mentions(id=me, max_results=5).data
+            me = self.x_client.get_me().data
+            my_id = me.id
+            mentions = self.x_client.get_users_mentions(id=my_id, max_results=5, expansions=['author_id']).data
+            
             if not mentions: return
+
             for tweet in mentions:
+                # القاعدة الذهبية الجديدة: منع الرد على النفس
+                if tweet.author_id == my_id:
+                    continue
+
                 conn = sqlite3.connect(DB_FILE)
                 exists = conn.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone()
+                
                 if not exists:
-                    reply_text = self.ai_ask("أنت خبير تقني سعودي فخم. رد بذكاء واختصار.", tweet.text)
+                    prompt = "أنت خبير تقني سعودي فخم. رد بذكاء واختصار ومصطلحات تقنية دقيقة."
+                    reply_text = self.ai_ask("خبير تقني", tweet.text)
                     if reply_text:
                         self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
                         conn.execute("INSERT INTO replies (tweet_id, replied_at) VALUES (?, ?)", (str(tweet.id), datetime.now().isoformat()))
                         conn.commit()
-                        logging.info(f"✅ تم الرد على: {tweet.id}")
+                        logging.info(f"✅ تم الرد على المستخدم: {tweet.author_id}")
                 conn.close()
         except tweepy.TooManyRequests:
-            logging.warning("⚠️ حد طلبات X، تخطي الردود.")
+            logging.warning("⚠️ حد طلبات X ممتلئ.")
         except Exception as e:
             logging.error(f"❌ Mentions Error: {e}")
 
     def post_thread(self, thread_content):
-        """خوارزمية تقسيم ونشر الثريد الاحترافي (القواعد الذهبية)"""
-        # تقسيم مرن يتعرف على 1/ أو 1. أو 1)
-        tweets = re.split(r'\n\d+[\/\.\)]\s*', thread_content)
-        tweets = [t.strip() for t in tweets if len(t.strip()) > 10]
+        """خوارزمية ذكية لتقسيم الثريد دون بتر الكلمات"""
+        # تنظيف وتحضير الأجزاء
+        clean_content = re.sub(r'^(1/|1\.|1\))\s*', '', thread_content.strip())
+        raw_parts = re.split(r'\n\s*\d+[\/\.\)]\s*', clean_content)
+        
+        tweets = []
+        for part in raw_parts:
+            text = part.strip()
+            if len(text) > 10:
+                # قص النص عند آخر مسافة قبل 270 حرفاً لمنع بتر الكلمات
+                if len(text) > 270:
+                    text = text[:267].rsplit(' ', 1)[0] + "..."
+                tweets.append(text)
 
         last_tweet_id = None
         for i, tweet in enumerate(tweets[:5]):
             try:
                 formatted_tweet = f"{i+1}/ {tweet}"
-                # صمام أمان الحجم
-                if len(formatted_tweet) > 280:
-                    formatted_tweet = formatted_tweet[:277] + "..."
-
                 if i == 0:
                     response = self.x_client.create_tweet(text=formatted_tweet)
                 else:
                     response = self.x_client.create_tweet(text=formatted_tweet, in_reply_to_tweet_id=last_tweet_id)
-                
                 last_tweet_id = response.data['id']
-                logging.info(f"🧵 تم نشر الجزء {i+1}")
+                logging.info(f"🧵 الجزء {i+1} تم.")
             except Exception as e:
-                logging.error(f"❌ خطأ جزء الثريد: {e}")
+                logging.error(f"❌ خطأ ثريد: {e}")
                 break
         return True
 
@@ -129,16 +147,15 @@ class TechEliteBot:
         if random.random() < 0.2:
             if self.create_poll(): return
 
-        # القواعد الذهبية للصياغة داخل البرومبت
-        system_instruction = """أنت محرر تقني خبير (Elite Tech Editor). حول الخبر إلى Thread احترافي وفق القواعد:
-        1. التغريدة الأولى: Hook جذاب بدون تفاصيل معقدة.
-        2. التقسيم: 3-4 تغريدات مرقمة (1/، 2/...).
-        3. المصطلحات: إنجليزي بجانب العربي، مثال: AI (الذكاء الاصطناعي).
-        4. الإيموجي: بحكمة لتعزيز المعنى.
+        system_instruction = """أنت محرر تقني خبير. حول الخبر إلى Thread احترافي:
+        1. التغريدة الأولى: Hook جذاب.
+        2. التقسيم: 3-4 تغريدات مرقمة.
+        3. المصطلحات: إنجليزي بجانب العربي.
+        4. الإيموجي: بحكمة.
         5. الاستقلالية: كل تغريدة مفهومة بذاتها."""
 
         random.shuffle(RSS_SOURCES)
-        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac"]
+        targets = ["apple", "nvidia", "leak", "rumor", "openai", "ai", "تسريب", "iphone", "gpu", "mac", "samsung"]
 
         for src in RSS_SOURCES:
             feed = feedparser.parse(src["url"])
@@ -155,11 +172,10 @@ class TechEliteBot:
                         conn.execute("INSERT INTO news (hash, title, published_at) VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit()
                         conn.close()
-                        logging.info(f"🚀 تم نشر الثريد الاحترافي.")
                         return
                 conn.close()
 
-        backup = self.ai_ask("خبير تقني", "نصيحة تقنية ذكية جداً في تغريدة.")
+        backup = self.ai_ask("خبير تقني", "نصيحة تقنية ذكية جداً في تغريدة واحدة.")
         if backup: self.x_client.create_tweet(text=backup[:280])
 
 if __name__ == "__main__":
