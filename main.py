@@ -8,7 +8,6 @@ from google import genai
 load_dotenv()
 DB_FILE = "news.db"
 
-# 1️⃣ الدليل التحريري والبرومبت المؤسسي
 AUTHORITY_PROMPT = """
 أنت رئيس تحرير في وكالة (TechElite). صُغ المحتوى بناءً على [النوع الإلزامي] المرفق.
 القواعد: ممنوع الاستنتاج، ممنوع صفات المدح، التزام تام بالحقائق، النبرة باردة ورصينة، المصطلحات الإنجليزية بين قوسين (Term).
@@ -67,7 +66,7 @@ class TechEliteAuthority:
                 me = self.x_client.get_me()
                 self.my_id = str(me.data.id)
             mentions = self.x_client.get_users_mentions(id=self.my_id, max_results=5)
-            if not mentions.data: return
+            if not mentions or not mentions.data: return
             conn = sqlite3.connect(DB_FILE)
             for tweet in mentions.data:
                 h = f"rep_{tweet.id}"
@@ -121,10 +120,46 @@ class TechEliteAuthority:
             feed = feedparser.parse(url)
             for e in feed.entries[:3]:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
-                if len(e.description.split()) < 40 or self.is_recycled_news(e.title): continue
+                desc = getattr(e, 'description', '')
+                if len(desc.split()) < 40 or self.is_recycled_news(e.title): continue
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
                     news_type = self.pre_classify(e.title)
-                    content = self._generate_ai(f"{AUTHORITY_PROMPT}\n[TYPE]: {news_type}", f"Title: {e.title}\nDesc: {e.description}")
-                    if content and self.post_authority_thread(content, e.link, domain, e.description, news_type):
-                        conn.execute("INSERT INTO news VALUES (?, ?,
+                    content = self._generate_ai(f"{AUTHORITY_PROMPT}\n[TYPE]: {news_type}", f"Title: {e.title}\nDesc: {desc}")
+                    if content and self.post_authority_thread(content, e.link, domain, desc, news_type):
+                        conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
+                        conn.commit()
+                        conn.close()
+                        self.handle_engagement_polls()
+                        return
+                conn.close()
+
+    def is_recycled_news(self, title):
+        conn = sqlite3.connect(DB_FILE)
+        rows = conn.execute("SELECT title FROM news WHERE published_at > ?", ((datetime.now() - timedelta(days=2)).isoformat(),)).fetchall()
+        conn.close()
+        new_kw = set(re.findall(r'\w+', title.lower())) - self.STOPWORDS
+        for (old,) in rows:
+            old_kw = set(re.findall(r'\w+', old.lower())) - self.STOPWORDS
+            if len(new_kw & old_kw & self.CORE_TERMS) >= 2: return True
+        return False
+
+    def _generate_ai(self, prompt, context):
+        try:
+            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\n{context}")
+            return res.text
+        except: return None
+
+    def _parse_blocks(self, text):
+        blocks, current = {}, None
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                current = line.strip("[]")
+                blocks[current] = []
+            elif current and line:
+                blocks[current].append(line)
+        return {k: " ".join(v) for k, v in blocks.items()}
+
+if __name__ == "__main__":
+    TechEliteAuthority().run_cycle()
