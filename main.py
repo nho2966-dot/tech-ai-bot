@@ -32,7 +32,6 @@ class TechEliteBot:
         self.gemini_client = genai.Client(api_key=g_api) if g_api else None
         self.ai_qwen = OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
 
-    # --- نظام الردود الذكية (مع استبعاد الرد الذاتي) ---
     def handle_smart_replies(self):
         try:
             me = self.x_client.get_me().data
@@ -40,24 +39,20 @@ class TechEliteBot:
             if not mentions.data: return
 
             for tweet in mentions.data:
-                # 1. منع الرد على النفس
                 if str(tweet.author_id) == str(me.id): continue
                 
-                # 2. فحص هل تم الرد سابقاً
                 conn = sqlite3.connect(DB_FILE)
                 if conn.execute("SELECT 1 FROM news WHERE hash=?", (f"rep_{tweet.id}",)).fetchone():
                     conn.close(); continue
                 
-                # 3. توليد رد ذكي (سعودي + مصطلحات بين قوسين)
                 prompt = (
-                    "أنت خبير تقني سعودي حيوي. رد على هذا المنشن بذكاء وحماس بلهجة سعودية بيضاء. "
+                    "أنت خبير تقني سعودي. رد بلهجة بيضاء حيوية ومفيدة. "
                     "استخدم العربية والمصطلحات الإنجليزية بين قوسين فقط. "
-                    "اجعل الرد يبدو كأنه من شخص حقيقي وغير مقتطع."
+                    "اجعل الرد كاملاً وغير مقتطع."
                 )
-                reply_text = self._generate_ai(prompt, f"التغريدة: {tweet.text}")
+                reply_text = self._generate_ai(prompt, tweet.text)
                 
                 if reply_text:
-                    # ضمان عدم الاقتطاع
                     final_reply = reply_text[:275] if len(reply_text) > 280 else reply_text
                     self.x_client.create_tweet(text=final_reply, in_reply_to_tweet_id=tweet.id)
                     conn.execute("INSERT INTO news VALUES (?, ?, ?)", (f"rep_{tweet.id}", "reply", datetime.now().isoformat()))
@@ -66,18 +61,16 @@ class TechEliteBot:
                 time.sleep(5)
         except Exception as e: logging.error(f"Reply Error: {e}")
 
-    # --- نظام النشر المتنوع (أخبار، استطلاعات، مسابقات) ---
     def run_cycle(self):
-        self.handle_smart_replies() # معالجة الردود أولاً
-        
+        self.handle_smart_replies()
         ctype = random.choices(['news', 'poll', 'quiz'], weights=[70, 15, 15])[0]
         
         if ctype == 'news':
             self.post_tech_news()
         elif ctype == 'poll':
-            self.post_interactive("صغ استطلاع رأي تقني حماسي بلهجة سعودية عن مقارنة منتجين. خيارات قصيرة.")
-        else: # quiz
-            self.post_interactive("صغ تحدي/مسابقة تقنية للأذكياء بلهجة سعودية حماسية عن معلومة غريبة.")
+            self.post_interactive("صغ استطلاع رأي تقني حماسي بلهجة سعودية عن مقارنة منتجات. خيارات قصيرة.")
+        else:
+            self.post_interactive("صغ مسابقة تقنية للأذكياء بلهجة سعودية حماسية عن معلومة غريبة.")
 
     def post_tech_news(self):
         sources = ["https://www.theverge.com/rss/index.xml", "https://9to5mac.com/feed/", "https://techcrunch.com/feed/"]
@@ -88,10 +81,9 @@ class TechEliteBot:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
-                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "leak", "openai", "ios", "m4"]):
+                    if any(w in e.title.lower() for w in ["apple", "nvidia", "ai", "tesla", "leak", "openai", "m4", "ios"]):
                         prompt = (
                             "أنت صانع محتوى تقني سعودي. صغ الخبر كثريد حماسي بلهجة بيضاء. "
-                            "التركيز: الجانب التطبيقي وكيف يؤثر على المستخدم. "
                             "اللغة: العربية والمصطلحات الإنجليزية بين قوسين فقط. "
                             "الهيكلية: 1. Hook خاطف. 2. تحليل تطبيقي. 3. مثال واقعي. 4. سؤال تفاعلي."
                         )
@@ -102,32 +94,28 @@ class TechEliteBot:
                 conn.close()
 
     def post_interactive(self, prompt_instr):
-        content = self._generate_ai(prompt_instr + " (لهجة سعودية، مصطلحات إنجليزية بين قوسين، لغة عربية)", "تفاعل")
+        content = self._generate_ai(prompt_instr + " (باللغة العربية، لهجة بيضاء، مصطلحات بين قوسين)", "تفاعل")
         if content:
-            safe_text = content[:270] + "\n#تقنية #تفاعل"
+            safe_text = content[:270] + "\n#تقنية"
             self.x_client.create_tweet(text=safe_text)
 
     def _generate_ai(self, prompt, context):
-        try: # Gemini Primary
-            res = self.gemini_client.models.generate_content(model='gemini-1.5-flash', contents=f"{prompt}\n\nالسياق: {context}")
+        try:
+            # تصحيح اسم النموذج لـ Gemini
+            res = self.gemini_client.models.generate_content(model='models/gemini-1.5-flash', contents=f"{prompt}\n\nالسياق: {context}")
             return res.text
-        except: # Qwen Backup
+        except Exception as e:
+            logging.error(f"Gemini Error: {e}. Switching to Backup...")
             res = self.ai_qwen.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role":"user","content":f"{prompt}\n\nالسياق: {context}"}])
             return res.choices[0].message.content
 
     def post_thread(self, content, url):
-        # تقسيم النص بذكاء مع منع الاقتطاع
         tweets = [t.strip() for t in re.split(r'\n\s*\d+[\/\.\)]\s*|\n\n', content.strip()) if len(t.strip()) > 10]
         last_id = None
         for i, tweet in enumerate(tweets[:3]):
             text = tweet
-            if i == len(tweets[:3]) - 1: 
-                text += f"\n\n🔗 المصدر: {url}\n#تقنية"
-            
-            # منع الاقتطاع المشوه (قص عند أقرب مسافة)
-            if len(text) > 280:
-                text = text[:277].rsplit(' ', 1)[0] + "..."
-            
+            if i == len(tweets[:3]) - 1: text += f"\n\n🔗 المصدر: {url}\n#تقنية"
+            if len(text) > 280: text = text[:277].rsplit(' ', 1)[0] + "..."
             try:
                 res = self.x_client.create_tweet(text=text, in_reply_to_tweet_id=last_id)
                 last_id = res.data['id']
