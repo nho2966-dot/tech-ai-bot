@@ -102,4 +102,48 @@ class TechEliteBot:
         last_id = None
         for i, tweet in enumerate(tweets[:5]):
             text = f"{i+1}/ {tweet}"
-            if i == len(tweets[:5]) - 1
+            # تم إضافة النقطتين الرأسيتين هنا في سطر 105 والتحقق من القواعد
+            if i == (len(tweets[:5]) - 1):
+                text += f"\n\n{final_tags}"
+            
+            if len(text) > 280:
+                text = text[:277].rsplit(' ', 1)[0] + "..."
+            
+            last_id = self.safe_post(text, last_id)
+            if not last_id: break
+            time.sleep(2)
+        return True
+
+    def run_cycle(self):
+        sources = [
+            {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+            {"name": "9to5Mac", "url": "https://9to5mac.com/feed/"},
+            {"name": "MacRumors", "url": "https://www.macrumors.com/macrumors.xml"}
+        ]
+        targets = ["apple", "nvidia", "leak", "rumor", "ai", "tesla", "تسريب", "عاجل"]
+        random.shuffle(sources)
+        for src in sources:
+            feed = feedparser.parse(src["url"])
+            for e in feed.entries[:8]:
+                try:
+                    pub_time = datetime(*e.published_parsed[:6], tzinfo=timezone.utc)
+                    if (datetime.now(timezone.utc) - pub_time).total_seconds() > 129600: continue
+                except: continue
+
+                h = hashlib.sha256(e.title.encode()).hexdigest()
+                conn = sqlite3.connect(DB_FILE)
+                if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
+                    if any(w in e.title.lower() for w in targets):
+                        score = self.calculate_credibility(src['name'], e)
+                        sys_prompt = f"أنت محرر تقني نخبوي. ابدأ بـ '📊 تقييم المصداقية: {score}/10'. صغ الخبر كثريد فخم ومركز واقترح 3 وسوم تقنية."
+                        content = self.ai_ask(sys_prompt, f"العنوان: {e.title}\nالتفاصيل: {e.description}")
+                        if content:
+                            if self.post_thread(content, e.title, e.description):
+                                conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
+                                conn.commit()
+                                conn.close()
+                                return
+                conn.close()
+
+if __name__ == "__main__":
+    TechEliteBot().run_cycle()
