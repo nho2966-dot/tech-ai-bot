@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  techelite_engine:
+  techelite_enterprise:
     build: .
-    container_name: techelite_sovereign
-    restart: always # إعادة التشغيل التلقائي عند أي انهيار
+    container_name: techelite_sovereign_engine
+    restart: always # بروتوكول التعافي التلقائي
     volumes:
-      - .:/app # لضمان بقاء قاعدة البيانات وملفات الاستراتيجية
+      - .:/app # للحفاظ على قاعدة البيانات وملفات الاستراتيجية
     env_file:
       - .env
     logging:
