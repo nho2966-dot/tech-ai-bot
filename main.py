@@ -7,6 +7,7 @@ from openai import OpenAI
 load_dotenv()
 DB_FILE = "news.db"
 
+# تعليمات المحرر التقني (وضع التهدئة والود)
 STRICT_FRIENDLY_PROMPT = """
 أنت رئيس تحرير (TechElite)، خبير تقني ودود. صُغ ثريداً ممتعاً ورصيناً بالعربية بناءً على النص.
 القواعد:
@@ -81,12 +82,12 @@ class TechEliteFinal:
                         res = self.x_client.create_tweet(text=item["text"], in_reply_to_tweet_id=last_id)
                     
                     last_id = res.data["id"]
-                    time.sleep(40) # زيادة الفاصل الزمني للأمان
+                    time.sleep(60) # زيادة الانتظار لدقيقة كاملة بين تغريدات الثريد الواحد
                     break
                 except tweepy.TooManyRequests:
                     retries += 1
-                    wait = 120 * retries
-                    logging.warning(f"⚠️ ضغط عالي، انتظار {wait} ثانية...")
+                    wait = 300 * retries # في حال الخطأ، ينتظر 5 دقائق ثم 10 دقائق
+                    logging.warning(f"⚠️ ضغط عالي، سأنتظر {wait} ثانية للهدوء...")
                     time.sleep(wait)
                 except Exception as e:
                     logging.error(f"❌ خطأ: {e}"); return False
@@ -96,15 +97,17 @@ class TechEliteFinal:
         SOURCES = [
             "https://venturebeat.com/category/ai/feed/", "https://openai.com/news/rss.xml",
             "https://9to5mac.com/feed/", "https://techcrunch.com/feed/",
-            "https://www.theverge.com/rss/index.xml", "https://www.bleepingcomputer.com/feed/"
+            "https://www.theverge.com/rss/index.xml"
         ]
         random.shuffle(SOURCES)
         published = 0
+        max_per_cycle = 1 # خبر واحد فقط في كل دورة (كل 8 ساعات) لفك الحظر
+
         for url in SOURCES:
-            if published >= 3: break
+            if published >= max_per_cycle: break
             feed = feedparser.parse(url)
-            for e in feed.entries[:5]:
-                if published >= 3: break
+            for e in feed.entries[:3]:
+                if published >= max_per_cycle: break
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
@@ -112,7 +115,6 @@ class TechEliteFinal:
                     if ai_text and self.post_thread(ai_text, e.link):
                         conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit(); published += 1
-                        time.sleep(1200) # انتظار 20 دقيقة بين ثريد وآخر
                 conn.close()
 
 if __name__ == "__main__":
