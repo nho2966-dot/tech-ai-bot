@@ -26,8 +26,8 @@ SOURCES = {
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 # الـ Prompts التخصصية
-PUBLISH_PROMPT = "أنت محرر تقني مؤسسي. صُغ ثريداً تقنياً احترافياً مع مصطلحات إنجليزية بين قوسين. [TWEET_1] هوك، [TWEET_2] تفاصيل، [POLL_QUESTION] سؤال، [POLL_OPTIONS] خيارات (-). لا تستخدم الهاشتاغات."
-REPLY_PROMPT = "أنت خبير تقني سيادي. اكتب رداً ذكياً ومختصراً (Smart Reply) يضيف قيمة علمية للتغريدة التالية، مع ذكر مصطلحات إنجليزية بين قوسين. تجنب الردود العامة."
+PUBLISH_PROMPT = "أنت محرر تقني مؤسسي. صُغ ثريداً تقنياً احترافياً مع مصطلحات إنجليزية بين قوسين. [TWEET_1] هوك، [TWEET_2] تفاصيل تقنية مركزة، [POLL_QUESTION] سؤال تفاعلي، [POLL_OPTIONS] خيارات مقسمة بـ (-). لا تستخدم الهاشتاغات أبداً."
+REPLY_PROMPT = "أنت خبير تقني سيادي. اكتب رداً ذكياً ومختصراً (Smart Reply) يضيف قيمة علمية للتغريدة، مع ذكر مصطلحات إنجليزية بين قوسين. تجنب الردود العامة."
 
 class TechEliteEnterpriseSystem:
     def __init__(self):
@@ -62,29 +62,45 @@ class TechEliteEnterpriseSystem:
         else:
             self.strategy = {"daily_limit": 4, "focus_cats": list(SOURCES.keys()), "last_update": 2026}
 
-    # --- محركات الذكاء والذاكرة ---
+    # --- محرك الذكاء المقاوم للزحام (Resilient AI Engine) ---
     def _is_in_memory(self, h):
         with sqlite3.connect(DB_FILE) as conn:
             return conn.execute("SELECT 1 FROM editorial_memory WHERE content_hash=?", (h,)).fetchone() is not None
 
     def _generate_ai(self, system_p, user_p, h):
         if self._is_in_memory(h): return None
-        try:
-            r = self.ai_client.chat.completions.create(
-                model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": system_p}, {"role": "user", "content": user_p}],
-                temperature=0.3
-            )
-            content = r.choices[0].message.content
-            with sqlite3.connect(DB_FILE) as conn:
-                conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?)", (h, content[:50], datetime.now().isoformat()))
-            return content
-        except: return None
+        
+        # قائمة النماذج لتجاوز خطأ 429
+        models = ["qwen/qwen-2.5-72b-instruct", "google/gemini-flash-1.5", "anthropic/claude-3-haiku"]
+        
+        for model_name in models:
+            retries = 0
+            while retries < 2:
+                try:
+                    r = self.ai_client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "system", "content": system_p}, {"role": "user", "content": user_p}],
+                        temperature=0.3
+                    )
+                    content = r.choices[0].message.content
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?)", (h, content[:50], datetime.now().isoformat()))
+                    return content
+                except Exception as e:
+                    if "429" in str(e):
+                        logging.warning(f"⚠️ زحام على {model_name}. محاولة أخرى أو تبديل النموذج...")
+                        time.sleep(30)
+                        retries += 1
+                    else:
+                        logging.error(f"🚨 خطأ {model_name}: {e}")
+                        break 
+        return None
 
     def _safe_x_post(self, func, **kwargs):
         for i in range(3):
             try: return func(**kwargs)
             except Exception as e:
+                logging.error(f"⚠️ X API Error: {e}")
                 time.sleep((2**i)*60)
         return None
 
@@ -105,7 +121,7 @@ class TechEliteEnterpriseSystem:
             if i == 2 and len(parts) >= 4:
                 opts = [o.strip()[:25] for o in parts[3].split('-') if 2 <= len(o.strip()) <= 25][:4]
                 res = self._safe_x_post(self.x_client.create_tweet, text=msg[:240], poll_options=opts, poll_duration_minutes=1440, in_reply_to_tweet_id=last_id)
-                poll_id = res.data['id'] if res else None
+                if res: poll_id = res.data['id']
             else:
                 res = self._safe_x_post(self.x_client.create_tweet, text=msg, in_reply_to_tweet_id=last_id)
             
@@ -114,6 +130,7 @@ class TechEliteEnterpriseSystem:
 
         if last_id:
             with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("INSERT INTO news (hash, title, keywords) VALUES (?, ?, ?)", (hashlib.sha256(title.encode()).hexdigest(), title, url))
                 conn.execute("INSERT INTO roi_metrics (tweet_id, category, created_at) VALUES (?, ?, ?)", (str(poll_id or last_id), cat, datetime.now().isoformat()))
             return True
         return False
@@ -121,25 +138,26 @@ class TechEliteEnterpriseSystem:
     # --- [الركن الثاني]: الردود الذكية ---
     def process_smart_replies(self):
         logging.info("🔍 Searching for engagement opportunities...")
-        queries = ["ذكاء اصطناعي", "الأمن السيبراني", "Microsoft 365"]
+        queries = ["ذكاء اصطناعي", "الأمن السيبراني", "تقنيات مايكروسوفت"]
         for q in queries:
-            tweets = self.x_client.search_recent_tweets(query=f"{q} -is:retweet", max_results=5)
-            if not tweets.data: continue
-            for tweet in tweets.data:
-                h = hashlib.sha256(f"reply_{tweet.id}".encode()).hexdigest()
-                reply_text = self._generate_ai(REPLY_PROMPT, tweet.text, h)
-                if reply_text:
-                    self._safe_x_post(self.x_client.create_tweet, text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
-                    logging.info(f"✅ Smart Reply sent to: {tweet.id}")
-                    time.sleep(120)
+            try:
+                tweets = self.x_client.search_recent_tweets(query=f"{q} -is:retweet", max_results=5)
+                if not tweets.data: continue
+                for tweet in tweets.data:
+                    h = hashlib.sha256(f"reply_{tweet.id}".encode()).hexdigest()
+                    reply_text = self._generate_ai(REPLY_PROMPT, tweet.text, h)
+                    if reply_text:
+                        self._safe_x_post(self.x_client.create_tweet, text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
+                        logging.info(f"✅ Smart Reply sent to: {tweet.id}")
+                        time.sleep(120)
+            except Exception as e:
+                logging.error(f"⚠️ Reply Logic Error: {e}")
 
     # --- الدورة التشغيلية ---
     def run_cycle(self):
         logging.info("🚀 Sovereign Cycle Started")
-        # 1. الردود الذكية أولاً لرفع التفاعل
-        self.process_smart_replies()
+        self.process_smart_replies() # التفاعل أولاً
         
-        # 2. النشر الاستهدافي
         posts_count = 0
         for cat, urls in SOURCES.items():
             if posts_count >= self.daily_limit: break
@@ -155,12 +173,14 @@ class TechEliteEnterpriseSystem:
         logging.info("🏁 Cycle Finished")
 
     def start_forever(self):
+        logging.info("🌍 TechElite Enterprise Engine LIVE 24/7")
         while True:
             try:
                 self.run_cycle()
                 time.sleep(3600)
             except Exception as e:
-                logging.error(f"🚨 Error: {e}"); time.sleep(600)
+                logging.error(f"🚨 Critical Failure: {e}")
+                time.sleep(600)
 
 if __name__ == "__main__":
     TechEliteEnterpriseSystem().start_forever()
