@@ -1,24 +1,23 @@
 import os, sqlite3, logging, hashlib, time, re, random
 import tweepy, feedparser
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
 DB_FILE = "news.db"
 
-# الدليل التحريري (بناءً على طلبك: تقني، عربي، مصطلحات إنجليزية بين قوسين)
+# الدليل التحريري المعتمد
 AUTHORITY_PROMPT = """
-أنت رئيس تحرير (TechElite). صُغ المحتوى بناءً على [النوع الإلزامي].
+أنت رئيس تحرير في وكالة (TechElite). صُغ المحتوى بناءً على [النوع الإلزامي] المرفق.
 القواعد: 
-1. التزام تام بالحقائق، نبرة باردة ورصينة.
-2. المصطلحات الإنجليزية بين قوسين مثل (Artificial Intelligence).
-3. تجنب اقتطاع التغريدات، النشر باللغة العربية فقط.
-4. التنسيق: ابدأ بـ [TWEET_1] ثم المحتوى، ثم [TWEET_2] وهكذا.
+1. التزام تام بالحقائق، نبرة باردة ورصينة، تجنب صفات المبالغة.
+2. المصطلحات الإنجليزية توضع بين قوسين (Term).
+3. تجنب اقتطاع التغريدات نهائياً، والالتزام باللغة العربية.
+4. التنسيق: وزع المحتوى على وسوم [TWEET_1], [TWEET_2] لضمان عدم التقطيع.
 """
 
 class TechEliteAuthority:
-    AR_STOP = {"من", "في", "على", "إلى", "عن", "تم", "كما", "وفق", "حيث", "بعد"}
     SOURCE_TRUST = {"theverge.com": "موثوق", "9to5mac.com": "موثوق", "techcrunch.com": "موثوق"}
 
     def __init__(self):
@@ -34,7 +33,7 @@ class TechEliteAuthority:
         conn.close()
 
     def _init_clients(self):
-        # إعداد X
+        # إعداد تويتر
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -42,7 +41,7 @@ class TechEliteAuthority:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        # إعداد OpenRouter (كبديل مستقر لـ Gemini)
+        # إعداد OpenRouter
         self.ai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv("OPENROUTER_API_KEY")
@@ -51,7 +50,7 @@ class TechEliteAuthority:
     def _generate_ai(self, prompt, context):
         try:
             response = self.ai_client.chat.completions.create(
-                model="alibi/qwen-2.5-72b-instruct", # نموذج قوي جداً في العربية
+                model="qwen/qwen-2.5-72b-instruct",
                 messages=[
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": context}
@@ -64,9 +63,9 @@ class TechEliteAuthority:
 
     def pre_classify(self, title):
         t = title.lower()
-        if any(x in t for x in ["launch", "announce"]): return "إطلاق"
-        if any(x in t for x in ["leak", "rumor"]): return "تسريب"
-        return "تقرير تقني"
+        if any(x in t for x in ["launch", "announce"]): return "إطلاق منتج"
+        if any(x in t for x in ["leak", "rumor", "spotted"]): return "تسريب تقني"
+        return "تقرير تحديث"
 
     def handle_smart_replies(self):
         try:
@@ -81,7 +80,9 @@ class TechEliteAuthority:
                 h = f"rep_{tweet.id}"
                 if conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone(): continue
                 
-                reply = self._generate_ai("رد كخبير تقني سعودي بلهجة بيضاء رصينة ومختصرة جداً.", tweet.text)
+                prompt = "أنت خبير تقني سعودي. رد بلهجة بيضاء رصينة ومختصرة جداً مع الحفاظ على العربية الفصحى في المصطلحات."
+                reply = self._generate_ai(prompt, f"المتابع يقول: {tweet.text}")
+                
                 if reply:
                     self.x_client.create_tweet(text=reply[:278], in_reply_to_tweet_id=tweet.id)
                     conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, "reply", datetime.now().isoformat()))
@@ -89,11 +90,11 @@ class TechEliteAuthority:
             conn.close()
         except Exception as e: logging.error(f"Reply Error: {e}")
 
-    def post_authority_thread(self, ai_text, url, domain, news_type):
+    def post_authority_thread(self, ai_text, url, news_type):
         blocks = self._parse_blocks(ai_text)
-        content_tweets = [blocks[k] for k in ["TWEET_1", "TWEET_2"] if k in blocks]
+        content_tweets = [blocks[k] for k in ["TWEET_1", "TWEET_2", "TWEET_3"] if k in blocks]
         
-        footer = f"🛡️ رصد: {news_type}\n🔗 {url}\n—\n🧠 TechElite"
+        footer = f"🛡️ رصد: {news_type}\n🔗 {url}\n—\n🧠 TechElite | رصد بلا تضخيم"
         all_tweets = content_tweets + [footer]
         
         last_id = None
@@ -101,29 +102,32 @@ class TechEliteAuthority:
             try:
                 res = self.x_client.create_tweet(text=t[:278], in_reply_to_tweet_id=last_id)
                 last_id = res.data["id"]
-                time.sleep(10)
-            except Exception: break
+                time.sleep(12) # تجنب الـ Rate Limit
+            except Exception as e: 
+                logging.error(f"Tweet Error: {e}")
+                break
         return True
 
     def run_cycle(self):
-        # 1. الردود الذكية أولاً
+        # 1. معالجة الردود الذكية أولاً
         self.handle_smart_replies()
         
-        # 2. النشر الاستهدافي
+        # 2. النشر الاستهدافي من المصادر
         sources = ["https://www.theverge.com/rss/index.xml", "https://9to5mac.com/feed/"]
+        random.shuffle(sources)
         for url in sources:
             feed = feedparser.parse(url)
-            for e in feed.entries[:2]:
+            for e in feed.entries[:3]:
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
                     news_type = self.pre_classify(e.title)
-                    content = self._generate_ai(AUTHORITY_PROMPT.replace("[نوع]", news_type), e.title)
-                    if content and self.post_authority_thread(content, e.link, url, news_type):
+                    content = self._generate_ai(f"{AUTHORITY_PROMPT}\n[TYPE]: {news_type}", e.title)
+                    if content and self.post_authority_thread(content, e.link, news_type):
                         conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit()
                         conn.close()
-                        return
+                        return # نشر خبر واحد في كل دورة
                 conn.close()
 
     def _parse_blocks(self, text):
