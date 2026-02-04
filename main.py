@@ -4,21 +4,19 @@ from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# إعداد البيئة وقاعدة البيانات
 load_dotenv()
 DB_FILE = "news.db"
 
-# تعليمات المحرر التقني (ودود، رصين، وصارم لغوياً)
 STRICT_FRIENDLY_PROMPT = """
-أنت رئيس تحرير (TechElite)، خبير تقني ودود وسلس. صُغ ثريداً ممتعاً بالعربية بناءً على النص المرفق.
-القواعد الصارمة:
-1. امنع تماماً أي رموز صينية أو لغات غير مفهومة.
-2. استخدم لغة عربية ودودة (مثل: تخيلوا، خبر يهمكم، إليكم التفاصيل) مع وضع المصطلح التقني بالإنجليزية بين قوسين (Term).
-3. التنسيق المطلوب:
-[TWEET_1]: افتتاحية ودودة وجذابة تشرح الخبر الأساسي.
-[TWEET_2]: تفاصيل تقنية (Technical Specs) بأسلوب مبسط وشيق.
-[POLL_QUESTION]: سؤال استطلاع رأي (Poll) ذكي للمتابعين (أقل من 80 حرفاً).
-[POLL_OPTIONS]: خياران أو 3 خيارات واضحة، مفصولة بشرطة (مثلاً: رائع جداً - لا أحتاجه).
+أنت رئيس تحرير (TechElite)، خبير تقني ودود. صُغ ثريداً ممتعاً ورصيناً بالعربية بناءً على النص.
+القواعد:
+1. يمنع تماماً أي رموز صينية أو لغات غير مفهومة.
+2. استخدم لغة ودودة وسلسة مع وضع المصطلح التقني بالإنجليزية بين قوسين (Term).
+3. التنسيق:
+[TWEET_1]: افتتاحية جذابة تشرح الخبر الأساسي.
+[TWEET_2]: تفاصيل تقنية (Technical Specs) مبسطة.
+[POLL_QUESTION]: سؤال استطلاع رأي (Poll) ذكي (أقل من 80 حرفاً).
+[POLL_OPTIONS]: خياران أو 3 خيارات، مفصولة بشرطة (مثلاً: رائع جداً - لا أحتاجه).
 """
 
 class TechEliteFinal:
@@ -43,9 +41,7 @@ class TechEliteFinal:
         self.ai_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
     def _is_clean_text(self, text):
-        """نظام حماية لمنع الرموز الصينية أو التداخلات اللغوية"""
-        if re.search(r'[\u4e00-\u9fff]', text): # اكتشاف الحروف الصينية
-            return False
+        if re.search(r'[\u4e00-\u9fff]', text): return False
         return True
 
     def _generate_ai(self, context):
@@ -60,7 +56,6 @@ class TechEliteFinal:
         except: return None
 
     def post_thread(self, ai_text, url):
-        # استخراج الأقسام باستخدام Regex
         t1 = re.search(r'\[TWEET_1\](.*?)(?=\[|$)', ai_text, re.S)
         t2 = re.search(r'\[TWEET_2\](.*?)(?=\[|$)', ai_text, re.S)
         p_q = re.search(r'\[POLL_QUESTION\](.*?)(?=\[|$)', ai_text, re.S)
@@ -68,29 +63,34 @@ class TechEliteFinal:
 
         if not (t1 and t2 and p_q and p_o): return False
 
-        try:
-            # التغريدة 1
-            res1 = self.x_client.create_tweet(text=f"1/ {t1.group(1).strip()}"[:278])
-            last_id = res1.data["id"]
-            time.sleep(20)
+        tweets_data = [
+            {"text": f"1/ {t1.group(1).strip()}"[:278]},
+            {"text": f"2/ {t2.group(1).strip()}\n\n🔗 المصدر: {url}"[:278]},
+            {"text": f"3/ رأيكم يهمنا: {p_q.group(1).strip()}"[:278], "is_poll": True}
+        ]
 
-            # التغريدة 2 + الرابط
-            content2 = f"2/ {t2.group(1).strip()}\n\n🔗 التفاصيل:\n{url}"
-            res2 = self.x_client.create_tweet(text=content2[:278], in_reply_to_tweet_id=last_id)
-            last_id = res2.data["id"]
-            time.sleep(20)
-
-            # التغريدة 3 (الاستطلاع)
-            options = [o.strip() for o in p_o.group(1).split('-') if o.strip()][:4]
-            self.x_client.create_tweet(
-                text=f"3/ رأيكم يهمنا: {p_q.group(1).strip()}",
-                poll_options=options,
-                poll_duration_minutes=1440,
-                in_reply_to_tweet_id=last_id
-            )
-            return True
-        except Exception as e:
-            logging.error(f"Post Error: {e}"); return False
+        last_id = None
+        for i, item in enumerate(tweets_data):
+            retries = 0
+            while retries < 3:
+                try:
+                    if item.get("is_poll"):
+                        options = [o.strip() for o in p_o.group(1).split('-') if o.strip()][:4]
+                        res = self.x_client.create_tweet(text=item["text"], poll_options=options, poll_duration_minutes=1440, in_reply_to_tweet_id=last_id)
+                    else:
+                        res = self.x_client.create_tweet(text=item["text"], in_reply_to_tweet_id=last_id)
+                    
+                    last_id = res.data["id"]
+                    time.sleep(40) # زيادة الفاصل الزمني للأمان
+                    break
+                except tweepy.TooManyRequests:
+                    retries += 1
+                    wait = 120 * retries
+                    logging.warning(f"⚠️ ضغط عالي، انتظار {wait} ثانية...")
+                    time.sleep(wait)
+                except Exception as e:
+                    logging.error(f"❌ خطأ: {e}"); return False
+        return True
 
     def run_cycle(self):
         SOURCES = [
@@ -100,13 +100,11 @@ class TechEliteFinal:
         ]
         random.shuffle(SOURCES)
         published = 0
-        
         for url in SOURCES:
-            if published >= 3: break # 3 أخبار كل 8 ساعات
+            if published >= 3: break
             feed = feedparser.parse(url)
             for e in feed.entries[:5]:
                 if published >= 3: break
-                
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
@@ -114,7 +112,7 @@ class TechEliteFinal:
                     if ai_text and self.post_thread(ai_text, e.link):
                         conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
                         conn.commit(); published += 1
-                        time.sleep(900) # فاصل 15 دقيقة بين الأخبار
+                        time.sleep(1200) # انتظار 20 دقيقة بين ثريد وآخر
                 conn.close()
 
 if __name__ == "__main__":
