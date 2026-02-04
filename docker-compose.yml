@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  techelite_bot:
+    build: .
+    container_name: techelite_sovereign
+    restart: always # إعادة تشغيل تلقائية عند الانهيار
+    volumes:
+      - .:/app # ربط المجلد لضمان بقاء قاعدة البيانات (Persistence)
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10mb"
+        max-file: "3"
