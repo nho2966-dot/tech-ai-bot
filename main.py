@@ -1,23 +1,25 @@
 import os, sqlite3, logging, hashlib, time, re, random
 import tweepy, feedparser
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
 DB_FILE = "news.db"
 
-# هندسة الأوامر لمنع الهلوسة والالتزام باللغة العربية والمصطلحات الإنجليزية
+# البرومبت الصارم: وظيفة الموديل هي التقييم قبل الصياغة
 STRICT_AUTHORITY_PROMPT = """
-أنت محرر تقني في (TechElite). صُغ ثريداً تقنياً دقيقاً باللغة العربية بناءً على النص المرفق فقط.
-القواعد الصارمة:
-1. يمنع إضافة أي معلومة (أرقام، تواريخ، أسماء) غير موجودة في النص.
-2. المصطلحات التقنية تكتب بالإنجليزية بين قوسين (Term) بجانب معناها العربي.
-3. تجنب الاقتطاع؛ وزع المحتوى على التنسيق التالي:
+أنت مدقق محتوى تقني في (TechElite). مهمتك الحالية هي تصفية الأخبار ونشر المفيد منها فقط.
 
-[TWEET_1]: المعلومة المركزية للخبر بأسلوب "خطاف" رصين وجذاب.
-[TWEET_2]: تفاصيل تقنية حرفية مترجمة من النص (أرقام، ميزات).
-[TWEET_3]: سؤال تقني تفاعلي للمتابعين مشتق من محتوى الخبر فقط.
+القواعد الصارمة:
+1. الجودة: إذا كان الخبر مبهمًا، تافهًا، أو مجرد إشاعة ضعيفة، لا تصغِ شيئًا واكتب فقط: [REJECTED].
+2. المصداقية: التزم بالحقائق التقنية المذكورة في النص حصراً.
+3. التنسيق (في حال القبول):
+[TWEET_1]: حقيقة تقنية مركزية واضحة ومباشرة (بدون غموض).
+[TWEET_2]: تفاصيل تقنية (Technical Details) مع ذكر المصطلحات الإنجليزية بين قوسين (Term).
+[TWEET_3]: الأثر العملي لهذا الخبر على المستخدم أو السوق.
+
+ممنوع استخدام عبارات تسويقية أو كلمات مبهمة مثل "قريبًا" أو "ربما" مالم تكن جزءًا من حقيقة تقنية مؤكدة.
 """
 
 class TechEliteAuthority:
@@ -25,19 +27,11 @@ class TechEliteAuthority:
         logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
         self._init_db()
         self._init_clients()
-        self.my_id = None
 
     def _init_db(self):
         conn = sqlite3.connect(DB_FILE)
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS news (
-            hash TEXT PRIMARY KEY,
-            title TEXT,
-            published_at TEXT
-        )
-        """)
-        conn.commit()
-        conn.close()
+        conn.execute("CREATE TABLE IF NOT EXISTS news (hash TEXT PRIMARY KEY, title TEXT, published_at TEXT)")
+        conn.commit(); conn.close()
 
     def _init_clients(self):
         self.x_client = tweepy.Client(
@@ -52,46 +46,41 @@ class TechEliteAuthority:
             api_key=os.getenv("OPENROUTER_API_KEY")
         )
 
+    def _is_valuable_content(self, title):
+        """فلتر الكلمات المفتاحية لمنع الأخبار غير المفيدة قبل إرسالها للذكاء الاصطناعي"""
+        useless_keywords = ['deal', 'discount', 'sale', 'giveaway', 'rumor', 'maybe', 'opinion']
+        return not any(word in title.lower() for word in useless_keywords)
+
     def _generate_ai(self, prompt, context):
         try:
             r = self.ai_client.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role":"system","content":prompt},{"role":"user","content":context}],
-                temperature=0.1, # صرامة تامة ضد الهلوسة
-                max_tokens=700
+                temperature=0.0 # أدنى درجة حرارة لضمان المنطق المطلق والصفر هلوسة
             )
             return r.choices[0].message.content.strip()
         except Exception as e:
-            logging.error(f"AI Error: {e}")
-            return None
+            logging.error(f"AI Error: {e}"); return None
 
-    def is_recycled_news(self, title):
-        conn = sqlite3.connect(DB_FILE)
-        # فحص الأخبار في آخر يومين لمنع التكرار
-        cutoff = (datetime.now() - timedelta(days=2)).isoformat()
-        rows = conn.execute("SELECT title FROM news WHERE published_at > ?", (cutoff,)).fetchall()
-        conn.close()
+    def _smart_parse(self, text):
+        if "[REJECTED]" in text or len(text) < 50:
+            return []
         
-        t_clean = re.sub(r'\W+', '', title.lower())
-        for (old_title,) in rows:
-            if re.sub(r'\W+', '', old_title.lower()) == t_clean:
-                return True
-        return False
+        tweets = []
+        segments = re.split(r'\[TWEET_\d+\]', text)
+        for seg in segments:
+            clean_seg = seg.strip()
+            if clean_seg and len(clean_seg) > 15:
+                tweets.append(clean_seg)
+        return tweets[:3]
 
     def post_thread(self, ai_text, url):
-        blocks = {}
-        current = None
-        for line in ai_text.splitlines():
-            if line.startswith("[TWEET_"):
-                current = line.split("]")[0].strip("[]")
-                blocks[current] = []
-            elif current and line.strip():
-                blocks[current].append(line.strip())
-        
-        tweets = [" ".join(blocks[k]) for k in ["TWEET_1", "TWEET_2", "TWEET_3"] if k in blocks]
-        if not tweets: return False
+        tweets = self._smart_parse(ai_text)
+        if not tweets:
+            logging.info("🚫 تم استبعاد المحتوى لعدم كفاية الجودة أو الوضوح.")
+            return False
 
-        footer = f"🔗 المصدر:\n{url}\n\n🛡️ رصد TechElite"
+        footer = f"🔗 المصدر الموثوق:\n{url}\n\n🛡️ TechElite | رصد دقيق"
         tweets.append(footer)
 
         last_id = None
@@ -100,59 +89,36 @@ class TechEliteAuthority:
                 prefix = f"{i+1}/ " if i < len(tweets)-1 else ""
                 res = self.x_client.create_tweet(text=f"{prefix}{t}"[:278], in_reply_to_tweet_id=last_id)
                 last_id = res.data["id"]
-                time.sleep(15) # فاصل بين التغريدات
+                time.sleep(15)
             except Exception as e:
-                logging.error(f"Tweet Error: {e}")
-                break
+                logging.error(f"Tweet Error: {e}"); break
         return True
 
-    def handle_mentions(self):
-        try:
-            if not self.my_id:
-                self.my_id = str(self.x_client.get_me().data.id)
-            mentions = self.x_client.get_users_mentions(id=self.my_id, max_results=5)
-            if not mentions.data: return
-
-            conn = sqlite3.connect(DB_FILE)
-            for tweet in mentions.data:
-                h = f"reply_{tweet.id}"
-                if conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone(): continue
-                
-                reply_text = self._generate_ai("أنت خبير تقني رصين. رد على الاستفسار المرفق بوقار ودون هلوسة وباختصار.", tweet.text)
-                if reply_text:
-                    self.x_client.create_tweet(text=reply_text[:278], in_reply_to_tweet_id=tweet.id)
-                    conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, "reply", datetime.now().isoformat()))
-                    conn.commit()
-            conn.close()
-        except Exception as e: logging.error(f"Mentions Error: {e}")
-
     def run_cycle(self):
-        self.handle_mentions()
-        
-        count = 0
+        published = 0
         sources = ["https://www.theverge.com/rss/index.xml", "https://9to5mac.com/feed/", "https://techcrunch.com/feed/"]
         random.shuffle(sources)
 
         for url in sources:
-            if count >= 2: break
+            if published >= 2: break
             feed = feedparser.parse(url)
             for e in feed.entries[:5]:
-                if count >= 2: break
+                if published >= 2: break
                 
-                if self.is_recycled_news(e.title): continue
-                
+                # طبقة الفلترة الأولى: الكلمات المفتاحية
+                if not self._is_valuable_content(e.title): continue
+
                 h = hashlib.sha256(e.title.encode()).hexdigest()
                 conn = sqlite3.connect(DB_FILE)
                 if not conn.execute("SELECT 1 FROM news WHERE hash=?", (h,)).fetchone():
-                    # إرسال العنوان والوصف لضمان الدقة
-                    context = f"Title: {e.title}\nDetails: {getattr(e, 'summary', '')}"
-                    ai_content = self._generate_ai(STRICT_AUTHORITY_PROMPT, context)
+                    # إرسال المحتوى الكامل للتقييم الصارم
+                    context = f"Title: {e.title}\nFull Text: {getattr(e, 'summary', '')}"
+                    ai_text = self._generate_ai(STRICT_AUTHORITY_PROMPT, context)
                     
-                    if ai_content and self.post_thread(ai_content, e.link):
+                    if ai_text and self.post_thread(ai_text, e.link):
                         conn.execute("INSERT INTO news VALUES (?, ?, ?)", (h, e.title, datetime.now().isoformat()))
-                        conn.commit()
-                        count += 1
-                        time.sleep(60) # فاصل بين الخبرين
+                        conn.commit(); published += 1
+                        time.sleep(120) # فاصل زمني طويل بين الأخبار لتعزيز الرصانة
                 conn.close()
 
 if __name__ == "__main__":
