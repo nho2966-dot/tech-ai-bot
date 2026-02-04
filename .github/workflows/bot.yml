@@ -1,24 +1,32 @@
-name: TechElite 8-Hour Friendly Cycle
+name: TechElite Bot Runner 2026
 
 on:
   schedule:
-    - cron: '0 */8 * * *' # تشغيل آلي كل 8 ساعات
-  workflow_dispatch: # تشغيل يدوي بضغطة زر
+    # يعمل كل 6 ساعات لضمان تغطية الأخبار والتقارير
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ضروري للسماح للبوت بتحديث قاعدة البيانات
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # جلب كامل التاريخ لضمان نجاح الـ Rebase
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          pip install tweepy feedparser python-dotenv openai
+          python -m pip install --upgrade pip
+          pip install tweepy feedparser openai python-dotenv
 
       - name: Run TechElite Bot
         env:
@@ -30,10 +38,20 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python main.py
 
-      - name: Save and Sync Database
+      - name: Sync and Push Database
         run: |
-          git config --global user.name "TechElite-Bot"
-          git config --global user.email "bot@techelite.ai"
-          git add news.db
-          git commit -m "Update DB: [skip ci]" || echo "No changes"
-          git push
+          git config --local user.email "action@github.com"
+          git config --local user.name "TechElite-Bot"
+          
+          # إضافة قاعدة البيانات فقط
+          git add news_master_2026.db system_master.log
+          
+          # بروتوكول المزامنة الذكية:
+          # 1. جلب التغييرات الأخيرة من السيرفر
+          git fetch origin main
+          # 2. دمج التغييرات المحلية فوق التغييرات البعيدة لتجنب الرفض
+          git rebase origin/main
+          
+          # 3. الرفع النهائي
+          git commit -m "🛡️ Update DB and Logs [skip ci]" || echo "No changes to commit"
+          git push origin main
