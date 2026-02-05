@@ -28,9 +28,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install tweepy feedparser openai python-dotenv
 
-      - name: List Files (For Debugging)
-        run: ls -R # هذا السطر سيطبع لنا أسماء الملفات في السجل لنعرف أين الخطأ
-
       - name: Run Tech Engine
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
@@ -39,8 +36,7 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        # سنستخدم نقطة لتحديد المسار الحالي
-        run: python ./Tech_Sovereign_V12.py
+        run: python main.py
 
       - name: Commit Database Updates
         run: |
