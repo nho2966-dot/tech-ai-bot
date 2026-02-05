@@ -18,7 +18,7 @@ EDITORIAL_POLICY = {
     "HARVEST":  {"min_score": 5, "max_len": 25000, "prefix": "🗞️ حصاد الأسبوع"}
 }
 
-# 2. محرك الثريدات النخبوي
+# 2. محرك الثريدات النخبوي مع نظام التهدئة (Anti-429 Guard)
 class EliteThreadEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
@@ -47,12 +47,25 @@ class EliteThreadEngine:
                 header = "🧵 تحليل سيادي\n" if i == 0 else f"↳ {i+1}/{len(tweets)}\n"
                 footer = f"\n\n🔗 المرجع: {source_url}" if i == len(tweets)-1 else ""
                 final_txt = f"{header}{txt}{footer}"
-                time.sleep(2)
-                res = self.x.create_tweet(text=final_txt, in_reply_to_tweet_id=prev_id)
-                prev_id = res.data['id']
+                
+                # --- نظام التهدئة والتعافي من الـ Rate Limit ---
+                retry_count = 0
+                while retry_count < 3:
+                    try:
+                        # تأخير بشري: 12 ثانية بين كل تغريدة في الثريد
+                        time.sleep(12 if i > 0 else 2) 
+                        res = self.x.create_tweet(text=final_txt, in_reply_to_tweet_id=prev_id)
+                        prev_id = res.data['id']
+                        logging.info(f"✅ تم نشر الجزء {i+1}")
+                        break 
+                    except tweepy.TooManyRequests:
+                        retry_count += 1
+                        logging.warning(f"⚠️ حد الطلبات ممتلئ.. انتظار 45 ثانية (محاولة {retry_count}/3)")
+                        time.sleep(45)
+                # --------------------------------------------
             return True
         except Exception as e:
-            logging.error(f"❌ فشل الثريد: {e}")
+            logging.error(f"❌ فشل الثريد النهائي: {e}")
             return False
 
 # 3. محرك الردود الذكي
@@ -81,12 +94,16 @@ class SmartReplyEngine:
                         model="qwen/qwen-2.5-72b-instruct",
                         messages=[{"role": "user", "content": prompt}]
                     )
+                    
+                    time.sleep(5) # تأخير وقائي للردود
                     self.x.create_tweet(text=res.choices[0].message.content.strip(), in_reply_to_tweet_id=tweet.id)
                     conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (rh, "REPLY", datetime.now().isoformat()))
                     logging.info(f"✅ رد ذكي على: {tweet.id}")
+        except tweepy.TooManyRequests:
+            logging.warning("⚠️ توقف مؤقت لمحرك الردود بسبب Rate Limit.")
         except Exception as e: logging.error(f"❌ خطأ الردود: {e}")
 
-# 4. المحرك السيادي
+# 4. المحرك السيادي (الأوركسترا)
 class SovereignEngine:
     def __init__(self):
         self._init_db()
@@ -121,7 +138,6 @@ class SovereignEngine:
                 logging.info("🔁 مكرر.")
                 return
 
-            # للنشر التجريبي مباشرة كثريد لضمان عمل المعمارية
             success = self.threader.post_thread(raw_data, url)
             if success:
                 conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (h, mode, datetime.now().isoformat()))
@@ -129,7 +145,10 @@ class SovereignEngine:
 
 if __name__ == "__main__":
     bot = SovereignEngine()
+    
+    # 1. خدمة الجمهور أولاً (الردود)
     bot.replier.handle_mentions()
-    # تم تصحيح النص هنا لضمان عدم وجود SyntaxError
-    test_content = "قفزة نوعية في تقنيات الطاقة النظيفة تعزز كفاءة مراكز بيانات الذكاء الاصطناعي في المنطقة."
-    bot.publish_logic(test_content, "techcrunch.com", mode="HARVEST")
+    
+    # 2. النشر الإستراتيجي
+    test_content = "ثورة في تقنيات الذكاء الاصطناعي التوليدي تفتح آفاقاً جديدة لتطوير التطبيقات البرمجية للأفراد."
+    bot.publish_logic(test_content, "techcrunch.com", mode="ANALYSIS")
