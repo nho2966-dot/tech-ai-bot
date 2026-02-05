@@ -4,29 +4,39 @@ import tweepy, feedparser
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# --- 1. الإعدادات ---
+# --- 1. الإعدادات والتحصين ---
 load_dotenv()
 DB_FILE = "tech_om_enterprise_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-# مصادر الأخبار وكلمات بحث الردود
-SOURCES = ["https://www.theverge.com/rss/index.xml", "https://venturebeat.com/category/ai/feed/"]
-REPLY_QUERIES = "(\"أداة ذكاء اصطناعي\" OR \"كيف استخدم AI\" OR \"تطوير مهارات تقنية\") -is:retweet"
+# --- 2. توجيهات الذكاء الاصطناعي (Prompts) ---
+# ردود ذكية تركز على ممارسات الثورة 4.0 للأفراد
+SYSTEM_REPLY_PROMPT = (
+    "أنت خبير تقني ودود ومختصر (Peer Expert). رد على الاستفسار بممارسة عملية (Industry 4.0 Practice) "
+    "تفيد الفرد فوراً في إنتاجيته أو دخله. استخدم العربية، وضع المصطلحات الإنجليزية بين قوسين، ولا تتجاوز 280 حرف."
+)
 
-# --- 2. توجيهات الذكاء الاصطناعي ---
-PUBLISH_PROMPT = "أنت خبير في الثورة الصناعية الرابعة لتمكين الأفراد. صُغ ثريداً: [TWEET_1] الفكرة والجدوى للفرد، [TWEET_2] ممارسة عملية (Step-by-Step)، [POLL_QUESTION] سؤال استطلاع، [POLL_OPTIONS] خيارات قصيرة. العربية، مصطلحات إنجليزية بين قوسين."
-REPLY_PROMPT = "أنت صديق تقني خبير. رد على الاستفسار بأسلوب (How-to) عملي وبسيط جداً، اقترح أداة أو ممارسة تقنية تفيد السائل فوراً."
+# نشر محتوى جديد (ثريد تعليمي)
+SYSTEM_THREAD_PROMPT = (
+    "أنت خبير في الثورة الصناعية الرابعة للأفراد. صُغ ثريداً تعليمياً من جزأين: "
+    "[TWEET_1] الفكرة: وش الجديد؟ وكيف هالأداة بتفيدك (أنت) كفرد في يومك؟ "
+    "[TWEET_2] الممارسة: خطوات عملية (Step-by-Step) لاستخدام هالتقنية. "
+    "القواعد: العربية، المصطلحات الإنجليزية بين قوسين، نبرة حماسية."
+)
 
 class TechSupremeSystem:
     def __init__(self):
         self._init_db()
         self._init_clients()
+        # 🎯 Rate-Limit Guard: منع الـ GitHub Actions من التعليق
+        self.ai_calls = 0
+        self.MAX_AI_CALLS = 3 # حد أقصى لطلبات AI في كل Run
 
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS memory (h TEXT PRIMARY KEY, dt TEXT)")
-            conn.execute("CREATE TABLE IF NOT EXISTS active_polls (tweet_id TEXT PRIMARY KEY, topic TEXT, expires_at TEXT, processed INTEGER DEFAULT 0)")
             conn.execute("CREATE TABLE IF NOT EXISTS replies (user_id TEXT PRIMARY KEY, dt TEXT)")
+            conn.commit()
 
     def _init_clients(self):
         self.x = tweepy.Client(
@@ -36,97 +46,83 @@ class TechSupremeSystem:
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    # --- نظام المحاولة المتكررة (Retry Logic) ---
-    def _safe_x_call(self, func, **kwargs):
-        attempts = 0
-        while attempts < 3:
-            try:
-                return func(**kwargs)
-            except tweepy.TooManyRequests:
-                attempts += 1
-                wait = attempts * 300
-                logging.warning(f"⚠️ خطأ 429! انتظار {wait/60} دقيقة...")
-                time.sleep(wait)
-            except Exception as e:
-                logging.error(f"❌ خطأ X: {e}")
-                return None
-        return None
-
-    def _generate_ai(self, sys_p, user_p):
+    def _safe_ai_call(self, sys_p, user_p):
+        if self.ai_calls >= self.MAX_AI_CALLS:
+            logging.warning("⛔ تم بلوغ الحد الأقصى لطلبات AI. التوقف ذكاءً.")
+            return None
         try:
+            self.ai_calls += 1
+            logging.info(f"🤖 طلب AI رقم {self.ai_calls}...")
             r = self.ai.chat.completions.create(
-                model="qwen/qwen-2.5-72b-instruct", 
+                model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": sys_p}, {"role": "user", "content": user_p}]
             )
             return r.choices[0].message.content
-        except: return None
+        except Exception as e:
+            logging.error(f"❌ خطأ AI: {e}")
+            return None
 
-    # --- 3. تنفيذ الردود الذكية ---
+    # --- 3. محرك الردود الذكية (Replying) ---
     def process_smart_replies(self):
-        logging.info("🔍 البحث عن استفسارات للرد عليها...")
-        tweets = self._safe_x_call(self.x.search_recent_tweets, query=REPLY_QUERIES, max_results=10, user_auth=True)
-        
-        if tweets and tweets.data:
+        logging.info("🔍 فحص استفسارات الجمهور للرد عليها...")
+        # كلمات البحث المستهدفة
+        query = "(\"أداة ذكاء اصطناعي\" OR \"كيف أستخدم AI\" OR \"تعلم البرمجة\") -is:retweet"
+        try:
+            tweets = self.x.search_recent_tweets(query=query, max_results=5, user_auth=True)
+            if not tweets or not tweets.data: return
+
             for t in tweets.data:
-                # التأكد من عدم الرد على نفس الشخص مرتين في يوم واحد
+                if self.ai_calls >= self.MAX_AI_CALLS: break
+                
+                # فحص الذاكرة: لا نرد على نفس الشخص مرتين في 24 ساعة
                 with sqlite3.connect(DB_FILE) as conn:
-                    if conn.execute("SELECT 1 FROM replies WHERE user_id=? AND dt > ?", 
-                                    (str(t.author_id), (datetime.now() - timedelta(days=1)).isoformat())).fetchone():
+                    if conn.execute("SELECT 1 FROM replies WHERE user_id=?", (str(t.author_id),)).fetchone():
                         continue
 
-                reply_text = self._generate_ai(REPLY_PROMPT, t.text)
-                if reply_text:
-                    if self._safe_x_call(self.x.create_tweet, text=reply_text[:280], in_reply_to_tweet_id=t.id):
-                        with sqlite3.connect(DB_FILE) as conn:
-                            conn.execute("INSERT OR REPLACE INTO replies VALUES (?, ?)", (str(t.author_id), datetime.now().isoformat()))
-                        logging.info(f"✅ تم الرد على المستخدم: {t.author_id}")
-                        time.sleep(60)
+                reply_txt = self._safe_ai_call(SYSTEM_REPLY_PROMPT, t.text)
+                if reply_txt:
+                    self.x.create_tweet(text=reply_txt[:280], in_reply_to_tweet_id=t.id)
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("INSERT INTO replies VALUES (?, ?)", (str(t.author_id), datetime.now().isoformat()))
+                    logging.info(f"✅ تم الرد على: {t.author_id}")
+                    time.sleep(2) 
+        except Exception as e:
+            logging.error(f"❌ خطأ في الردود: {e}")
 
-    # --- 4. تنفيذ النشر (ثريد + استطلاع) ---
+    # --- 4. محرك النشر (Publishing) ---
     def execute_publishing(self):
-        for url in SOURCES:
-            feed = feedparser.parse(url)
-            for e in feed.entries[:3]:
-                h = hashlib.sha256(e.title.encode()).hexdigest()
-                with sqlite3.connect(DB_FILE) as conn:
-                    if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
-
-                content = self._generate_ai(PUBLISH_PROMPT, e.title)
-                if content:
-                    self._post_thread(content, e.link, e.title, h)
-                    return
-
-    def _post_thread(self, text, link, topic, h):
-        parts = re.findall(r'\[.*?\](.*?)(?=\[|$)', text, re.S)
-        last_id = None
+        if self.ai_calls >= self.MAX_AI_CALLS: return
+        logging.info("🌍 فحص الأخبار الجديدة للنشر...")
+        feed = feedparser.parse("https://www.theverge.com/rss/index.xml")
         
-        # مهمة 1: الفكرة
-        res = self._safe_x_call(self.x.create_tweet, text=f"1/ {parts[0].strip()}"[:280])
-        if res: last_id = res.data["id"]
-        time.sleep(60)
+        for e in feed.entries[:3]:
+            h = hashlib.sha256(e.title.encode()).hexdigest()
+            with sqlite3.connect(DB_FILE) as conn:
+                if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
 
-        # مهمة 2: الممارسة + الرابط
-        if len(parts) > 1 and last_id:
-            msg = f"2/ {parts[1].strip()}\n\n🔗 ممارسة: {link}"
-            res = self._safe_x_call(self.x.create_tweet, text=msg[:280], in_reply_to_tweet_id=last_id)
-            if res: last_id = res.data["id"]
-            time.sleep(60)
+            content = self._safe_ai_call(SYSTEM_THREAD_PROMPT, e.title)
+            if content:
+                try:
+                    # تقسيم ونشر ثريد مبسط
+                    parts = re.findall(r'\[.*?\](.*?)(?=\[|$)', content, re.S)
+                    t1 = f"📌 {e.title}\n\n{parts[0].strip()}" if parts else content
+                    res = self.x.create_tweet(text=t1[:280])
+                    
+                    if res and len(parts) > 1:
+                        self.x.create_tweet(text=parts[1].strip()[:280], in_reply_to_tweet_id=res.data['id'])
+                    
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
+                    logging.info(f"✅ تم نشر محتوى جديد: {e.title}")
+                    break
+                except Exception as ex:
+                    logging.error(f"❌ فشل النشر: {ex}")
 
-        # مهمة 3: الاستطلاع
-        if len(parts) > 3 and last_id:
-            options = [o.strip('- ').strip() for o in parts[3].strip().split('\n') if o.strip()][:4]
-            res = self._safe_x_call(self.x.create_tweet, text=f"3/ {parts[2].strip()}", 
-                                    in_reply_to_tweet_id=last_id, poll_options=options, poll_duration_minutes=1440)
-            if res:
-                with sqlite3.connect(DB_FILE) as conn:
-                    conn.execute("INSERT INTO active_polls VALUES (?, ?, ?, 0)", (res.data["id"], topic, (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()))
-
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
-
-    def run_all(self):
-        self.process_smart_replies() # أولاً التفاعل مع الجمهور
-        self.execute_publishing()     # ثانياً نشر محتوى جديد
+    def run(self):
+        logging.info("🚀 بدء الدورة الشاملة...")
+        self.process_smart_replies() # تفاعل أولاً
+        self.execute_publishing()     # انشر ثانياً
+        logging.info("🏁 انتهت الدورة.")
 
 if __name__ == "__main__":
-    TechSupremeSystem().run_all()
+    TechSupremeSystem().run()
