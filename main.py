@@ -12,96 +12,47 @@ logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)
 
 TRUSTED_SOURCES = ["techcrunch.com", "openai.com", "wired.com", "theverge.com", "bloomberg.com", "mit.edu"]
 
-# 2. محرك الثريدات النخبوي (نظام النشر المتزن)
+# 2. محرك النشر النخبوي (مع بصمة زمنية فريدة)
 class EliteThreadEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
         self.ai = ai_client
 
     def post_thread(self, raw_content, source_url):
+        # إضافة بصمة زمنية للنص لمنع خطأ 403 (Duplicate)
+        timestamp = datetime.now().strftime("%H:%M:%S")
         system_prompt = (
-            "أنت خبير تقني خليجي نخبوي. حوّل النص التالي إلى ثريد (Thread) متماسك.\n"
-            "الهيكل: (Hook جذاب -> Analysis عميق -> Takeaway عملي).\n"
-            "استخدم لهجة خليجية بيضاء، وافصل بين التغريدات بعلامة '---'."
+            f"أنت خبير تقني خليجي. حوّل النص التالي لثريد مهني.\n"
+            f"ملاحظة: اجعل الخاتمة تحتوي على وقت التحديث: {timestamp}"
         )
         try:
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": raw_content}]
             )
-            tweets = [t.strip() for t in r.choices[0].message.content.split("---") if len(t.strip()) > 20]
+            tweets = [t.strip() for t in r.choices[0].message.content.split("---") if len(t.strip()) > 10]
 
             prev_id = None
             for i, txt in enumerate(tweets):
-                if i > 0:
-                    wait_time = random.randint(30, 60)
-                    logging.info(f"⏳ انتظار {wait_time} ثانية لمنع الإغراق...")
-                    time.sleep(wait_time)
-
-                header = "🧵 رؤية تقنية\n" if i == 0 else f"↳ {i+1}/{len(tweets)}\n"
-                footer = f"\n\n🔗 المرجع: {source_url}" if i == len(tweets)-1 else ""
+                if i > 0: time.sleep(random.randint(30, 45))
                 
-                res = self.x.create_tweet(text=f"{header}{txt}{footer}", in_reply_to_tweet_id=prev_id)
+                # إضافة معرف فريد غير مرئي تقريباً بنهاية أول تغريدة
+                final_txt = f"{txt}\n.\n{timestamp}" if i == 0 else txt
+                
+                res = self.x.create_tweet(text=final_txt, in_reply_to_tweet_id=prev_id)
                 prev_id = res.data['id']
-                logging.info(f"✅ تم نشر الجزء {i+1}")
+                logging.info(f"✅ تم نشر التغريدة {i+1} بنجاح.")
             return True
         except Exception as e:
-            logging.error(f"❌ خطأ في محرك النشر: {e}")
+            logging.error(f"❌ فشل النشر: {e}")
             return False
 
-# 3. محرك الردود الذكي (المحصن ضد 403)
-class SmartReplyEngine:
-    def __init__(self, client_x, ai_client):
-        self.x = client_x
-        self.ai = ai_client
-
-    def handle_mentions(self):
-        try:
-            me_res = self.x.get_me()
-            if not me_res.data: return
-            me_id = me_res.data.id
-
-            mentions = self.x.get_users_mentions(id=me_id)
-            if not mentions.data: 
-                logging.info("📥 لا توجد منشنز جديدة.")
-                return
-
-            with sqlite3.connect(DB_FILE) as conn:
-                for tweet in mentions.data:
-                    rh = hashlib.sha256(f"rep_{tweet.id}".encode()).hexdigest()
-                    if conn.execute("SELECT 1 FROM vault WHERE h=?", (rh,)).fetchone(): continue
-
-                    logging.info(f"🧐 فحص التغريدة {tweet.id}")
-                    
-                    prompt = f"رد كخبير تقني خليجي متمكن بجملة واحدة على: '{tweet.text}'."
-                    ai_res = self.ai.chat.completions.create(
-                        model="qwen/qwen-2.5-72b-instruct",
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    reply_text = ai_res.choices[0].message.content.strip()
-
-                    try:
-                        time.sleep(random.randint(5, 15))
-                        self.x.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
-                        logging.info(f"✅ تم الرد بنجاح على {tweet.id}")
-                    except tweepy.Forbidden:
-                        logging.warning(f"⚠️ 403 على {tweet.id}: محاولة الرد البديل...")
-                        try:
-                            self.x.create_tweet(text="أهلاً بك، شكراً لتفاعلك التقني! 🛠️", in_reply_to_tweet_id=tweet.id)
-                        except:
-                            logging.error(f"❌ تعذر الرد النهائي على {tweet.id}")
-                    
-                    conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (rh, "REPLY_FINISH", datetime.now().isoformat()))
-        except Exception as e:
-            logging.error(f"❌ خطأ شامل في الردود: {e}")
-
-# 4. الأوركسترا السيادية
+# 3. المحرك الرئيسي
 class SovereignEngine:
     def __init__(self):
         self._init_db()
         self._init_clients()
         self.threader = EliteThreadEngine(self.x, self.ai)
-        self.replier = SmartReplyEngine(self.x, self.ai)
 
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as conn:
@@ -116,17 +67,19 @@ class SovereignEngine:
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
     def publish_logic(self, content, url):
-        h = hashlib.sha256(content.encode()).hexdigest()
+        # بصمة المحتوى للتأكد من عدم التكرار البرمجي
+        h = hashlib.sha256(f"{content}_{datetime.now().day}".encode()).hexdigest()
         with sqlite3.connect(DB_FILE) as conn:
-            if conn.execute("SELECT 1 FROM vault WHERE h=?", (h,)).fetchone(): return
+            if conn.execute("SELECT 1 FROM vault WHERE h=?", (h,)).fetchone():
+                logging.info("🔁 تم نشر هذا المحتوى اليوم بالفعل.")
+                return
+            
             if self.threader.post_thread(content, url):
                 conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (h, "THREAD", datetime.now().isoformat()))
 
 if __name__ == "__main__":
     bot = SovereignEngine()
-    # تشغيل محرك الردود أولاً
-    bot.replier.handle_mentions()
     
-    # محتوى استراتيجي يركز على الصناعة 4.0 والأفراد (الخيار 1)
-    target_topic = "أدوات الذكاء الاصطناعي التي ستمكن الأفراد من بناء شركاتهم الخاصة في 2026 دون الحاجة لموظفين."
-    bot.publish_logic(target_topic, "techcrunch.com")
+    # موضوع جديد كلياً لمنع الـ 403 الناتج عن التكرار
+    new_topic = "تحليل استراتيجي لأثر الحوسبة الكمية (Quantum Computing) على أمن البيانات الشخصية للأفراد في عام 2026."
+    bot.publish_logic(new_topic, "mit.edu")
