@@ -22,7 +22,8 @@ class TechEliteEnterpriseSystem:
     def __init__(self):
         self._init_db()
         self._init_clients()
-        self.peak_hours_utc = [5, 9, 16, 19]
+        # ساعات الذروة في عمان (GST)
+        self.peak_hours_utc = [4, 5, 9, 16, 19] 
 
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as conn:
@@ -47,55 +48,29 @@ class TechEliteEnterpriseSystem:
 
     def _safe_x_post(self, **kwargs):
         for attempt in range(3):
-            try: return self.x_client.create_tweet(**kwargs)
+            try: 
+                return self.x_client.create_tweet(**kwargs)
             except tweepy.errors.TooManyRequests:
                 logging.warning("⚠️ Post Rate Limit Hit. Waiting 60s...")
                 time.sleep(60)
-            except Exception: return None
+            except Exception as e: 
+                logging.error(f"❌ Post Failed: {e}")
+                return None
         return None
 
-    def _is_technical_news(self, title: str) -> bool:
-        keywords = ["ai", "model", "security", "cloud", "data", "update", "ذكاء", "أمن", "سحابة", "بيانات"]
-        matches = sum(k in title.lower() for k in keywords)
-        return matches >= 2
-
-    def _recently_replied(self, author_id) -> bool:
+    def test_connection_post(self):
+        """دالة لإرسال تغريدة اختبار فورية للتأكد من صلاحيات الكتابة"""
+        h = hashlib.sha256("test_initial_boot".encode()).hexdigest()
         with sqlite3.connect(DB_FILE) as conn:
-            one_day_ago = (datetime.now() - timedelta(days=1)).isoformat()
-            row = conn.execute("SELECT 1 FROM editorial_memory WHERE summary=? AND created_at>?", (f"user_{author_id}", one_day_ago)).fetchone()
-            return row is not None
-
-    def _update_performance_metrics(self):
-        with sqlite3.connect(DB_FILE) as conn:
-            rows = conn.execute("SELECT tweet_id FROM performance_metrics ORDER BY last_updated ASC LIMIT 5").fetchall()
-        for (tweet_id,) in rows:
-            try:
-                res = self.x_client.get_tweet(id=tweet_id, tweet_fields=["public_metrics"])
-                if res and res.data:
-                    m = res.data.public_metrics
-                    with sqlite3.connect(DB_FILE) as conn:
-                        conn.execute("UPDATE performance_metrics SET likes=?, retweets=?, last_updated=? WHERE tweet_id=?",
-                                     (m["like_count"], m["retweet_count"], datetime.now().isoformat(), tweet_id))
-                time.sleep(5)
-            except: continue
-
-    def _get_best_category(self) -> str:
-        with sqlite3.connect(DB_FILE) as conn:
-            row = conn.execute("SELECT category FROM performance_metrics GROUP BY category ORDER BY SUM(likes + retweets) DESC LIMIT 1").fetchone()
-            return row[0] if row else "AI_Official"
-
-    def _generate_ai(self, system_p, user_p, h, category, summary_label=None):
-        with sqlite3.connect(DB_FILE) as conn:
-            if conn.execute("SELECT 1 FROM editorial_memory WHERE content_hash=?", (h,)).fetchone(): return None
-        try:
-            r = self.ai_client.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", 
-                messages=[{"role": "system", "content": system_p}, {"role": "user", "content": user_p}], temperature=0.3)
-            content = r.choices[0].message.content
-            label = summary_label or content[:50]
+            if conn.execute("SELECT 1 FROM editorial_memory WHERE content_hash=?", (h,)).fetchone():
+                return
+        
+        test_msg = "🛡️ تم تفعيل نظام الإدارة التقنية المؤسسية (Enterprise Tech System) بنجاح. خوارزميات النشر والرد الذكي قيد التشغيل الآن. 🇴🇲"
+        res = self._safe_x_post(text=test_msg)
+        if res:
+            logging.info("✅ Test Tweet Sent Successfully!")
             with sqlite3.connect(DB_FILE) as conn:
-                conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?, ?)", (h, label, category, datetime.now().isoformat()))
-            return content
-        except: return None
+                conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?, ?)", (h, "Initial Boot Test", "System", datetime.now().isoformat()))
 
     def process_smart_replies(self):
         logging.info("🔍 Deep Engagement Mode...")
@@ -113,16 +88,21 @@ class TechEliteEnterpriseSystem:
                         time.sleep(20)
             except tweepy.errors.TooManyRequests:
                 logging.warning(f"⚠️ Search limit reached for '{q}'. Skipping...")
-                continue # لا يتوقف البرنامج، بل ينتقل للخطوة التالية بسلام
+                continue
 
-    def execute_publishing(self):
-        best_cat = self._get_best_category()
+    def execute_publishing(self, force=False):
+        # تجاوز شرط الوقت إذا كان force=True
+        current_hour = datetime.now(timezone.utc).hour
+        if not force and current_hour not in self.peak_hours_utc:
+            logging.info(f"🕒 Not peak hour ({current_hour} UTC). Skipping publication.")
+            return
+
+        logging.info("🌟 Publishing started...")
         for cat, urls in SOURCES.items():
-            limit = 2 if cat == best_cat else 1
             for rss in urls:
                 feed = feedparser.parse(rss)
-                for entry in feed.entries[:limit]:
-                    if not hasattr(entry, "link") or not self._is_technical_news(entry.title): continue
+                for entry in feed.entries[:1]: # نشر خبر واحد من كل مصدر للاختبار
+                    if not hasattr(entry, "link"): continue
                     h = hashlib.sha256(f"{entry.title}{entry.link}".encode()).hexdigest()
                     content = self._generate_ai(PUBLISH_PROMPT, entry.title, h, cat)
                     if content: self._post_thread(content, entry.link, cat)
@@ -142,12 +122,36 @@ class TechEliteEnterpriseSystem:
                                      (str(last_id), category, datetime.now().isoformat()))
             time.sleep(15)
 
+    def _generate_ai(self, system_p, user_p, h, category, summary_label=None):
+        with sqlite3.connect(DB_FILE) as conn:
+            if conn.execute("SELECT 1 FROM editorial_memory WHERE content_hash=?", (h,)).fetchone(): return None
+        try:
+            r = self.ai_client.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", 
+                messages=[{"role": "system", "content": system_p}, {"role": "user", "content": user_p}], temperature=0.3)
+            content = r.choices[0].message.content
+            label = summary_label or content[:50]
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?, ?)", (h, label, category, datetime.now().isoformat()))
+            return content
+        except: return None
+
+    def _recently_replied(self, author_id) -> bool:
+        with sqlite3.connect(DB_FILE) as conn:
+            one_day_ago = (datetime.now() - timedelta(days=1)).isoformat()
+            row = conn.execute("SELECT 1 FROM editorial_memory WHERE summary=? AND created_at>?", (f"user_{author_id}", one_day_ago)).fetchone()
+            return row is not None
+
     def run_cycle(self):
         if not self._check_x_health(): return
-        self._update_performance_metrics()
+        
+        # 1. اختبار الإرسال الفوري (سيعمل لمرة واحدة فقط)
+        self.test_connection_post()
+        
+        # 2. محاولة التفاعل مع الآخرين
         self.process_smart_replies()
-        if datetime.now(timezone.utc).hour in self.peak_hours_utc:
-            self.execute_publishing()
+        
+        # 3. النشر الإجباري لمرة واحدة للتأكد من المحتوى (تم وضع force=True)
+        self.execute_publishing(force=True)
 
 if __name__ == "__main__":
     TechEliteEnterpriseSystem().run_cycle()
