@@ -1,58 +1,49 @@
-name: TechElite Muscat Sovereign Engine
+name: Tech AI Bot - Professional CI/CD with Retry
 
 on:
+  workflow_dispatch:
   schedule:
-    # تم ضبط المواعيد لتتوافق مع (9ص، 1ظ، 8م، 11م) بتوقيت مسقط
-    # UTC = GST - 4
-    - cron: '0 5 * * *'  # 09:00 AM Muscat
-    - cron: '0 9 * * *'  # 01:00 PM Muscat
-    - cron: '0 16 * * *' # 08:00 PM Muscat
-    - cron: '0 19 * * *' # 11:00 PM Muscat
-  workflow_dispatch: # للتشغيل اليدوي في أي وقت
+    - cron: '0 * * * *' # كل ساعة
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write # للسماح بحفظ الذاكرة التحريرية (.db)
+    timeout-minutes: 15  # تمديد بسيط لإمكانية الانتظار عند 429
 
     steps:
-      - name: Checkout Repository
+      - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: 📦 Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install tweepy feedparser openai python-dotenv
 
-      - name: Run Sovereign Engine
+      - name: 🤖 Run Tech Bot with Retry
         env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python main.py
+        run: |
+          # Retry loop للـ AI و X API
+          for attempt in 1 2 3; do
+            echo "🔄 محاولة تشغيل Tech Bot رقم $attempt"
+            python main.py && break || echo "⚠️ خطأ مؤقت، إعادة المحاولة بعد 1 دقيقة..." && sleep 60
+          done
 
-      - name: Sync Muscat Enterprise Memory
+      - name: 💾 Save Bot Memory
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # إضافة قاعدة البيانات مهما كان اسمها
-          git add *.db || echo "No DB changes"
-          
-          # الحفظ فقط في حال وجود بيانات جديدة (مثل بصمة خبر جديد)
-          if ! git diff-index --quiet HEAD; then
-            git commit -m "🛡️ Muscat Memory Sync [skip ci]"
-            git push
-          else
-            echo "No new updates in this cycle."
-          fi
+          git config --local user.name "GitHub Action Bot"
+          git add tech_om_enterprise_2026.db
+          git commit -m "🛡️ Update Bot Memory [skip ci]" || echo "No changes to commit"
+          git push
