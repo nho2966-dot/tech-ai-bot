@@ -1,24 +1,19 @@
-import os, sqlite3, logging, hashlib, re, time
+import os, sqlite3, logging, hashlib, re, time, random
 from datetime import datetime
 from urllib.parse import urlparse
 import tweepy
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# 1. الحوكمة والإعدادات العليا
+# 1. الحوكمة السيادية - ضد الإغراق
 load_dotenv()
 DB_FILE = "tech_om_sovereign_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
+# مصادر نجبوية فقط لضمان الجودة
 TRUSTED_SOURCES = ["techcrunch.com", "openai.com", "wired.com", "theverge.com", "bloomberg.com", "mit.edu"]
 
-EDITORIAL_POLICY = {
-    "BREAKING": {"min_score": 4, "max_len": 240, "prefix": "🚨 عاجل تقني"},
-    "ANALYSIS": {"min_score": 5, "max_len": 25000, "prefix": "🧠 تحليل معمق"},
-    "HARVEST":  {"min_score": 5, "max_len": 25000, "prefix": "🗞️ حصاد الأسبوع"}
-}
-
-# 2. محرك الثريدات النخبوي مع نظام التهدئة (Anti-429 Guard)
+# 2. محرك الثريدات النخبوي (نظام النشر المتزن)
 class EliteThreadEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
@@ -26,49 +21,45 @@ class EliteThreadEngine:
 
     def post_thread(self, raw_content, source_url):
         system_prompt = (
-            "أنت خبير تقني خليجي نخبوي. حوّل النص التالي إلى ثريد (Thread) متماسك.\n"
-            "الهيكل: (Hook جذاب -> Analysis عميق -> Takeaway عملي).\n"
-            "استخدم لهجة خليجية بيضاء، وافصل بين التغريدات بعلامة '---'."
+            "أنت خبير تقني خليجي نخبوي. حوّل النص التالي إلى ثريد (Thread) متماسك جداً وبدون حشو.\n"
+            "الهيكل: (Hook ذكي -> Analysis عميق ومختصر -> Takeaway استراتيجي).\n"
+            "اللغة: خليجية بيضاء مهنية. افصل بين التغريدات بـ '---'."
         )
         try:
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": raw_content}
-                ], 
-                temperature=0.5
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": raw_content}],
+                temperature=0.4 # تقليل التشتت لضمان الدقة
             )
-            raw_tweets = r.choices[0].message.content.split("---")
-            tweets = [t.strip() for t in raw_tweets if len(t.strip()) > 30]
+            tweets = [t.strip() for t in r.choices[0].message.content.split("---") if len(t.strip()) > 30]
 
             prev_id = None
             for i, txt in enumerate(tweets):
-                header = "🧵 تحليل سيادي\n" if i == 0 else f"↳ {i+1}/{len(tweets)}\n"
+                header = "🧵 رؤية تقنية\n" if i == 0 else f"↳ {i+1}/{len(tweets)}\n"
                 footer = f"\n\n🔗 المرجع: {source_url}" if i == len(tweets)-1 else ""
-                final_txt = f"{header}{txt}{footer}"
                 
-                # --- نظام التهدئة والتعافي من الـ Rate Limit ---
+                # --- Guard against Flooding (التأخير المتزن) ---
+                if i > 0:
+                    # تأخير عشوائي طويل بين 30 و 60 ثانية لكسر نمط الأتمتة
+                    wait_time = random.randint(30, 60)
+                    logging.info(f"⏳ تهدئة.. انتظار {wait_time} ثانية قبل الجزء القادم.")
+                    time.sleep(wait_time)
+
                 retry_count = 0
                 while retry_count < 3:
                     try:
-                        # تأخير بشري: 12 ثانية بين كل تغريدة في الثريد
-                        time.sleep(12 if i > 0 else 2) 
-                        res = self.x.create_tweet(text=final_txt, in_reply_to_tweet_id=prev_id)
+                        res = self.x.create_tweet(text=f"{header}{txt}{footer}", in_reply_to_tweet_id=prev_id)
                         prev_id = res.data['id']
-                        logging.info(f"✅ تم نشر الجزء {i+1}")
-                        break 
+                        break
                     except tweepy.TooManyRequests:
                         retry_count += 1
-                        logging.warning(f"⚠️ حد الطلبات ممتلئ.. انتظار 45 ثانية (محاولة {retry_count}/3)")
-                        time.sleep(45)
-                # --------------------------------------------
+                        time.sleep(120 * retry_count) # انتظار مضاعف عند الضغط
             return True
         except Exception as e:
-            logging.error(f"❌ فشل الثريد النهائي: {e}")
+            logging.error(f"❌ خطأ في محرك النشر: {e}")
             return False
 
-# 3. محرك الردود الذكي
+# 3. محرك الردود الذكي (محدد بـ 3 ردود فقط في الجلسة الواحدة لمنع الإغراق)
 class SmartReplyEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
@@ -77,33 +68,28 @@ class SmartReplyEngine:
     def handle_mentions(self):
         try:
             me = self.x.get_me().data.id
-            mentions = self.x.get_users_mentions(id=me)
+            mentions = self.x.get_users_mentions(id=me, max_results=5) 
             if not mentions.data: return
 
+            count = 0
             with sqlite3.connect(DB_FILE) as conn:
                 for tweet in mentions.data:
-                    rh = hashlib.sha256(f"reply_{tweet.id}".encode()).hexdigest()
+                    if count >= 3: break # حد أقصى للردود في كل تشغيل (Anti-Spam)
+                    
+                    rh = hashlib.sha256(f"rep_{tweet.id}".encode()).hexdigest()
                     if conn.execute("SELECT 1 FROM vault WHERE h=?", (rh,)).fetchone(): continue
 
-                    tone = "تحليلي وهادئ"
-                    if any(word in tweet.text.lower() for word in ["ليش", "كيف", "وش"]):
-                        tone = "تعليمي وداعم"
-
-                    prompt = f"رد كخبير تقني خليجي بنبرة {tone} على: '{tweet.text}'."
-                    res = self.ai.chat.completions.create(
-                        model="qwen/qwen-2.5-72b-instruct",
-                        messages=[{"role": "user", "content": prompt}]
-                    )
+                    prompt = f"رد كخبير تقني خليجي متمكن على: '{tweet.text}'. الرد يكون جملة واحدة قوية."
+                    res = self.ai.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role": "user", "content": prompt}])
                     
-                    time.sleep(5) # تأخير وقائي للردود
+                    time.sleep(random.randint(10, 20)) # تأخير قبل الرد
                     self.x.create_tweet(text=res.choices[0].message.content.strip(), in_reply_to_tweet_id=tweet.id)
                     conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (rh, "REPLY", datetime.now().isoformat()))
-                    logging.info(f"✅ رد ذكي على: {tweet.id}")
-        except tweepy.TooManyRequests:
-            logging.warning("⚠️ توقف مؤقت لمحرك الردود بسبب Rate Limit.")
+                    count += 1
+                    logging.info(f"✅ رد ذكي متزن على: {tweet.id}")
         except Exception as e: logging.error(f"❌ خطأ الردود: {e}")
 
-# 4. المحرك السيادي (الأوركسترا)
+# 4. الأوركسترا السيادية
 class SovereignEngine:
     def __init__(self):
         self._init_db()
@@ -123,32 +109,20 @@ class SovereignEngine:
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    def _is_trusted(self, url):
+    def publish_logic(self, content, url):
+        # التحقق من المصدر ومنع التكرار
         domain = urlparse(url if "://" in url else f"https://{url}").netloc.replace("www.", "")
-        return any(t in domain for t in TRUSTED_SOURCES)
+        if not any(t in domain for t in TRUSTED_SOURCES): return
 
-    def publish_logic(self, raw_data, url, mode="ANALYSIS"):
-        if not self._is_trusted(url):
-            logging.warning(f"🛑 مصدر غير موثوق: {url}")
-            return
-
-        h = hashlib.sha256(raw_data.encode()).hexdigest()
+        h = hashlib.sha256(content.encode()).hexdigest()
         with sqlite3.connect(DB_FILE) as conn:
-            if conn.execute("SELECT 1 FROM vault WHERE h=?", (h,)).fetchone():
-                logging.info("🔁 مكرر.")
-                return
-
-            success = self.threader.post_thread(raw_data, url)
-            if success:
-                conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (h, mode, datetime.now().isoformat()))
-                logging.info(f"🚀 تم نشر {mode} بنجاح!")
+            if conn.execute("SELECT 1 FROM vault WHERE h=?", (h,)).fetchone(): return
+            
+            if self.threader.post_thread(content, url):
+                conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (h, "THREAD", datetime.now().isoformat()))
 
 if __name__ == "__main__":
     bot = SovereignEngine()
-    
-    # 1. خدمة الجمهور أولاً (الردود)
     bot.replier.handle_mentions()
-    
-    # 2. النشر الإستراتيجي
-    test_content = "ثورة في تقنيات الذكاء الاصطناعي التوليدي تفتح آفاقاً جديدة لتطوير التطبيقات البرمجية للأفراد."
-    bot.publish_logic(test_content, "techcrunch.com", mode="ANALYSIS")
+    # تجربة محتوى نخبوي واحد فقط
+    bot.publish_logic("مستقبل الحوسبة الحيوية ودمج الذكاء الاصطناعي في الخلايا البشرية لأغراض طبية.", "technologyreview.com")
