@@ -8,18 +8,15 @@ load_dotenv()
 DB_FILE = "tech_om_enterprise_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 
-# --- المصادر الاستراتيجية للسبق الصحفي ---
-BREAKING_SOURCES = [
-    "https://www.theverge.com/rss/index.xml",
-    "https://www.wired.com/feed/rss",
-    "https://www.technologyreview.com/feed/"
-]
+# المصادر والمواضيع
+BREAKING_SOURCES = ["https://www.theverge.com/rss/index.xml", "https://www.wired.com/feed/rss"]
+CORE_TOPICS = ["الذكاء الاصطناعي (AI Tools)", "الطباعة ثلاثية الأبعاد (3D Printing)", "إنترنت الأشياء (IoT)", "الأجهزة الذكية (Smart Devices)"]
 
 class TechSupremeSystem:
     def __init__(self):
         self._init_db()
         self._init_clients()
-        self.MAX_AI_CALLS = 18 # رفع الحصة لدعم الأخبار العاجلة
+        self.MAX_AI_CALLS = 18
         self.ai_calls = 0
 
     def _init_db(self):
@@ -46,67 +43,62 @@ class TechSupremeSystem:
             self.ai_calls += 1
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": sys_p + " قيد: لا هلوسة، حقائق فقط."}, {"role": "user", "content": user_p}],
+                messages=[{"role": "system", "content": sys_p + " قيد: لا هلوسة، حقائق فقط، مصطلحات إنجليزية بين قوسين."}, {"role": "user", "content": user_p}],
                 temperature=0.2
             )
             return r.choices[0].message.content
         except Exception as e:
             logging.error(f"❌ AI Error: {e}"); return None
 
-    # --- محرك السبق الصحفي (Breaking News) ---
-    def check_for_scoop(self):
-        logging.info("🕵️ جاري البحث عن سبق صحفي تقني...")
+    # --- دالة الردود الذكية (المفقودة التي سببت الخطأ) ---
+    def process_smart_replies(self):
+        logging.info("🔍 فحص الردود الذكية...")
+        query = "(\"كيف أستخدم AI\" OR #عمان_تتقدم OR \"الأجهزة الذكية\") -is:retweet"
+        try:
+            tweets = self.x.search_recent_tweets(query=query, max_results=10, user_auth=True)
+            if not tweets or not tweets.data: return
+            for t in tweets.data[:3]:
+                if str(t.author_id) == self.my_id: continue
+                with sqlite3.connect(DB_FILE) as conn:
+                    if conn.execute("SELECT 1 FROM tweet_history WHERE tweet_id=?", (str(t.id),)).fetchone(): continue
+                
+                reply = self._safe_ai_call("خبير تقني. رد بممارسة عمليّة دقيقة (Industry 4.0).", t.text)
+                if reply:
+                    time.sleep(10)
+                    self.x.create_tweet(text=reply[:280], in_reply_to_tweet_id=t.id)
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("INSERT INTO tweet_history VALUES (?, ?)", (str(t.id), datetime.now().isoformat()))
+                        conn.commit()
+        except Exception as e: logging.error(f"❌ خطأ الردود: {e}")
+
+    def execute_strategic_flow(self):
+        # سبق صحفي
         for url in BREAKING_SOURCES:
             feed = feedparser.parse(url)
-            if not feed.entries: continue
-            
-            # نأخذ أول خبر فقط (الأحدث على الإطلاق)
-            latest = feed.entries[0]
-            h = hashlib.sha256(latest.title.encode()).hexdigest()
-            
-            with sqlite3.connect(DB_FILE) as conn:
-                if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
-
-            # صياغة السبق الصحفي مع ربطه بممارسات الثورة 4.0
-            prompt = f"هذا خبر عاجل: [{latest.title}]. صغ تغريدة 'سبق صحفي' تشرح ممارسته العملية للفرد فوراً. ابدأ بـ 🚨 سبق تقني:"
-            content = self._safe_ai_call("أنت مراسل تقني خبير ودقيق.", prompt)
-            
-            if content:
-                self.x.create_tweet(text=f"{content[:250]} #عمان_تتقدم #سبق_تقني")
+            if feed.entries:
+                latest = feed.entries[0]
+                h = hashlib.sha256(latest.title.encode()).hexdigest()
                 with sqlite3.connect(DB_FILE) as conn:
-                    conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
-                    conn.commit()
-                logging.info("🚨 تم نشر سبق صحفي جديد!")
-                return True # توقف بعد نشر السبق
-        return False
+                    if not conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone():
+                        content = self._safe_ai_call("🚨 سبق تقني:", latest.title)
+                        if content:
+                            self.x.create_tweet(text=f"🚨 سبق تقني: {content[:240]} #عمان_تتقدم")
+                            with sqlite3.connect(DB_FILE) as conn:
+                                conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
+                            return
 
-    # --- المنطق الأسبوعي (المسابقة والاستطلاع) ---
-    def execute_strategic_flow(self):
-        # 1. التحقق من السبق الصحفي أولاً
-        if self.check_for_scoop(): return
-
-        # 2. إذا لم يوجد سبق، ننتقل للجدول المعتاد
+        # مسابقة أو محتوى اعتيادي
         now = datetime.now()
-        day_of_week = now.weekday() # 3 هو الخميس
-
-        if day_of_week == 3: # الخميس: يوم المسابقة
-            content = self._safe_ai_call("صغ مسابقة تقنية أسبوعية عن ممارسات الذكاء الاصطناعي.", "تحدي الأسبوع")
-            if content: self.x.create_tweet(text=f"🏆 مسابقة الأسبوع:\n{content[:260]}")
+        if now.weekday() == 3: # الخميس
+            self.x.create_tweet(text="🏆 مسابقة الأسبوع التقنية حانت! ترقبوا السؤال في الرد القادم.")
         else:
-            # نشر اعتيادي أو استطلاع ذكي
-            topic = random.choice(["AI", "3D Printing", "IoT", "Smart Devices"])
-            content = self._safe_ai_call(f"صغ ممارسة عملية في {topic}.", "خبر تقني جديد")
-            if content:
-                # قرار الاستطلاع الذكي
-                if "مستقبل" in content or "تفضيل" in content:
-                    self.x.create_tweet(text=f"📊 استطلاع تقني:\n{content[:240]}")
-                else:
-                    self.x.create_tweet(text=f"📌 ممارسة اليوم:\n{content[:270]}")
+            topic = random.choice(CORE_TOPICS)
+            content = self._safe_ai_call(f"صغ ممارسة عملية حول {topic}.", "تحديث تقني")
+            if content: self.x.create_tweet(text=f"📌 {content[:270]}")
 
     def run(self):
-        # تنفيذ الردود الذكية أولاً (بدون تكرار وبدون الرد على النفس)
-        self.process_smart_replies() # (تم شرح تفاصيلها في الرد السابق)
-        time.sleep(20)
+        self.process_smart_replies()
+        time.sleep(15)
         self.execute_strategic_flow()
 
 if __name__ == "__main__":
