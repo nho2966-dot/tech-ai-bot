@@ -4,43 +4,30 @@ import tweepy, feedparser
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# --- 1. الإعدادات والذاكرة ---
+# --- 1. الإعدادات والذاكرة الفائقة ---
 load_dotenv()
 DB_FILE = "tech_om_enterprise_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-# --- 2. المجالات الستة (بصيغة ودية للأفراد) ---
-TARGET_TOPICS = [
-    "كيف تبدع باستخدام الذكاء الاصطناعي في يومك (ChatGPT, MidJourney) وتسهل مهامك",
-    "أسرار وحيل في هاتفك الذكي (iPhone, Samsung) تخلي استخدامك أسرع وأذكى",
-    "عالم الألعاب والواقع المعزز (VR/AR) وكيف تستمتع بأحدث تقنيات الترفيه",
-    "تطبيقات رهيبة تساعدك تنظم وقتك، تهتم بصحتك، أو حتى تبدع في المونتاج",
-    "خطوات بسيطة وسلسة تحمي فيها خصوصيتك وتأمن حساباتك من أي اختراق",
-    "تحديات تقنية وألغاز ذكاء اصطناعي (AI Quiz) تحرك فيها عقلك وتستمتع"
-]
-
-SOURCES = [
+NEWS_SOURCES = [
     "https://www.theverge.com/rss/index.xml",
-    "https://www.wired.com/feed/rss",
-    "https://www.technologyreview.com/feed/"
+    "https://www.wired.com/feed/rss"
 ]
 
-class TechSupremeFriendly:
+class TechSupremeArchitect:
     def __init__(self):
         self._init_db()
         self._init_clients()
         self.ai_calls = 0
-        self.MAX_AI_CALLS = 25
-        try:
-            me = self.x.get_me()
-            self.my_user_id = str(me.data.id)
-            logging.info(f"✅ أهلاً بك! البوت متصل الآن كصديق تقني.")
-        except: self.my_user_id = None
+        self.MAX_AI_CALLS = 18
+        self.last_ai_reset = datetime.now().date()
 
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS memory (h TEXT PRIMARY KEY, dt TEXT)")
-            conn.execute("CREATE TABLE IF NOT EXISTS tweet_history (tweet_id TEXT PRIMARY KEY, dt TEXT)")
+            # منع تكرار المحتوى المنشور
+            conn.execute("CREATE TABLE IF NOT EXISTS content_memory (h TEXT PRIMARY KEY, dt TEXT)")
+            # تحسين ذكي: منع تكرار الردود عبر الـ ID والـ Hash معاً
+            conn.execute("CREATE TABLE IF NOT EXISTS tweet_history (tweet_id TEXT PRIMARY KEY, text_hash TEXT, dt TEXT)")
             conn.commit()
 
     def _init_clients(self):
@@ -52,89 +39,99 @@ class TechSupremeFriendly:
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
     def _safe_ai_call(self, sys_p, user_p):
+        if datetime.now().date() != self.last_ai_reset:
+            self.ai_calls = 0
+            self.last_ai_reset = datetime.now().date()
+        
+        if self.ai_calls >= self.MAX_AI_CALLS: return None
+
+        # --- تحسين 1: برومبت منع الهلوسة الصارم (النسخة الذهبية) ---
+        STRICT_SYSTEM = (
+            sys_p + 
+            "\nالتزم بالآتي بدقة:\n"
+            "- اكتب بنقاط (Bullet Points) فقط.\n"
+            "- لا تضف أي معلومة غير مؤكدة نهائياً.\n"
+            "- اذكر اسم الأداة أو المصدر الرسمي صراحة.\n"
+            "- أسلوب مختصر، تقني، بلا حشو أو آراء شخصية.\n"
+            "- اللغة: عربية احترافية، المصطلحات الإنجليزية بين قوسين.\n"
+        )
+
         try:
             self.ai_calls += 1
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[
-                    {"role": "system", "content": sys_p + " الأسلوب: ودي، سلس، بسيط، بعيد عن التكلف، استخدم نقاط واضحة ومصطلحات إنجليزية بين قوسين."},
-                    {"role": "user", "content": user_p}
-                ],
-                temperature=0.4 # زيادة طفيفة للإبداع في اللغة الودية
+                messages=[{"role": "system", "content": STRICT_SYSTEM}, {"role": "user", "content": user_p}],
+                temperature=0.15 # دقة متناهية
             )
             return r.choices[0].message.content
         except: return None
 
-    # --- 3. نظام النشر السلس (منع الاقتطاع) ---
-    def _publish_safe_thread(self, content, prefix=""):
-        # تقسيم النص لضمان سلاسة القراءة (260 حرف لتجنب الاقتطاع)
-        chunks = textwrap.wrap(content, width=260, break_long_words=False)
-        prev_id = None
-        for i, chunk in enumerate(chunks):
-            try:
-                # إضافة إيموجي ورمز السلسلة بشكل لطيف
-                marker = f" ✨ ({i+1}/{len(chunks)})"
-                full_text = f"{prefix if i==0 else ''}{chunk}{marker}"
-                tweet = self.x.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
-                prev_id = tweet.data['id']
-                time.sleep(40) 
-            except: break
+    # --- 2. المهام الاستراتيجية ---
 
-    # --- 4. المهام بروح "الصديق التقني" ---
     def task_scoop(self):
-        logging.info("🕵️ بشوف إذا فيه أخبار تقنية جديدة تهمنا...")
-        for url in SOURCES:
+        # البحث عن سبق صحفي
+        for url in NEWS_SOURCES:
             feed = feedparser.parse(url)
             if not feed.entries: continue
-            latest = feed.entries[0]
-            h = hashlib.sha256(latest.title.encode()).hexdigest()
+            entry = feed.entries[0]
+            h = hashlib.sha256(entry.title.encode()).hexdigest()
             with sqlite3.connect(DB_FILE) as conn:
-                if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
-
-            content = self._safe_ai_call("🚨 خبر عاجل بأسلوب مشوق:", f"بسط هذا الخبر [{latest.title}] ووضح كيف بيفيدنا كأفراد.")
+                if conn.execute("SELECT 1 FROM content_memory WHERE h=?", (h,)).fetchone(): continue
+            
+            content = self._safe_ai_call("محلل سبق صحفي.", f"لخص هذا الخبر التقني بدقة للأفراد: {entry.title}")
             if content:
-                self._publish_safe_thread(content, "🚨 خبر يهمك على السريع:\n")
+                self._publish_safe_thread(content, "🚨 سبق تقني عاجل:\n")
                 with sqlite3.connect(DB_FILE) as conn:
-                    conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
+                    conn.execute("INSERT INTO content_memory VALUES (?, ?)", (h, datetime.now().isoformat()))
                 return True
         return False
 
     def task_reply(self):
-        logging.info("💬 بشوف إذا أحد يحتاج مساعدة أو استفسار...")
-        query = "(\"كيف أستخدم AI\" OR #عمان_تتقدم OR \"أفضل هاتف\") -is:retweet"
-        try:
-            tweets = self.x.search_recent_tweets(query=query, max_results=5, user_auth=True)
-            if tweets.data:
-                for t in tweets.data:
+        # ردود احترافية مع منع تكرار معنوي
+        query = "(\"كيف أستخدم AI\" OR #عمان_تتقدم) -is:retweet"
+        tweets = self.x.search_recent_tweets(query=query, max_results=5, user_auth=True)
+        if tweets.data:
+            for t in tweets.data:
+                text_hash = hashlib.sha256(t.text.encode()).hexdigest()
+                with sqlite3.connect(DB_FILE) as conn:
+                    if conn.execute("SELECT 1 FROM tweet_history WHERE tweet_id=? OR text_hash=?", (str(t.id), text_hash)).fetchone():
+                        continue
+                
+                reply = self._safe_ai_call("مهندس ردود دقيقة.", f"حلل ورد باحترافية فائقة على: {t.text}")
+                if reply:
+                    self.x.create_tweet(text=f"{reply[:280]}", in_reply_to_tweet_id=t.id)
                     with sqlite3.connect(DB_FILE) as conn:
-                        if conn.execute("SELECT 1 FROM tweet_history WHERE tweet_id=?", (str(t.id),)).fetchone(): continue
-                    
-                    reply = self._safe_ai_call("خبير تقني وصديق للجميع.", f"رد بأسلوب ودي وسلس جداً كأنك تدردش مع صديقك: {t.text}")
-                    if reply:
-                        self.x.create_tweet(text=f"{reply[:280]}", in_reply_to_tweet_id=t.id)
-                        with sqlite3.connect(DB_FILE) as conn:
-                            conn.execute("INSERT INTO tweet_history VALUES (?, ?)", (str(t.id), datetime.now().isoformat()))
-                        return True
-        except: pass
+                        conn.execute("INSERT INTO tweet_history VALUES (?, ?, ?)", (str(t.id), text_hash, datetime.now().isoformat()))
+                    return True
         return False
 
-    def task_regular_post(self):
-        logging.info("💡 وقت مشاركة نصيحة تقنية خفيفة...")
-        topic = random.choice(TARGET_TOPICS)
-        content = self._safe_ai_call(f"عطنا نصيحة أو ممارسة رهيبة في {topic}.", "دردشة تقنية")
+    def task_bomb_post(self):
+        # نشر قنبلة تقنية (أدوات ذكاء اصطناعي أو ممارسات)
+        content = self._safe_ai_call("خبير أدوات الذكاء الاصطناعي.", "اشرح أداة تقنية مذهلة توفر الوقت أو المال للأفراد.")
         if content:
-            self._publish_safe_thread(content, "💡 تدري؟ جرب هالحركة:\n")
+            self._publish_safe_thread(content, "🚀 قنبلة تقنية:\n")
             return True
         return False
 
+    def _publish_safe_thread(self, content, prefix=""):
+        chunks = textwrap.wrap(content, width=250, break_long_words=False)
+        prev_id = None
+        for i, chunk in enumerate(chunks):
+            # --- تحسين 2: إضافة حوافز النمو في آخر تغريدة ---
+            if i == len(chunks) - 1:
+                chunk += "\n\n🔁 إذا أفادك، أعد التغريد وتابع للحصريات التقنية."
+            
+            full_text = f"{prefix if i==0 else ''}{chunk} 🛡️ {i+1}/{len(chunks)}"
+            tweet = self.x.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
+            prev_id = tweet.data['id']
+            time.sleep(45)
+
     def run_strategy(self):
-        # موازنة المهام: أولوية الخبر، ثم التفاعل مع الناس، ثم المحتوى العام
-        if self.task_scoop(): return
-        if random.random() > 0.5:
-            if not self.task_reply(): self.task_regular_post()
-        else:
-            if not self.task_regular_post(): self.task_reply()
+        # موازنة النمو: 1. السبق 2. الردود 3. القنابل المعرفية
+        if not self.task_scoop():
+            if not self.task_reply():
+                self.task_bomb_post()
 
 if __name__ == "__main__":
-    bot = TechSupremeFriendly()
+    bot = TechSupremeArchitect()
     bot.run_strategy()
