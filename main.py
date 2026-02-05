@@ -1,4 +1,4 @@
-import os, sqlite3, logging, hashlib, time, random
+import os, sqlite3, logging, hashlib, time, random, textwrap
 from datetime import datetime
 import tweepy, feedparser
 from dotenv import load_dotenv
@@ -9,19 +9,23 @@ load_dotenv()
 DB_FILE = "tech_om_enterprise_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-# --- 2. المجالات الستة المستهدفة للأفراد ---
+# --- 2. المجالات الستة (بصيغة ودية للأفراد) ---
 TARGET_TOPICS = [
-    "الذكاء الاصطناعي للأفراد (ChatGPT, MidJourney) واستخداماته الإبداعية",
-    "الهواتف والأجهزة الذكية (Apple, Samsung) والحيل التقنية",
-    "الألعاب الإلكترونية وتقنيات (VR/AR) والترفيه الرقمي",
-    "التطبيقات العملية لإدارة الوقت، الصحة، وتعديل الفيديو",
-    "الأمن الرقمي الشخصي وحماية الخصوصية من الاختراقات",
-    "التحديات والمسابقات التقنية وألغاز AI"
+    "كيف تبدع باستخدام الذكاء الاصطناعي في يومك (ChatGPT, MidJourney) وتسهل مهامك",
+    "أسرار وحيل في هاتفك الذكي (iPhone, Samsung) تخلي استخدامك أسرع وأذكى",
+    "عالم الألعاب والواقع المعزز (VR/AR) وكيف تستمتع بأحدث تقنيات الترفيه",
+    "تطبيقات رهيبة تساعدك تنظم وقتك، تهتم بصحتك، أو حتى تبدع في المونتاج",
+    "خطوات بسيطة وسلسة تحمي فيها خصوصيتك وتأمن حساباتك من أي اختراق",
+    "تحديات تقنية وألغاز ذكاء اصطناعي (AI Quiz) تحرك فيها عقلك وتستمتع"
 ]
 
-SOURCES = ["https://www.theverge.com/rss/index.xml", "https://www.wired.com/feed/rss"]
+SOURCES = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://www.wired.com/feed/rss",
+    "https://www.technologyreview.com/feed/"
+]
 
-class TechSupremeProfessional:
+class TechSupremeFriendly:
     def __init__(self):
         self._init_db()
         self._init_clients()
@@ -30,6 +34,7 @@ class TechSupremeProfessional:
         try:
             me = self.x.get_me()
             self.my_user_id = str(me.data.id)
+            logging.info(f"✅ أهلاً بك! البوت متصل الآن كصديق تقني.")
         except: self.my_user_id = None
 
     def _init_db(self):
@@ -52,33 +57,32 @@ class TechSupremeProfessional:
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[
-                    {"role": "system", "content": sys_p + " قيد: العربية، مصطلحات إنجليزية، لا هلوسة، نقاط مركزة."},
+                    {"role": "system", "content": sys_p + " الأسلوب: ودي، سلس، بسيط، بعيد عن التكلف، استخدم نقاط واضحة ومصطلحات إنجليزية بين قوسين."},
                     {"role": "user", "content": user_p}
                 ],
-                temperature=0.2
+                temperature=0.4 # زيادة طفيفة للإبداع في اللغة الودية
             )
             return r.choices[0].message.content
         except: return None
 
-    # --- 3. نظام النشر المتزن (Throttled Threading) ---
+    # --- 3. نظام النشر السلس (منع الاقتطاع) ---
     def _publish_safe_thread(self, content, prefix=""):
-        # تقسيم المحتوى بذكاء لتجنب الحظر
-        chunks = [content[i:i+250] for i in range(0, len(content), 250)]
+        # تقسيم النص لضمان سلاسة القراءة (260 حرف لتجنب الاقتطاع)
+        chunks = textwrap.wrap(content, width=260, break_long_words=False)
         prev_id = None
         for i, chunk in enumerate(chunks):
             try:
-                text = f"{prefix if i==0 else ''}{chunk}"
-                tweet = self.x.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
+                # إضافة إيموجي ورمز السلسلة بشكل لطيف
+                marker = f" ✨ ({i+1}/{len(chunks)})"
+                full_text = f"{prefix if i==0 else ''}{chunk}{marker}"
+                tweet = self.x.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
                 prev_id = tweet.data['id']
-                logging.info(f"✅ تم نشر جزء {i+1}")
-                time.sleep(45) # انتظار طويل نسبياً بين أجزاء السلسلة لتهدئة API
-            except tweepy.errors.TooManyRequests:
-                logging.warning("🚨 X API Limit reached. Stopping thread.")
-                break
+                time.sleep(40) 
+            except: break
 
-    # --- 4. المهام المنفصلة ---
+    # --- 4. المهام بروح "الصديق التقني" ---
     def task_scoop(self):
-        logging.info("🔎 فحص السبق الصحفي...")
+        logging.info("🕵️ بشوف إذا فيه أخبار تقنية جديدة تهمنا...")
         for url in SOURCES:
             feed = feedparser.parse(url)
             if not feed.entries: continue
@@ -86,57 +90,51 @@ class TechSupremeProfessional:
             h = hashlib.sha256(latest.title.encode()).hexdigest()
             with sqlite3.connect(DB_FILE) as conn:
                 if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
-            
-            content = self._safe_ai_call("🚨 سبق تقني:", f"حلل الخبر [{latest.title}] للأفراد.")
+
+            content = self._safe_ai_call("🚨 خبر عاجل بأسلوب مشوق:", f"بسط هذا الخبر [{latest.title}] ووضح كيف بيفيدنا كأفراد.")
             if content:
-                self._publish_safe_thread(content, "🚨 سبق تقني عاجل:\n")
+                self._publish_safe_thread(content, "🚨 خبر يهمك على السريع:\n")
                 with sqlite3.connect(DB_FILE) as conn:
                     conn.execute("INSERT INTO memory VALUES (?, ?)", (h, datetime.now().isoformat()))
                 return True
         return False
 
     def task_reply(self):
-        logging.info("💬 فحص الردود الذكية...")
-        query = "(#عمان_تتقدم OR \"كيف أستخدم AI\") -is:retweet"
+        logging.info("💬 بشوف إذا أحد يحتاج مساعدة أو استفسار...")
+        query = "(\"كيف أستخدم AI\" OR #عمان_تتقدم OR \"أفضل هاتف\") -is:retweet"
         try:
-            tweets = self.x.search_recent_tweets(query=query, max_results=10, user_auth=True)
+            tweets = self.x.search_recent_tweets(query=query, max_results=5, user_auth=True)
             if tweets.data:
                 for t in tweets.data:
                     with sqlite3.connect(DB_FILE) as conn:
                         if conn.execute("SELECT 1 FROM tweet_history WHERE tweet_id=?", (str(t.id),)).fetchone(): continue
                     
-                    reply = self._safe_ai_call("خبير تقني 4.0.", t.text)
+                    reply = self._safe_ai_call("خبير تقني وصديق للجميع.", f"رد بأسلوب ودي وسلس جداً كأنك تدردش مع صديقك: {t.text}")
                     if reply:
                         self.x.create_tweet(text=f"{reply[:280]}", in_reply_to_tweet_id=t.id)
                         with sqlite3.connect(DB_FILE) as conn:
                             conn.execute("INSERT INTO tweet_history VALUES (?, ?)", (str(t.id), datetime.now().isoformat()))
-                        logging.info(f"✅ تم الرد على {t.id}")
-                        return True # رد واحد فقط في الدورة الواحدة للأمان
+                        return True
         except: pass
         return False
 
     def task_regular_post(self):
-        logging.info("💡 نشر محتوى مجدول...")
+        logging.info("💡 وقت مشاركة نصيحة تقنية خفيفة...")
         topic = random.choice(TARGET_TOPICS)
-        content = self._safe_ai_call(f"صغ ممارسة في {topic}.", "محتوى اليوم")
+        content = self._safe_ai_call(f"عطنا نصيحة أو ممارسة رهيبة في {topic}.", "دردشة تقنية")
         if content:
-            self._publish_safe_thread(content, "💡 تجربة تقنية:\n")
+            self._publish_safe_thread(content, "💡 تدري؟ جرب هالحركة:\n")
             return True
         return False
 
-    # --- 5. المحرك الاحترافي (The Strategy) ---
     def run_strategy(self):
-        # موازنة المهام: الأولوية للسبق، ثم الردود، ثم المحتوى العام
+        # موازنة المهام: أولوية الخبر، ثم التفاعل مع الناس، ثم المحتوى العام
         if self.task_scoop(): return
-        
-        # إذا لم يوجد سبق، اختر بين الرد أو النشر بنسبة 50/50 لتوزيع الضغط
         if random.random() > 0.5:
-            if not self.task_reply():
-                self.task_regular_post()
+            if not self.task_reply(): self.task_regular_post()
         else:
-            if not self.task_regular_post():
-                self.task_reply()
+            if not self.task_regular_post(): self.task_reply()
 
 if __name__ == "__main__":
-    bot = TechSupremeProfessional()
+    bot = TechSupremeFriendly()
     bot.run_strategy()
