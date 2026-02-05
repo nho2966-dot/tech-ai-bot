@@ -5,42 +5,51 @@ import tweepy
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# 1. الإعدادات
+# 1. الحوكمة والإعدادات
 load_dotenv()
 DB_FILE = "tech_om_sovereign_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 TRUSTED_SOURCES = ["techcrunch.com", "openai.com", "wired.com", "theverge.com", "bloomberg.com", "mit.edu"]
 
-# 2. محرك النشر (المجرب والناجح)
+# 2. محرك الثريدات النخبوي (نظام النشر المتزن)
 class EliteThreadEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
         self.ai = ai_client
 
     def post_thread(self, raw_content, source_url):
-        system_prompt = "أنت خبير تقني خليجي. حوّل النص لثريد مهني بلهجة بيضاء، افصل بـ '---'."
+        system_prompt = (
+            "أنت خبير تقني خليجي نخبوي. حوّل النص التالي إلى ثريد (Thread) متماسك.\n"
+            "الهيكل: (Hook جذاب -> Analysis عميق -> Takeaway عملي).\n"
+            "استخدم لهجة خليجية بيضاء، وافصل بين التغريدات بعلامة '---'."
+        )
         try:
             r = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": raw_content}]
             )
             tweets = [t.strip() for t in r.choices[0].message.content.split("---") if len(t.strip()) > 20]
-            
+
             prev_id = None
             for i, txt in enumerate(tweets):
-                # تأخير متزن لمنع الإغراق
-                if i > 0: time.sleep(random.randint(20, 40))
+                if i > 0:
+                    wait_time = random.randint(30, 60)
+                    logging.info(f"⏳ انتظار {wait_time} ثانية لمنع الإغراق...")
+                    time.sleep(wait_time)
+
+                header = "🧵 رؤية تقنية\n" if i == 0 else f"↳ {i+1}/{len(tweets)}\n"
+                footer = f"\n\n🔗 المرجع: {source_url}" if i == len(tweets)-1 else ""
                 
-                res = self.x.create_tweet(text=f"{txt}\n\n{i+1}/{len(tweets)}", in_reply_to_tweet_id=prev_id)
+                res = self.x.create_tweet(text=f"{header}{txt}{footer}", in_reply_to_tweet_id=prev_id)
                 prev_id = res.data['id']
-                logging.info(f"✅ تم نشر جزء {i+1}")
+                logging.info(f"✅ تم نشر الجزء {i+1}")
             return True
         except Exception as e:
-            logging.error(f"❌ خطأ في النشر: {e}")
+            logging.error(f"❌ خطأ في محرك النشر: {e}")
             return False
 
-# 3. محرك الردود (مع معالجة خطأ 403)
+# 3. محرك الردود الذكي (المحصن ضد 403)
 class SmartReplyEngine:
     def __init__(self, client_x, ai_client):
         self.x = client_x
@@ -48,15 +57,45 @@ class SmartReplyEngine:
 
     def handle_mentions(self):
         try:
-            me = self.x.get_me().data.id
-            mentions = self.x.get_users_mentions(id=me)
-            # ... باقي منطق الردود
-        except tweepy.Forbidden:
-            logging.warning("⚠️ الوصول للمنشنز مرفوض حالياً (403). سأكتفي بالنشر فقط.")
-        except Exception as e:
-            logging.error(f"❌ خطأ ردود: {e}")
+            me_res = self.x.get_me()
+            if not me_res.data: return
+            me_id = me_res.data.id
 
-# 4. المحرك الرئيسي
+            mentions = self.x.get_users_mentions(id=me_id)
+            if not mentions.data: 
+                logging.info("📥 لا توجد منشنز جديدة.")
+                return
+
+            with sqlite3.connect(DB_FILE) as conn:
+                for tweet in mentions.data:
+                    rh = hashlib.sha256(f"rep_{tweet.id}".encode()).hexdigest()
+                    if conn.execute("SELECT 1 FROM vault WHERE h=?", (rh,)).fetchone(): continue
+
+                    logging.info(f"🧐 فحص التغريدة {tweet.id}")
+                    
+                    prompt = f"رد كخبير تقني خليجي متمكن بجملة واحدة على: '{tweet.text}'."
+                    ai_res = self.ai.chat.completions.create(
+                        model="qwen/qwen-2.5-72b-instruct",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    reply_text = ai_res.choices[0].message.content.strip()
+
+                    try:
+                        time.sleep(random.randint(5, 15))
+                        self.x.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
+                        logging.info(f"✅ تم الرد بنجاح على {tweet.id}")
+                    except tweepy.Forbidden:
+                        logging.warning(f"⚠️ 403 على {tweet.id}: محاولة الرد البديل...")
+                        try:
+                            self.x.create_tweet(text="أهلاً بك، شكراً لتفاعلك التقني! 🛠️", in_reply_to_tweet_id=tweet.id)
+                        except:
+                            logging.error(f"❌ تعذر الرد النهائي على {tweet.id}")
+                    
+                    conn.execute("INSERT INTO vault VALUES (?, ?, ?)", (rh, "REPLY_FINISH", datetime.now().isoformat()))
+        except Exception as e:
+            logging.error(f"❌ خطأ شامل في الردود: {e}")
+
+# 4. الأوركسترا السيادية
 class SovereignEngine:
     def __init__(self):
         self._init_db()
@@ -85,8 +124,9 @@ class SovereignEngine:
 
 if __name__ == "__main__":
     bot = SovereignEngine()
-    # تشغيل الردود بشكل مستقل (لو فشلت ما تخرب النشر)
+    # تشغيل محرك الردود أولاً
     bot.replier.handle_mentions()
     
-    # النشر الإستراتيجي (المحتوى الذي نجح سابقاً)
-    bot.publish_logic("تطور تقنيات الجيل السادس 6G وبداية التجارب الحقيقية في المدن الذكية.", "wired.com")
+    # محتوى استراتيجي يركز على الصناعة 4.0 والأفراد (الخيار 1)
+    target_topic = "أدوات الذكاء الاصطناعي التي ستمكن الأفراد من بناء شركاتهم الخاصة في 2026 دون الحاجة لموظفين."
+    bot.publish_logic(target_topic, "techcrunch.com")
