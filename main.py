@@ -9,7 +9,7 @@ load_dotenv()
 DB_FILE = "tech_om_enterprise_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-# المواضيع الـ 10 المختارة بعناية للثورة الرابعة
+# المواضيع الـ 10 المختارة للثورة الرابعة
 TARGET_TOPICS = [
     "أدوات الذكاء الاصطناعي (AI Tools)", "إنتاجية الأفراد الرقمية", 
     "الأمن السيبراني الشخصي", "التقنيات المالية (FinTech)", 
@@ -47,7 +47,6 @@ class TechSovereignMain:
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    # --- 2. محرك الذكاء (Zero Hallucination) ---
     def _safe_ai_call(self, sys_p, user_p):
         if datetime.now().date() != self.last_ai_reset:
             self.ai_calls = 0
@@ -68,7 +67,6 @@ class TechSovereignMain:
         except Exception as e:
             logging.error(f"AI Error: {e}"); return None
 
-    # --- 3. نظام الردود العميقة (Deep Expert Replies) ---
     def task_expert_reply(self):
         query = "(\"كيف أستخدم AI\" OR \"مشكلة تقنية\" OR #عمان_تتقدم) -is:retweet"
         try:
@@ -79,25 +77,20 @@ class TechSovereignMain:
                 with sqlite3.connect(DB_FILE) as conn:
                     if conn.execute("SELECT 1 FROM tweet_history WHERE tweet_id=? OR text_hash=?", (str(t.id), text_hash)).fetchone(): continue
                 
-                # الرد العميق: تحليل المشكلة وتقديم حل في خطوة واحدة
                 reply = self._safe_ai_call("خبير حلول تقنية.", f"حلل بعمق ورد بخطوة عملية واحدة أو أداة واحدة فقط على: {t.text}")
                 if reply:
                     final_reply = reply.strip() + "\n\n— Tech Insight"
                     self.x.create_tweet(text=final_reply[:280], in_reply_to_tweet_id=t.id)
                     with sqlite3.connect(DB_FILE) as conn:
                         conn.execute("INSERT INTO tweet_history VALUES (?, ?, ?)", (str(t.id), text_hash, datetime.now().isoformat()))
-                    logging.info(f"✅ تم الرد بعمق على: {t.id}")
                     return True
-        except Exception as e:
-            logging.error(f"Reply Task Failed: {e}"); return False
+        except: return False
         return False
 
-    # --- 4. محرك النشر والتعلم (Decision Engine) ---
     def task_scoop_and_content(self):
         now_hour = datetime.now().hour
         if now_hour < 9 or now_hour > 23: return False
 
-        # جلب الأوزان الديناميكية من الأداء السابق
         weights_dict = {"scoop": 2, "ai_tool": 3, "info": 4, "quiz": 1}
         task_type = random.choices(list(weights_dict.keys()), weights=list(weights_dict.values()))[0]
         
@@ -113,7 +106,7 @@ class TechSovereignMain:
                 h_link = hashlib.sha256(entry.link.encode()).hexdigest()
                 with sqlite3.connect(DB_FILE) as conn:
                     if conn.execute("SELECT 1 FROM content_memory WHERE h_link=?", (h_link,)).fetchone(): continue
-                content = self._safe_ai_call("محلل أخبار عاجلة.", f"لخص هذا الخبر التقني: {entry.title} - المصدر: {entry.link}")
+                content = self._safe_ai_call("محلل أخبار عاجلة.", f"لخص هذا الخبر التقني الرسمي: {entry.title} - المصدر: {entry.link}")
                 break
         else:
             p_map = {"info": f"نصيحة تقنية في {topic}.", "ai_tool": f"أداة AI ثورية في {topic}.", "quiz": f"سؤال تفاعلي ذكي في {topic}."}
@@ -143,8 +136,19 @@ class TechSovereignMain:
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute("INSERT OR IGNORE INTO performance VALUES (?, ?, 0, 0, 0, ?)", (str(first_id), task_type, datetime.now().isoformat()))
 
+    def track_performance(self):
+        with sqlite3.connect(DB_FILE) as conn:
+            tweets = conn.execute("SELECT tweet_id FROM performance WHERE dt > date('now', '-3 days')").fetchall()
+            for (t_id,) in tweets:
+                try:
+                    m = self.x.get_tweet(id=t_id, user_auth=True, tweet_fields=["public_metrics"]).data.public_metrics
+                    conn.execute("UPDATE performance SET likes=?, retweets=?, replies=? WHERE tweet_id=?", 
+                                 (m['like_count'], m['retweet_count'], m['reply_count'], t_id))
+                except: continue
+            conn.commit()
+
     def run_strategy(self):
-        # 1. الردود أولاً للنمو 2. المحتوى ثانياً للسيادة
+        self.track_performance()
         if not self.task_expert_reply():
             self.task_scoop_and_content()
 
