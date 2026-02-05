@@ -4,7 +4,7 @@ import tweepy, feedparser
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# --- 1. الإعدادات والتحصين المؤسسي ---
+# --- 1. الإعدادات والتحصين ---
 load_dotenv()
 DB_FILE = "news_enterprise_full_2026.db"
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
@@ -15,8 +15,8 @@ SOURCES = {
     "CyberSecurity": ["https://thehackernews.com/feeds/posts/default"]
 }
 
-PUBLISH_PROMPT = "أنت محرر تقني مؤسسي رصين. صُغ ثريداً تقنياً احترافياً بالعربية مع مصطلحات إنجليزية بين قوسين. [TWEET_1] تحليل للخبر، [TWEET_2] تفاصيل تقنية عميقة، [POLL_QUESTION] سؤال استراتيجي، [POLL_OPTIONS] خيارات (-). لا هاشتاغات."
-REPLY_PROMPT = "أنت خبير تقني سيادي في سلطنة عمان. رد بذكاء واختصار، أضف قيمة علمية، استخدم مصطلحات إنجليزية بين قوسين، واحفظ نبرة مهنية مؤسسية."
+PUBLISH_PROMPT = "أنت محرر تقني مؤسسي رصين. صُغ ثريداً تقنياً احترافياً بالعربية مع مصطلحات إنجليزية بين قوسين. [TWEET_1] تحليل، [TWEET_2] تفاصيل، [POLL_QUESTION] سؤال، [POLL_OPTIONS] خيارات (-). لا هاشتاغات."
+REPLY_PROMPT = "أنت خبير تقني في عمان. رد بذكاء واختصار، أضف قيمة علمية، استخدم مصطلحات إنجليزية بين قوسين."
 
 class TechEliteEnterpriseSystem:
     def __init__(self):
@@ -42,15 +42,16 @@ class TechEliteEnterpriseSystem:
             self.x_client.get_me()
             return True
         except Exception as e:
-            logging.error(f"🚨 X API unstable: {e}")
+            logging.error(f"🚨 X API Connection Issue: {e}")
             return False
 
     def _safe_x_post(self, **kwargs):
         for attempt in range(3):
             try: return self.x_client.create_tweet(**kwargs)
-            except Exception as e:
-                if "429" in str(e): time.sleep(60 * (attempt + 1))
-                else: return None
+            except tweepy.errors.TooManyRequests:
+                logging.warning("⚠️ Post Rate Limit Hit. Waiting 60s...")
+                time.sleep(60)
+            except Exception: return None
         return None
 
     def _is_technical_news(self, title: str) -> bool:
@@ -94,22 +95,25 @@ class TechEliteEnterpriseSystem:
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute("INSERT INTO editorial_memory VALUES (?, ?, ?, ?)", (h, label, category, datetime.now().isoformat()))
             return content
-        except Exception as e: return None
+        except: return None
 
     def process_smart_replies(self):
         logging.info("🔍 Deep Engagement Mode...")
         queries = ["الذكاء الاصطناعي", "الأمن السيبراني", "التحول الرقمي عمان"]
         for q in queries:
-            # تم تعديل max_results إلى 10 لتجنب خطأ BadRequest 400
-            tweets = self.x_client.search_recent_tweets(query=f"{q} -is:retweet", max_results=10, user_auth=True)
-            if not tweets or not tweets.data: continue
-            for tweet in tweets.data:
-                if not tweet.author_id or self._recently_replied(tweet.author_id): continue
-                h = hashlib.sha256(f"rep_{tweet.id}".encode()).hexdigest()
-                reply = self._generate_ai(REPLY_PROMPT, tweet.text, h, "Engagement", f"user_{tweet.author_id}")
-                if reply:
-                    self._safe_x_post(text=reply[:280], in_reply_to_tweet_id=tweet.id)
-                    time.sleep(25)
+            try:
+                tweets = self.x_client.search_recent_tweets(query=f"{q} -is:retweet", max_results=10, user_auth=True)
+                if not tweets or not tweets.data: continue
+                for tweet in tweets.data:
+                    if not tweet.author_id or self._recently_replied(tweet.author_id): continue
+                    h = hashlib.sha256(f"rep_{tweet.id}".encode()).hexdigest()
+                    reply = self._generate_ai(REPLY_PROMPT, tweet.text, h, "Engagement", f"user_{tweet.author_id}")
+                    if reply:
+                        self._safe_x_post(text=reply[:280], in_reply_to_tweet_id=tweet.id)
+                        time.sleep(20)
+            except tweepy.errors.TooManyRequests:
+                logging.warning(f"⚠️ Search limit reached for '{q}'. Skipping...")
+                continue # لا يتوقف البرنامج، بل ينتقل للخطوة التالية بسلام
 
     def execute_publishing(self):
         best_cat = self._get_best_category()
