@@ -1,11 +1,11 @@
-name: build_and_run
+name: build_and_run_sovereign
 on:
   schedule:
-    - cron: '0 * * * *' # يعمل مرة كل ساعة لضمان الهيبة
-  workflow_dispatch:
+    - cron: '0 */2 * * *' # يعمل مرة كل ساعتين (توقيت استراتيجي)
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً عند الحاجة
 
 permissions:
-  contents: write # ضروري جداً لحفظ الذاكرة (Database)
+  contents: write # ضروري جداً لحفظ قاعدة البيانات ومنع التكرار
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tweepy feedparser openai python-dotenv
           
-      - name: Run Sovereign Bot
+      - name: Run Sovereign Bot V76
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -33,10 +33,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python main.py
 
-      - name: Commit and Push Database changes
+      - name: Commit and Sync Memory
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add sovereign_v73.db
-          git commit -m "Update Bot Memory [Skip CI]" || echo "No changes to commit"
+          git config --local user.name "Sovereign-Bot-Action"
+          git add *.db
+          git commit -m "🛡️ Update Strategic Memory [Skip CI]" || echo "No changes to commit"
           git push
