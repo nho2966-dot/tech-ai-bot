@@ -7,107 +7,111 @@ from dotenv import load_dotenv
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 
-# السياسة السيادية (الخبير التقني الخليجي المحلل)
-POLICY = (
-    "أنت خبير ومحلل تقني خليجي نخبوي. القواعد الصارمة:\n"
-    "1. اللغة: العربية (الخليجية البيضاء) حصراً، مع مصطلحات إنجليزية بين قوسين ().\n"
-    "2. الذكاء: لا تنقل الخبر فقط، بل قارنه بالمنافسين ووضح أثره المستقبلي (Impact Prediction).\n"
-    "3. الهيكل: (Hook) ثم (Value + المقارنة) ثم (Impact) ثم (CTA).\n"
-    "4. الجودة: منع الهلوسة، منع الأخبار القديمة، منع الرموز الغريبة.\n"
-    "5. الفلتر: يُمنع الرد على النفس أو تكرار الرد لنفس الشخص في نفس السياق."
-)
-
-class EliteSovereignSystem:
+class ZenithGlobalAgent:
     def __init__(self):
-        self._setup_db()
-        self._setup_clients()
+        self._init_db()
+        self._init_clients()
         self.bot_id = self.x.get_me().data.id
+        # مصادر العمالقة الموثوقة عالمياً
+        self.sources = [
+            "https://techcrunch.com/feed/",
+            "https://www.theverge.com/rss/index.xml",
+            "https://wired.com/feed/rss",
+            "https://arstechnica.com/feed/",
+            "https://9to5mac.com/feed/",
+            "https://9to5google.com/feed/"
+        ]
+        self.charter = (
+            "أنت المهندس التقني والمستشار الاستراتيجي الأعلى. فكرك نخبوي.\n"
+            "1. الهوية: خليجية نُخبوية رصينة، مصطلحات تقنية دقيقة بين قوسين ().\n"
+            "2. المنطق: (تحليل الخبر + المقارنة التنافسية + الأثر على السيادة الرقمية والخصوصية).\n"
+            "3. الفلاتر: منع الهلوسة، منع الأخبار البائتة (>36س)، منع الرد على النفس أو التكرار."
+        )
 
-    def _setup_db(self):
-        with sqlite3.connect("sovereign_v58.db") as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS v (h PRIMARY KEY, type TEXT, dt TEXT)")
+    def _init_db(self):
+        with sqlite3.connect("zenith_v71.db") as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS memory (h PRIMARY KEY, type TEXT, dt TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS throttle (task TEXT PRIMARY KEY, last_run TEXT)")
 
-    def _setup_clients(self):
+    def _init_clients(self):
         self.x = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"), consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"), access_token_secret=os.getenv("X_ACCESS_SECRET")
+            access_token=os.getenv("X_ACCESS_TOKEN"), access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    def is_clean_and_valid(self, text):
-        """فلتر النقاء اللغوي ومنع الرموز الغريبة"""
-        if not text: return False
-        clean_pattern = re.compile(r'^[ \u0600-\u06FF\u0750-\u077F0-9a-zA-Z()\[\]\.\!\?\-\n\r]+$')
-        if not clean_pattern.match(text) or re.search(r'[\?\!\.]{4,}', text):
-            return False
-        return True
-
-    def _ai_call(self, user_p, high_temp=False):
-        """استدعاء الذكاء الاصطناعي مع فحص الحقائق ومنع الهلوسة"""
+    def _strategic_brain(self, prompt, context=""):
         try:
             res = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
-                messages=[{"role": "system", "content": POLICY}, {"role": "user", "content": user_p}],
-                temperature=0.7 if high_temp else 0.3 # درجة حرارة منخفضة لمنع الهلوسة
+                messages=[{"role": "system", "content": self.charter}, 
+                          {"role": "user", "content": f"Context: {context}\nMission: {prompt}"}],
+                temperature=0.1
             ).choices[0].message.content.strip()
-            return res if self.is_clean_and_valid(res) else ""
-        except Exception as e:
-            logging.error(f"AI Error: {e}")
+            if re.match(r'^[ \u0600-\u06FF0-9a-zA-Z()\[\]\.\!\?\-\n\r]+$', res):
+                return res
             return ""
+        except: return ""
+
+    def _is_locked(self, task, minutes):
+        with sqlite3.connect("zenith_v71.db") as conn:
+            row = conn.execute("SELECT last_run FROM throttle WHERE task=?", (task,)).fetchone()
+            if row and datetime.now() < datetime.fromisoformat(row[0]) + timedelta(minutes=minutes):
+                return True
+        return False
 
     def handle_mentions(self):
-        """محرك الردود الذكي بفلتر صارم"""
-        mentions = self.x.get_users_mentions(id=self.bot_id, tweet_fields=['author_id', 'text'])
-        if not mentions.data: return
-        
-        with sqlite3.connect("sovereign_v58.db") as conn:
-            for t in mentions.data:
-                h = hashlib.sha256(f"{t.author_id}_{t.id}".encode()).hexdigest()
-                # فلتر منع الرد على النفس + منع التكرار
-                if t.author_id == self.bot_id or conn.execute("SELECT 1 FROM v WHERE h=?", (h,)).fetchone():
-                    continue
+        if self._is_locked("mentions", 20): return
+        try:
+            mentions = self.x.get_users_mentions(id=self.bot_id)
+            if not mentions.data: return
+            with sqlite3.connect("zenith_v71.db") as conn:
+                for t in mentions.data:
+                    h = hashlib.sha256(f"{t.id}".encode()).hexdigest()
+                    if t.author_id == self.bot_id or conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone():
+                        continue
+                    reply = self._strategic_brain(f"حلل ورد بذكاء خليجي نُخبوي مقتضب: {t.text}")
+                    if reply:
+                        self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
+                        conn.execute("INSERT INTO memory VALUES (?,?,?)", (h, "REPLY", datetime.now().isoformat()))
+                        conn.commit()
+                        time.sleep(random.randint(60, 120))
+                conn.execute("INSERT OR REPLACE INTO throttle VALUES ('mentions', ?)", (datetime.now().isoformat(),))
+        except Exception as e: logging.warning(f"Shield: {e}")
 
-                reply = self._ai_call(f"حلل ورد بذكاء خليجي (مصطلحات بين قوسين): {t.text}")
-                if reply:
-                    time.sleep(random.randint(40, 80))
-                    self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
-                    conn.execute("INSERT INTO v VALUES (?,?,?)", (h, "REPLY", datetime.now().isoformat()))
+    def post_global_scoops(self):
+        """سحب الأخبار من المصادر العالمية وتحويلها لثريدات استراتيجية"""
+        if self._is_locked("news", 120): return # فحص الأخبار كل ساعتين
 
-    def process_news(self):
-        """جلب الأخبار وتطبيق فلتر الـ 36 ساعة والقيمة المضافة"""
-        feed = feedparser.parse("https://techcrunch.com/feed/")
-        for entry in feed.entries[:5]:
-            # فحص عمر الخبر (36 ساعة)
-            p_date = datetime(*entry.published_parsed[:6])
-            is_old = (datetime.now() - p_date) > timedelta(hours=36)
-            
-            # إذا كان الخبر قديم، نتحقق هل يحمل "قيمة حيوية" دائمة؟
-            check_val = self._ai_call(f"هل هذه معلومة حيوية دائمة أم خبر مؤقت؟ أجب بـ (VITAL/NEWS): {entry.title}")
-            
-            if is_old and "VITAL" not in check_val:
-                continue # استبعاد الأخبار القديمة التي ليست حيوية
+        for url in self.sources:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:3]:
+                p_date = datetime(*entry.published_parsed[:6])
+                # فلتر الـ 36 ساعة الصارم
+                if (datetime.now() - p_date) > timedelta(hours=36): continue
 
-            h = hashlib.sha256(entry.title.encode()).hexdigest()
-            with sqlite3.connect("sovereign_v58.db") as conn:
-                if conn.execute("SELECT 1 FROM v WHERE h=?", (h,)).fetchone(): continue
-                
-                # صياغة المحتوى مع وحدة الاستخبارات (المقارنة والاستشراف)
-                prompt = f"حلل الخبر، قارنه بالمنافسين، وصغ ثريد خليجي (Hook-Value-Impact-CTA) فواصل '---':\n{entry.title}\n{entry.description}"
-                content = self._ai_call(prompt, high_temp=True)
-                
-                if content:
-                    tweets = [t.strip() for t in content.split("---") if len(t.strip()) > 10]
-                    p_id = None
-                    for i, txt in enumerate(tweets):
-                        time.sleep(random.randint(120, 180))
-                        msg = f"{txt}\n.\n🕒 {datetime.now().strftime('%H:%M')}" if i == 0 else txt
-                        res = self.x.create_tweet(text=msg, in_reply_to_tweet_id=p_id)
-                        p_id = res.data['id']
-                    conn.execute("INSERT INTO v VALUES (?,?,?)", (h, "THREAD", datetime.now().isoformat()))
-                    break # نشر ثريد واحد دسم في كل دورة
+                h = hashlib.sha256(entry.title.encode()).hexdigest()
+                with sqlite3.connect("zenith_v71.db") as conn:
+                    if conn.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
+                    
+                    instr = "صغ ثريداً استراتيجياً (Hook-Value-Impact-CTA). قارن بمنافسين ووضح أثر التقنية على الفرد والخصوصية."
+                    content = self._strategic_brain(instr, f"{entry.title}\n{entry.description}")
+                    
+                    if content:
+                        tweets = [t.strip() for t in content.split("---") if len(t.strip()) > 10]
+                        p_id = None
+                        for txt in tweets:
+                            res = self.x.create_tweet(text=txt, in_reply_to_tweet_id=p_id)
+                            p_id = res.data['id']
+                            time.sleep(60)
+                        conn.execute("INSERT INTO memory VALUES (?,?,?)", (h, "THREAD", datetime.now().isoformat()))
+                        conn.execute("INSERT OR REPLACE INTO throttle VALUES ('news', ?)", (datetime.now().isoformat(),))
+                        conn.commit()
+                        return # نكتفي بخبر واحد نخبوي في كل دورة لضمان المعدل
 
 if __name__ == "__main__":
-    bot = EliteSovereignSystem()
-    bot.process_news()
+    bot = ZenithGlobalAgent()
     bot.handle_mentions()
+    bot.post_global_scoops()
