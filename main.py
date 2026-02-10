@@ -1,28 +1,28 @@
 import os, sqlite3, logging, hashlib, random, re
 from datetime import datetime, timedelta
-import tweepy, feedparser, requests
-from bs4 import BeautifulSoup
+import tweepy, feedparser
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# === 1. الإعدادات والتحكم بالبيئة ===
+# === 1. الهوية والبروتوكولات السيادية ===
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 DB_FILE = "sovereign_memory.db"
 
-# بروتوكولات إجبار المحاذاة من اليمين (RTL Force)
 RTL_MARK = '\u200f'    # علامة اليمين لليسار
-RTL_EMBED = '\u202b'   # إجبار التغليف من اليمين لليسار
-RTL_POP = '\u202c'     # إنهاء التغليف
+RTL_EMBED = '\u202b'   # إجبار التغليف من اليمين
+RTL_POP = '\u202c'     # إغلاق التوجيه
 
-# مصفوفة تقييم "النخبوية" - الخبر الضعيف لا يمر
+# مصفوفة تقييم النخبوية
 BASE_ELITE_SCORE = {
-    "leak": 4, "exclusive": 4, "hands-on": 3, "benchmark": 3,
-    "specs": 2, "chip": 3, "tool": 3, "ai agent": 4,
-    "gpu": 2, "new feature": 2, "prototype": 3
+    "leak": 5, "exclusive": 5, "ai agent": 5, "benchmark": 4,
+    "hands-on": 4, "chip": 4, "gpu": 3, "specs": 3, "linux": 3
 }
 
-class SovereignApexBotV102_Final:
+# ساعات الذروة المبدئية (يمكن تعديلها لاحقاً ديناميكيًا)
+PEAK_HOURS = [9,10,11,19,20,21,22]
+
+class SovereignApexBotV104:
     def __init__(self):
         self._init_db()
         self._init_clients()
@@ -31,14 +31,8 @@ class SovereignApexBotV102_Final:
             "https://www.theverge.com/rss/index.xml",
             "https://9to5google.com/feed/",
             "https://9to5mac.com/feed/",
-            "https://www.macrumors.com/macrumors.xml",
             "https://venturebeat.com/feed/",
             "https://wccftech.com/feed/"
-        ]
-        self.reddit_feeds = [
-            "https://www.reddit.com/r/technology/.rss",
-            "https://www.reddit.com/r/Android/.rss",
-            "https://www.reddit.com/r/apple/.rss"
         ]
 
     # === 2. إدارة الذاكرة وقاعدة البيانات ===
@@ -46,7 +40,9 @@ class SovereignApexBotV102_Final:
         with sqlite3.connect(DB_FILE) as c:
             c.execute("CREATE TABLE IF NOT EXISTS memory (h TEXT PRIMARY KEY, type TEXT, dt TEXT)")
             c.execute("CREATE TABLE IF NOT EXISTS throttle (task TEXT PRIMARY KEY, last_run TEXT)")
-            c.execute("CREATE TABLE IF NOT EXISTS feedback (tweet_id TEXT PRIMARY KEY, reward REAL)")
+            c.execute("""CREATE TABLE IF NOT EXISTS feedback (
+                tweet_id TEXT PRIMARY KEY, reward REAL, likes INTEGER, retweets INTEGER, hour INTEGER
+            )""")
             c.commit()
 
     def _init_clients(self):
@@ -68,87 +64,92 @@ class SovereignApexBotV102_Final:
             c.execute("INSERT OR REPLACE INTO throttle VALUES (?,?)", (task, datetime.now().isoformat()))
             c.commit()
 
+    # === 4. Epsilon-Greedy Strategy ===
+    def _decide_strategy(self, epsilon=0.2):
+        """اختيار بين الاستغلال والاستكشاف"""
+        return "EXPLORE" if random.random() < epsilon else "EXPLOIT"
+
+    def _get_exploration_style(self):
+        styles = [
+            "أسلوب قصصي يربط التقنية بحياة الفرد اليومية.",
+            "أسلوب مقارن بين أدوات أو تقنيات.",
+            "أسلوب قائمة عملية (How-to) تبدأ غداً.",
+            "أسلوب تخيلي مستقبلي (Impact after 5 years)."
+        ]
+        return random.choice(styles)
+
+    # === 5. محرك الصياغة النخبوي ===
     def _brain(self, mission, context):
-        """محرك الصياغة: يمنع الركاكة ويفرض اللهجة الخليجية والمحاذاة"""
         charter = (
-            "أنت مستشار تقني خليجي نخبوي. لغتك (خليجية بيضاء) رصينة.\n"
-            "قاعدة ذهبية: ابدأ النص بكلمة عربية قوية فوراً. ممنوع مقدمات مثل (ابتكار، هل تبحث، إليك).\n"
-            "الهيكل: دخول مباشر في صلب الخبر -> ليش يهم الفرد حالياً -> 3 نقاط بأسلوب (💎⚡🛡️) -> سؤال نخبة.\n"
-            "المصطلحات الإنجليزية (بين أقواس). لا تهلوس نهائياً."
+            "أنت خبير تقني خليجي نخبوي. لغتك خليجية بيضاء ذكية.\n"
+            "ممنوع تبدأ بكلمات عامة. ابدأ مباشرة بشرارة.\n"
+            "الهيكل: شرارة -> تحليل الفائدة -> 3 نقاط (💎⚡🛡️) -> سؤال نخبة.\n"
+            "المصطلحات الإنجليزية بين أقواس. RTL Forced."
         )
         try:
             res = self.ai.chat.completions.create(
                 model="qwen/qwen-2.5-72b-instruct",
                 temperature=0.0,
-                messages=[{"role":"system","content":charter}, {"role":"user","content":f"Context: {context}\nMission: {mission}"}]
+                messages=[{"role":"system","content":charter},
+                          {"role":"user","content":f"Context: {context}\nMission: {mission}"}]
             )
             content = res.choices[0].message.content.strip()
-            # تغليف المحاذاة لضمان السيادة من اليمين
             return f"{RTL_EMBED}{RTL_MARK}{content}{RTL_POP}"
         except: return ""
 
-    # === 4. محرك النشر الطازج (The Freshness Engine) ===
+    # === 6. تقييم الأداء السابق لتحديد أسلوب الأفضل ===
+    def _get_optimal_style(self):
+        with sqlite3.connect(DB_FILE) as c:
+            r = c.execute("SELECT reward, likes, retweets, tweet_id FROM feedback ORDER BY reward DESC LIMIT 1").fetchone()
+        if r: return f"Analytical Style based on past ROI ({r[1]} likes, {r[2]} retweets)"
+        return "Standard Analytical"
+
+    # === 7. محرك النشر المعزز ===
     def post_elite_scoop(self):
-        """لا ينشر إلا الأخبار التي لم تتجاوز 24 ساعة ولم تسبق بصمتها"""
-        if self._is_throttled("post", 45): return
-        
-        all_entries = []
-        for src in (self.sources + self.reddit_feeds):
+        if self._is_throttled("post", 60): return
+
+        strategy = self._decide_strategy()
+        candidates = []
+
+        for src in self.sources:
             try:
                 feed = feedparser.parse(src)
                 for e in feed.entries[:10]:
-                    # الحارس الأول: فلترة التاريخ (24 ساعة فقط)
-                    published = datetime(*e.published_parsed[:6])
-                    if datetime.now() - published > timedelta(hours=24):
-                        continue
-                    all_entries.append(e)
+                    pub_date = datetime(*e.published_parsed[:6])
+                    if datetime.now() - pub_date > timedelta(hours=24): continue
+                    score = sum(v for k, v in BASE_ELITE_SCORE.items() if k in e.title.lower())
+                    if score >= 3: candidates.append(e)
             except: continue
 
-        candidates = []
-        for e in all_entries:
-            text = (e.title + getattr(e, 'description', '')).lower()
-            score = sum(v for k, v in BASE_ELITE_SCORE.items() if re.search(rf"\b{k}\b", text))
-            # الحارس الثاني: فلترة القيمة (أخبار قوية فقط)
-            if score >= 3: candidates.append(e)
-
         if not candidates: return
-        
-        # اختيار الخبر الأقوى
+
+        # اختيار خبر عشوائي
         target = random.choice(candidates)
-        # الحارس الثالث: بصمة العنوان (منع التكرار الأبدي)
         h = hashlib.sha256(target.title.lower().strip().encode()).hexdigest()
 
         with sqlite3.connect(DB_FILE) as c:
             if c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): return
             
-            content = self._brain("حلل هذا السكوب التقني الطازج بلهجة خليجية نُخبوية مباشرة.", target.title)
+            if strategy == "EXPLOIT":
+                style_hint = self._get_optimal_style()
+            else:
+                style_hint = self._get_exploration_style()
+
+            content = self._brain(f"صغ سكوب نخبوي بأسلوب {style_hint}", target.title)
             if content:
                 try:
-                    self.x.create_tweet(text=content)
+                    res = self.x.create_tweet(text=content)
+                    tweet_id = res.data['id']
                     c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "POST", datetime.now().isoformat()))
+                    # حفظ مبدئي للتفاعل لاحقًا
+                    c.execute("INSERT OR IGNORE INTO feedback (tweet_id, reward, likes, retweets, hour) VALUES (?,?,?,?,?)",
+                              (tweet_id, 0.0, 0, 0, datetime.now().hour))
                     c.commit()
                     self._lock("post")
-                    logging.info(f"✅ تم نشر الخبر: {target.title[:40]}...")
-                except Exception as e: logging.error(f"X Error: {e}")
-
-    def handle_mentions(self):
-        if self._is_throttled("mentions", 10): return
-        try:
-            mentions = self.x.get_users_mentions(id=self.bot_id)
-            if not mentions.data: return
-            with sqlite3.connect(DB_FILE) as c:
-                for t in mentions.data:
-                    h = hashlib.sha256(f"rep_{t.id}".encode()).hexdigest()
-                    if c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
-                    
-                    reply = self._brain("رد خليجي نخبوي رصين ومختصر جداً.", t.text)
-                    if reply:
-                        self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
-                        c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "REPLY", datetime.now().isoformat()))
-                        c.commit()
-        except: pass
+                    logging.info(f"🎯 Published [{strategy}] scoop: {target.title[:30]}")
+                except Exception as e:
+                    logging.error(f"X Error: {e}")
 
 if __name__ == "__main__":
-    bot = SovereignApexBotV102_Final()
-    bot.handle_mentions()
+    bot = SovereignApexBotV104()
     bot.post_elite_scoop()
