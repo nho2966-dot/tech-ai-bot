@@ -9,15 +9,15 @@ from dotenv import load_dotenv
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 DB_FILE = "sovereign_memory.db"
+RTL_MARK = '\u200f'  # رمز إجبار المحاذاة من اليمين لليسار
 
-# محددات النخبة (لضمان جودة السكوبات)
 BASE_ELITE_SCORE = {
     "leak": 3, "exclusive": 3, "hands-on": 2, "benchmark": 2,
     "specs": 2, "chip": 2, "tool": 2, "update": 1,
     "ai agent": 3, "gpu": 2, "new feature": 2
 }
 
-class SovereignApexBotV100:
+class SovereignApexBotV100Plus:
     def __init__(self):
         self._init_db()
         self._init_clients()
@@ -27,21 +27,15 @@ class SovereignApexBotV100:
             "https://9to5google.com/feed/",
             "https://9to5mac.com/feed/",
             "https://www.macrumors.com/macrumors.xml",
-            "https://venturebeat.com/feed/",
-            "https://wccftech.com/feed/"
+            "https://venturebeat.com/feed/"
         ]
 
-    # === 2. Database Intelligence (The Memory) ===
+    # === 2. Core Database & Intelligence ===
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as c:
-            # ذاكرة منع التكرار (Semantic Hash)
             c.execute("CREATE TABLE IF NOT EXISTS memory (h TEXT PRIMARY KEY, type TEXT, dt TEXT)")
-            # التحكم في وتيرة النشر (Throttle)
             c.execute("CREATE TABLE IF NOT EXISTS throttle (task TEXT PRIMARY KEY, last_run TEXT)")
-            # ذاكرة التعلم السياقي (Reinforcement Learning)
-            c.execute("""CREATE TABLE IF NOT EXISTS context_memory (
-                topic TEXT, hour INTEGER, style TEXT, strategy TEXT, reward REAL)""")
-            # بروفايلات المستخدمين (Profiling)
+            c.execute("CREATE TABLE IF NOT EXISTS context_memory (topic TEXT, hour INTEGER, style TEXT, strategy TEXT, reward REAL)")
             c.execute("CREATE TABLE IF NOT EXISTS user_profile (user_id TEXT PRIMARY KEY, level TEXT)")
             c.commit()
 
@@ -53,7 +47,7 @@ class SovereignApexBotV100:
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    # === 3. Safety & Logic Guards ===
+    # === 3. Safety & Grounding Guards ===
     def _is_throttled(self, task, minutes):
         with sqlite3.connect(DB_FILE) as c:
             r = c.execute("SELECT last_run FROM throttle WHERE task=?", (task,)).fetchone()
@@ -64,20 +58,13 @@ class SovereignApexBotV100:
             c.execute("INSERT OR REPLACE INTO throttle VALUES (?,?)", (task, datetime.now().isoformat()))
             c.commit()
 
-    def _fetch_url_context(self, url):
-        """Grounding Engine: استخراج بيانات الرابط لمنع الهلوسة"""
-        try:
-            r = requests.get(url, timeout=7, headers={"User-Agent": "Mozilla/5.0"})
-            soup = BeautifulSoup(r.text, "html.parser")
-            return f"Title: {soup.title.text}\nContext: {soup.find('meta', {'name':'description'})['content']}"
-        except: return ""
-
-    # === 4. AI Strategic Brain ===
+    # === 4. Advanced AI Brain (Zero Hallucination) ===
     def _brain(self, mission, context):
         charter = (
-            "أنت محلل تقني خليجي نخبوي. اللغة: خليجية بيضاء رصينة.\n"
-            "الشرط الحرج: التزم فقط بالحقائق المذكورة. لا تخمن أرقاماً أو تواريخ.\n"
-            "التركيز: الفرد، الإنتاجية، السكوبات التقنية الصلبة."
+            f"أنت مستشار تقني خليجي نخبوي. ابدأ التغريدة دائماً بـ 'خطّاف' (Hook) مثير يمس الفرد مباشرة.\n"
+            "اللغة: خليجية بيضاء رصينة. اتجاه النص: من اليمين لليسار.\n"
+            "الشرط الحرج: التزم فقط بالحقائق المذكورة حرفياً. لا تخترع أسعاراً أو مواعيد.\n"
+            "الهيكل: خطّاف -> عنوان السكوب -> ليش يهمك (الفائدة المضافة) -> نقاط المواصفات -> سؤال للنخبة."
         )
         try:
             res = self.ai.chat.completions.create(
@@ -85,22 +72,12 @@ class SovereignApexBotV100:
                 temperature=0.0,
                 messages=[{"role":"system","content":charter}, {"role":"user","content":f"Context: {context}\nMission: {mission}"}]
             )
-            return res.choices[0].message.content.strip()
+            content = res.choices[0].message.content.strip()
+            # حقن رمز الـ RTL لضمان المحاذاة في X
+            return f"{RTL_MARK}{content}"
         except: return ""
 
-    # === 5. Learning & Reward System ===
-    def _get_best_style(self, topic):
-        """اختيار أفضل أسلوب بناءً على الـ ROI السابق لهذا الموضوع"""
-        with sqlite3.connect(DB_FILE) as c:
-            res = c.execute("SELECT style FROM context_memory WHERE topic=? ORDER BY reward DESC LIMIT 1", (topic,)).fetchone()
-        return res[0] if res else random.choice(["Analytical", "Viral", "Story"])
-
-    def _detect_topic(self, text):
-        for topic, kws in {"AI": ["ai", "gpt", "llm"], "HARDWARE": ["chip", "gpu", "intel", "apple"], "CYBER": ["hack", "leak", "security"]}.items():
-            if any(k in text.lower() for k in kws): return topic
-        return "GENERAL"
-
-    # === 6. Main Action Engines ===
+    # === 5. Dynamic Content Logic ===
     def post_elite_scoop(self):
         if self._is_throttled("post", 100): return
         
@@ -108,7 +85,6 @@ class SovereignApexBotV100:
         for src in self.sources:
             feed = feedparser.parse(src)
             for e in feed.entries[:5]:
-                # فلترة الحداثة والنخبوية
                 text = (e.title + e.description).lower()
                 score = sum(v for k, v in BASE_ELITE_SCORE.items() if re.search(rf"\b{k}\b", text))
                 if score >= 3 and len(e.description) > 100:
@@ -116,27 +92,20 @@ class SovereignApexBotV100:
 
         if not candidates: return
         target = random.choice(candidates)
-        topic = self._detect_topic(target.title)
-        
-        # تفعيل الـ Reinforcement: الاستكشاف مقابل الاستثمار
-        strategy = "EXPLORE" if random.random() < 0.2 else "EXPLOIT"
-        style = self._get_best_style(topic) if strategy == "EXPLOIT" else random.choice(["Debate", "Future Speculation"])
-
-        # إنشاء المحتوى
         h = hashlib.sha256((target.title + target.description[:100]).encode()).hexdigest()
+
         with sqlite3.connect(DB_FILE) as c:
             if c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): return
 
-            content = self._brain(f"صغ سكوب بأسلوب {style} يركز على القيمة للفرد.", f"{target.title}\n{target.description}")
+            content = self._brain("صغ سكوب نخبوي بأسلوب يركز على الفرد والإنتاجية.", f"{target.title}\n{target.description}")
             if content:
                 try:
                     self.x.create_tweet(text=content)
                     c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "POST", datetime.now().isoformat()))
-                    c.execute("INSERT INTO context_memory VALUES (?,?,?,?,?)", (topic, datetime.now().hour, style, strategy, 0.0))
                     c.commit()
                     self._lock("post")
-                    logging.info(f"🚀 Published: {topic} | {style}")
-                except Exception as e: logging.error(e)
+                    logging.info("🎯 Published with RTL alignment and Hook.")
+                except Exception as e: logging.error(f"X Error: {e}")
 
     def handle_mentions(self):
         if self._is_throttled("mentions", 15): return
@@ -148,11 +117,7 @@ class SovereignApexBotV100:
                     h = hashlib.sha256(f"rep_{t.id}".encode()).hexdigest()
                     if t.author_id == self.bot_id or c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
                     
-                    # تحليل الروابط + Profiling
-                    urls = t.entities.get('urls') if t.entities else None
-                    context = self._fetch_url_context(urls[0]['expanded_url']) if urls else t.text
-                    
-                    reply = self._brain("رد تقني خليجي نخبوي ومختصر.", context)
+                    reply = self._brain("رد تقني خليجي نخبوي ومختصر ومحاذى لليمين.", t.text)
                     if reply:
                         self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
                         c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "REPLY", datetime.now().isoformat()))
@@ -160,6 +125,6 @@ class SovereignApexBotV100:
         except: pass
 
 if __name__ == "__main__":
-    bot = SovereignApexBotV100()
+    bot = SovereignApexBotV100Plus()
     bot.handle_mentions()
     bot.post_elite_scoop()
