@@ -1,29 +1,26 @@
-import os, sqlite3, logging, hashlib, random, time, re
+import os, sqlite3, logging, hashlib, random, re
 from datetime import datetime, timedelta
 import tweepy, feedparser, requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# === 1. Governance & Environment ===
+# === 1. الإعدادات والتحكم بالبيئة ===
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 DB_FILE = "sovereign_memory.db"
 
-# بروتوكولات إجبار المحاذاة من اليمين (RTL Protocols)
+# بروتوكولات إجبار المحاذاة من اليمين (RTL Force)
 RTL_MARK = '\u200f'    # علامة اليمين لليسار
-RTL_EMBED = '\u202b'   # إجبار التغليف من اليمين
+RTL_EMBED = '\u202b'   # إجبار التغليف من اليمين لليسار
 RTL_POP = '\u202c'     # إنهاء التغليف
 
-# مصفوفة تقييم المحتوى النخبوي
+# مصفوفة تقييم "النخبوية" - الخبر الضعيف لا يمر
 BASE_ELITE_SCORE = {
-    "leak": 3, "exclusive": 3, "hands-on": 2, "benchmark": 2,
-    "specs": 2, "chip": 2, "tool": 2, "update": 1,
-    "ai agent": 3, "gpu": 2, "new feature": 2
+    "leak": 4, "exclusive": 4, "hands-on": 3, "benchmark": 3,
+    "specs": 2, "chip": 3, "tool": 3, "ai agent": 4,
+    "gpu": 2, "new feature": 2, "prototype": 3
 }
-
-# ساعات الذروة بتوقيت الخليج (لتحسين الوصول)
-PEAK_HOURS = [9, 10, 11, 19, 20, 21, 22]
 
 class SovereignApexBotV102_Final:
     def __init__(self):
@@ -44,7 +41,7 @@ class SovereignApexBotV102_Final:
             "https://www.reddit.com/r/apple/.rss"
         ]
 
-    # === 2. Database & Persistence ===
+    # === 2. إدارة الذاكرة وقاعدة البيانات ===
     def _init_db(self):
         with sqlite3.connect(DB_FILE) as c:
             c.execute("CREATE TABLE IF NOT EXISTS memory (h TEXT PRIMARY KEY, type TEXT, dt TEXT)")
@@ -60,7 +57,7 @@ class SovereignApexBotV102_Final:
         )
         self.ai = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
 
-    # === 3. Intelligence & Safety ===
+    # === 3. فلاتر الأمان والذكاء ===
     def _is_throttled(self, task, minutes):
         with sqlite3.connect(DB_FILE) as c:
             r = c.execute("SELECT last_run FROM throttle WHERE task=?", (task,)).fetchone()
@@ -72,12 +69,12 @@ class SovereignApexBotV102_Final:
             c.commit()
 
     def _brain(self, mission, context):
-        """محرك الصياغة السيادي: خليجي، نخبوي، ومحاذاة RTL مضمونة"""
+        """محرك الصياغة: يمنع الركاكة ويفرض اللهجة الخليجية والمحاذاة"""
         charter = (
-            "أنت خبير تقني خليجي نخبوي. لغتك (خليجية بيضاء) ذكية وحماسية.\n"
-            "قاعدة ذهبية: ابدأ النص دائماً بكلمة عربية قوية. ممنوع البدء برموز أو إنجليزي.\n"
-            "الهيكل المعتمد: شرارة حماسية -> متن انسيابي يوضح الفائدة للفرد -> 3 مواصفات (💎⚡🛡️) -> سؤال استراتيجي.\n"
-            "المصطلحات الإنجليزية بين أقواس ( ). لا تهلوس."
+            "أنت مستشار تقني خليجي نخبوي. لغتك (خليجية بيضاء) رصينة.\n"
+            "قاعدة ذهبية: ابدأ النص بكلمة عربية قوية فوراً. ممنوع مقدمات مثل (ابتكار، هل تبحث، إليك).\n"
+            "الهيكل: دخول مباشر في صلب الخبر -> ليش يهم الفرد حالياً -> 3 نقاط بأسلوب (💎⚡🛡️) -> سؤال نخبة.\n"
+            "المصطلحات الإنجليزية (بين أقواس). لا تهلوس نهائياً."
         )
         try:
             res = self.ai.chat.completions.create(
@@ -86,45 +83,52 @@ class SovereignApexBotV102_Final:
                 messages=[{"role":"system","content":charter}, {"role":"user","content":f"Context: {context}\nMission: {mission}"}]
             )
             content = res.choices[0].message.content.strip()
-            # تغليف المحاذاة السيادي
+            # تغليف المحاذاة لضمان السيادة من اليمين
             return f"{RTL_EMBED}{RTL_MARK}{content}{RTL_POP}"
         except: return ""
 
-    # === 4. Content Engine ===
+    # === 4. محرك النشر الطازج (The Freshness Engine) ===
     def post_elite_scoop(self):
-        # التحقق من وقت الذروة أو المهلة
-        is_peak = datetime.now().hour in PEAK_HOURS
-        wait_time = 45 if is_peak else 120
-        if self._is_throttled("post", wait_time): return
-
+        """لا ينشر إلا الأخبار التي لم تتجاوز 24 ساعة ولم تسبق بصمتها"""
+        if self._is_throttled("post", 45): return
+        
         all_entries = []
         for src in (self.sources + self.reddit_feeds):
             try:
                 feed = feedparser.parse(src)
-                all_entries.extend(feed.entries[:5])
+                for e in feed.entries[:10]:
+                    # الحارس الأول: فلترة التاريخ (24 ساعة فقط)
+                    published = datetime(*e.published_parsed[:6])
+                    if datetime.now() - published > timedelta(hours=24):
+                        continue
+                    all_entries.append(e)
             except: continue
 
         candidates = []
         for e in all_entries:
             text = (e.title + getattr(e, 'description', '')).lower()
             score = sum(v for k, v in BASE_ELITE_SCORE.items() if re.search(rf"\b{k}\b", text))
+            # الحارس الثاني: فلترة القيمة (أخبار قوية فقط)
             if score >= 3: candidates.append(e)
 
         if not candidates: return
+        
+        # اختيار الخبر الأقوى
         target = random.choice(candidates)
-        h = hashlib.sha256(target.title.encode()).hexdigest()
+        # الحارس الثالث: بصمة العنوان (منع التكرار الأبدي)
+        h = hashlib.sha256(target.title.lower().strip().encode()).hexdigest()
 
         with sqlite3.connect(DB_FILE) as c:
             if c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): return
             
-            content = self._brain("صغ سكوب خليجي حماسي يركز على الفرد والإنتاجية التقنية.", target.title)
+            content = self._brain("حلل هذا السكوب التقني الطازج بلهجة خليجية نُخبوية مباشرة.", target.title)
             if content:
                 try:
                     self.x.create_tweet(text=content)
                     c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "POST", datetime.now().isoformat()))
                     c.commit()
                     self._lock("post")
-                    logging.info("🎯 Published Strategic Scoop.")
+                    logging.info(f"✅ تم نشر الخبر: {target.title[:40]}...")
                 except Exception as e: logging.error(f"X Error: {e}")
 
     def handle_mentions(self):
@@ -137,7 +141,7 @@ class SovereignApexBotV102_Final:
                     h = hashlib.sha256(f"rep_{t.id}".encode()).hexdigest()
                     if c.execute("SELECT 1 FROM memory WHERE h=?", (h,)).fetchone(): continue
                     
-                    reply = self._brain("رد خليجي نخبوي ذكي ومختصر جداً.", t.text)
+                    reply = self._brain("رد خليجي نخبوي رصين ومختصر جداً.", t.text)
                     if reply:
                         self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
                         c.execute("INSERT INTO memory VALUES (?,?,?)", (h, "REPLY", datetime.now().isoformat()))
