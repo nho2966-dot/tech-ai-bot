@@ -1,114 +1,46 @@
-# sovereign-config.yaml
-# تاريخ التحديث: 15 فبراير 2026
-# الغرض: إعدادات مركزية للبوت السيادي (SovereignBot) - تكلفة صفرية، تفاعل عالي، محتوى مثير
+name: SovereignBot 2026 Run
 
-bot:
-  name: SovereignPeak2026
-  version: "v5.50-enhanced"
-  database_path: "sovereign_v550.db"
-  daily_tweet_limit: 12
-  reply_delay_seconds: 45
-  post_delay:
-    min_seconds: 60
-    max_seconds: 240
-  rtl:
-    embed: "\u202b"
-    mark:   "\u200f"
-    pop:    "\u202c"
+on:
+  schedule:
+    # تشغيل كل ساعة (يمكنك تعديل التوقيت حسب رغبتك)
+    - cron: '0 * * * *'
+  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً للتجربة
 
-api_keys:
-  # أسماء المتغيرات البيئية (من .env)
-  groq:         GROQ_API_KEY
-  google:       GOOGLE_API_KEY
-  openrouter:   OPENROUTER_API_KEY
-  xai:          XAI_API_KEY
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-models:
-  priority:
-    - name: Groq-Free
-      type: openai
-      base_url: "https://api.groq.com/openai/v1"
-      model: "llama-3.3-70b-versatile"
-      temperature: 0.6
-      max_tokens: 190
-      timeout: 35
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Gemini-Flash
-      type: google
-      model: "gemini-1.5-flash"
-      temperature: 0.6
-      max_output_tokens: 190
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: OR-Free
-      type: openai
-      base_url: "https://openrouter.ai/api/v1"
-      model: "google/gemini-2.0-flash-exp:free"
-      temperature: 0.6
-      max_tokens: 190
+      - name: Install Dependencies
+        run: |
+          pip install tweepy feedparser requests openai python-dotenv google-generativeai pyyaml
 
-    - name: Grok-Brain
-      type: openai
-      base_url: "https://api.x.ai/v1"
-      model: "grok-4-1-fast-reasoning"
-      temperature: 0.6
-      max_tokens: 190
+      - name: Run SovereignBot
+        env:
+          # ربط أسرار GitHub ببيئة التشغيل
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: python main.py # تأكد أن اسم ملف الكود هو main.py
 
-sources:
-  rss:
-    - url: "https://www.jook.me/rss/technology"
-      max_items: 5
-      weight: 1.0
-
-    - url: "https://www.arabnews.com/rss/technology"
-      max_items: 4
-      weight: 0.8
-
-    - url: "https://techcrunch.com/feed/"
-      max_items: 6
-      weight: 1.5
-
-    - url: "https://www.theverge.com/rss/index.xml"
-      max_items: 6
-      weight: 1.5
-
-    - url: "https://feeds.feedburner.com/Techmeme"
-      max_items: 5
-      weight: 1.2
-
-features:
-  ai_tools_posts:
-    enabled: true
-    probability: 0.35
-    topics:
-      - "إنتاجية"
-      - "خصوصية"
-      - "أتمتة"
-      - "إبداع"
-      - "سيادة رقمية"
-
-  polls:
-    enabled_probability: 0.30
-    duration_minutes: 1440
-    default_options:
-      - "اتفق بشدة"
-      - "أحتاج تفكير"
-      - "أرفض تماماً"
-
-  hashtags:
-    default: " #سيادة_رقمية #HUMAIN_OS #AI2026"
-
-prompts:
-  system_core: |
-    أنت مستشار تقني نخبوي خليجي. 
-    ابدأ بجملة صادمة أو صورة ذهنية قوية، اربطها مباشرة بالسيادة الرقمية للفرد (HUMAIN OS)، 
-    كن فلسفياً، عميقاً، مثيراً للنقاش، لغة وقورة لكن مشوقة. أقل من 240 حرف.
-
-  modes:
-    POST:          "حلل بأسلوب 'جوك' الصادم والمثير: {content}"
-    REPLY:         "رد فلسفي وقور ومثير للنقاش العميق: {content}"
-    TOOL_POST:     "اقترح أداة ذكاء اصطناعي ثورية في 2026: {content}. قدم وصفاً صادماً، خطوتين فقط للاستفادة في سيادة الفرد، ثم سؤال استفزازي قوي."
-
-logging:
-  level: INFO
-  format: "%(asctime)s | %(levelname)s | %(message)s"
-  name: SovereignPeak2026
+      - name: Commit and Push DB Changes
+        run: |
+          git config --global user.name "SovereignBot-Bot"
+          git config --global user.email "bot@sovereign.peak"
+          git add sovereign_v550.db
+          git commit -m "Update Sovereign Database [skip ci]" || echo "No changes to commit"
+          git push
