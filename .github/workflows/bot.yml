@@ -1,13 +1,16 @@
-name: Sovereign Stealth Runner
+name: Sovereign Triple-AI Stealth Runner
 
 on:
   schedule:
-    - cron: '37 * * * *' # يعمل في الدقيقة 37 من كل ساعة لكسر النمط
-  workflow_dispatch:    # للتشغيل اليدوي
+    # يعمل في الدقيقة 37 من كل ساعة لضمان عدم التداخل مع البوتات الأخرى
+    - cron: '37 * * * *'
+  workflow_dispatch: # يتيح لك التشغيل اليدوي للتجربة
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # صلاحيات الكتابة ضرورية لحفظ "ذاكرة" البوت (قاعدة البيانات)
     permissions:
       contents: write
 
@@ -19,7 +22,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip'
+          cache: 'pip' # تسريع تثبيت المكتبات في الدورات القادمة
 
       - name: Install Dependencies
         run: |
@@ -27,18 +30,22 @@ jobs:
 
       - name: Run Sovereign Bot
         env:
+          # مفاتيح تويتر (X)
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          
+          # مفاتيح الذكاء الاصطناعي (العقول)
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }} # مفتاح Grok الجديد
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }} # مفتاح كوين
         run: python main.py
 
-      - name: Save Memory (Commit DB Only)
+      - name: Save Sovereign Memory
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Memory Update [Skip CI]"
-          # تم حذف الملف .log لتجنب خطأ المسار
+          commit_message: "Memory Update: Jook Analysis Synced [Skip CI]"
+          # نكتفي بحفظ قاعدة البيانات لضمان عدم تكرار الردود
           file_pattern: 'sovereign_v550.db'
           skip_dirty_check: false
