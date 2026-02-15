@@ -1,112 +1,142 @@
 import os
-import sqlite3
-import hashlib
 import time
 import random
-import re
-import logging
+import hashlib
 import yaml
+import sqlite3
+import logging
 from datetime import datetime
-import tweepy
 import feedparser
-import requests
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+import tweepy
 import google.generativeai as genai
+from dotenv import load_dotenv
 
+# تحميل متغيرات البيئة
 load_dotenv()
 
-class SovereignBot:
-    def __init__(self, config_path="utils/config.yaml"):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self.cfg = yaml.safe_load(f)
-        self._init_logging()
-        self._init_db()
-        self._init_clients()
+# -------------------------
+# إعداد اللوج (Logging)
+# -------------------------
+logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
+logger = logging.getLogger("SovereignBot")
 
-    def _init_logging(self):
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
-        self.logger = logging.getLogger('SovereignBot')
+# -------------------------
+# تحميل الإعدادات
+# -------------------------
+def load_config():
+    with open("utils/config.yaml", "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
-    def _init_db(self):
-        db_path = self.cfg['bot']['database_path']
-        os.makedirs(os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True)
-        with sqlite3.connect(db_path, timeout=30) as c:
-            c.execute("CREATE TABLE IF NOT EXISTS queue (h TEXT PRIMARY KEY, title TEXT, link TEXT, status TEXT DEFAULT 'PENDING')")
-            c.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-            c.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, created_at TEXT)")
+cfg = load_config()
 
-    def _init_clients(self):
-        # تهيئة X
-        try:
-            self.x = tweepy.Client(
-                bearer_token=os.getenv("X_BEARER_TOKEN"),
-                consumer_key=os.getenv("X_API_KEY"),
-                consumer_secret=os.getenv("X_API_SECRET"),
-                access_token=os.getenv("X_ACCESS_TOKEN"),
-                access_token_secret=os.getenv("X_ACCESS_SECRET"),
-                wait_on_rate_limit=True
-            )
-            self.logger.info("🛡️ X Client Ready")
-        except Exception as e:
-            self.logger.critical(f"🛑 X Error: {e}")
-            exit(1)
+# -------------------------
+# إعداد X Client و Gemini
+# -------------------------
+x_client = tweepy.Client(
+    bearer_token=os.getenv("X_BEARER_TOKEN"),
+    consumer_key=os.getenv("X_API_KEY"),
+    consumer_secret=os.getenv("X_API_SECRET"),
+    access_token=os.getenv("X_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("X_ACCESS_SECRET"),
+    wait_on_rate_limit=True
+)
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-    def is_sleep_time(self):
-        now = datetime.now().hour
-        start, end = self.cfg['bot'].get('sleep_start', 2), self.cfg['bot'].get('sleep_end', 8)
-        return start <= now < end if start < end else now >= start or now < end
+# -------------------------
+# إدارة قاعدة البيانات
+# -------------------------
+def get_db_conn():
+    conn = sqlite3.connect("data/sovereign.db", timeout=20)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, hash TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, content TEXT)")
+    conn.commit()
+    return conn, cursor
 
-    def _brain(self, content, mode):
-        sys_rules = self.cfg['prompts']['system_core']
-        prompt_tmpl = self.cfg['prompts']['modes'].get(mode, "{content}")
-        full_p = f"{sys_rules}\n\nالموضوع: {prompt_tmpl.format(content=content)}"
-        
-        # محاولة Gemini
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                res = model.generate_content(full_p)
-                if res.text: return res.text.strip()[:395]
-            except Exception as e:
-                self.logger.warning(f"🔄 Gemini Failed: {e}")
+def get_meta(key, default=None):
+    conn, cursor = get_db_conn()
+    cursor.execute("SELECT value FROM meta WHERE key=?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else default
 
-        # بصمة رقمية فريدة لمنع خطأ التكرار (403 Forbidden)
-        sig = hashlib.md5(str(time.time()).encode()).hexdigest()[:3]
-        return f"السيادة الرقمية هي ركيزة الاقتصاد الجديد في الثورة الصناعية الرابعة. [{sig}]"
+def update_meta(key, value):
+    conn, cursor = get_db_conn()
+    cursor.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", (key, value))
+    conn.commit()
+    conn.close()
 
-    def _scrape(self, url):
-        try:
-            r = requests.get(url, headers={'User-Agent': self.cfg['bot']['user_agent']}, timeout=10)
-            soup = BeautifulSoup(r.content, 'html.parser')
-            return " ".join([p.get_text() for p in soup.find_all('p')[:5]])[:1000]
-        except: return ""
+def is_duplicate(content):
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+    conn, cursor = get_db_conn()
+    cursor.execute("SELECT 1 FROM history WHERE hash=?", (content_hash,))
+    exists = cursor.fetchone() is not None
+    if not exists:
+        cursor.execute("INSERT INTO history (hash, content) VALUES (?,?)", (content_hash, content))
+        conn.commit()
+    conn.close()
+    return exists
 
-    def dispatch(self):
-        if self.is_sleep_time(): return
-        db_path = self.cfg['bot']['database_path']
-        with sqlite3.connect(db_path, timeout=30) as c:
-            row = c.execute("SELECT h, title, link FROM queue WHERE status='PENDING' ORDER BY RANDOM() LIMIT 1").fetchone()
-            if row:
-                text = self._brain(f"{row[1]} - {self._scrape(row[2])}", "POST_DEEP")
-                try:
-                    time.sleep(random.uniform(30, 90)) # تأخير بشري
-                    self.x.create_tweet(text=text)
-                    c.execute("UPDATE queue SET status='PUBLISHED' WHERE h=?", (row[0],))
-                    c.commit()
-                    self.logger.info("🚀 Tweet Sent")
-                except Exception as e: self.logger.error(f"❌ X Error: {e}")
+# -------------------------
+# جلب الأخبار الحديثة
+# -------------------------
+TECH_FEEDS = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://www.engadget.com/rss.xml",
+    "https://www.gsmarena.com/rss-news-releases.php"
+]
 
-    def run(self):
-        feed = feedparser.parse(self.cfg['sources']['rss_feeds'][0]['url'])
-        with sqlite3.connect(self.cfg['bot']['database_path'], timeout=30) as c:
-            for e in feed.entries[:10]:
-                h = hashlib.sha256(e.title.encode()).hexdigest()
-                c.execute("INSERT OR IGNORE INTO queue (h, title, link) VALUES (?,?,?)", (h, e.title, e.link))
-            c.commit()
-        self.dispatch()
+def fetch_latest_news(limit=5):
+    news_items = []
+    for feed_url in TECH_FEEDS:
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:limit]:
+            title = entry.title
+            link = entry.link
+            summary = entry.get("summary", "")
+            news_items.append(f"{title}\n{summary}\n{link}")
+    return news_items
 
-if __name__ == "__main__":
-    SovereignBot().run()
+# -------------------------
+# محركات الذكاء الاصطناعي
+# -------------------------
+def call_gemini_model(prompt):
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        full_prompt = f"{cfg['prompts']['system_core']}\n\nالسياق: {prompt}"
+        response = model.generate_content(full_prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"♊ Gemini Error: {e}")
+        return None
+
+def get_ai_response(prompt):
+    response = call_gemini_model(prompt)
+    if not response:
+        unique_id = hashlib.md5(str(time.time()).encode()).hexdigest()[:4]
+        response = f"السيادة الرقمية للفرد هي المستقبل. [{unique_id}]"
+    return response[:280]
+
+def ai_tweet_from_news(news_text):
+    prompt = f"{cfg['prompts']['system_core']}\n\nحول هذا الخبر إلى تغريدة ذكية قصيرة: {news_text}"
+    return get_ai_response(prompt)
+
+# -------------------------
+# المهام التشغيلية
+# -------------------------
+def dispatch_tweet_with_content(content):
+    if is_duplicate(content):
+        logger.info("🚫 Duplicate content detected. Skipping...")
+        return
+    today = datetime.now().date().isoformat()
+    count = int(get_meta(f"count_{today}", "0"))
+    if count >= cfg['bot'].get('daily_tweet_limit', 40):
+        logger.info("🚫 Daily limit reached.")
+        return
+    try:
+        x_client.create_tweet(text=content)
+        update_meta(f"count_{today}", str(count + 1))
+        logger.info(f"🚀 Tweet Dispatched: {content[:50]}...")
+    except Exception as e:
+        logger.error(f"❌ D
