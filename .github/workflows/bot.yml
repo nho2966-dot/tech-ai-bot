@@ -1,42 +1,103 @@
-name: Sovereign Elite Bot Runner
+# sovereign-config.yaml
+# تاريخ الإنشاء: 15 فبراير 2026
+# الغرض: إعدادات مركزية للبوت السيادي (SovereignBot)
 
-on:
-  schedule:
-    - cron: '45 * * * *'
-  workflow_dispatch:
+bot:
+  name: SovereignEnhanced
+  database: sovereign_v550.db
+  daily_max_tweets: 12
+  reply_delay_seconds: 45
+  rtl_control_characters:
+    embed: "\u202b"
+    mark: "\u200f"
+    pop: "\u202c"
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+sources:
+  rss_feeds:
+    - url: "https://www.jook.me/rss/technology"
+      priority: high
+      max_items: 5
+    - url: "https://www.arabnews.com/rss/technology"
+      priority: medium
+      max_items: 4
+    - url: "https://techcrunch.com/feed/"
+      priority: high
+      max_items: 6
+    - url: "https://www.theverge.com/rss/index.xml"
+      priority: high
+      max_items: 6
+    - url: "https://feeds.feedburner.com/Techmeme"
+      priority: high
+      max_items: 5
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+models:
+  priority_order:
+    - name: Groq-Free
+      type: openai
+      base_url: "https://api.groq.com/openai/v1"
+      env_key: GROQ_API_KEY
+      model: "llama-3.3-70b-versatile"
+      temperature: 0.6
+      max_tokens: 190
+      timeout: 35
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          cache: 'pip'
+    - name: Gemini-Flash
+      type: google
+      env_key: GOOGLE_API_KEY
+      model: "gemini-1.5-flash"
+      temperature: 0.6
+      max_output_tokens: 190
 
-      - name: Install
-        run: pip install tweepy feedparser requests openai python-dotenv
+    - name: OR-Free
+      type: openai
+      base_url: "https://openrouter.ai/api/v1"
+      env_key: OPENROUTER_API_KEY
+      model: "google/gemini-2.0-flash-exp:free"
+      temperature: 0.6
+      max_tokens: 190
 
-      - name: Execute
-        env:
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python main.py
+    - name: Grok-Brain
+      type: openai
+      base_url: "https://api.x.ai/v1"
+      env_key: XAI_API_KEY
+      model: "grok-4-1-fast-reasoning"
+      temperature: 0.6
+      max_tokens: 190
 
-      - name: Commit Memory
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Sync Sovereign Memory [Skip CI]"
-          file_pattern: 'sovereign_v550.db'
+twitter:
+  hashtags_default: " #سيادة_رقمية #HUMAIN_OS #AI2026"
+  poll:
+    enabled_probability: 0.30
+    duration_minutes: 1440
+    options:
+      - "اتفق بشدة"
+      - "أحتاج تفكير"
+      - "أرفض تماماً"
+  post_delay_min_seconds: 60
+  post_delay_max_seconds: 240
+
+prompts:
+  system: |
+    أنت مستشار تقني نخبوي خليجي. 
+    ابدأ بجملة صادمة أو صورة ذهنية قوية، اربطها مباشرة بالسيادة الرقمية للفرد (HUMAIN OS)، 
+    كن فلسفياً، عميقاً، مثيراً للنقاش، لغة وقورة لكن مشوقة. أقل من 240 حرف.
+
+  modes:
+    POST: "حلل بأسلوب 'جوك' الصادم والمثير: {content}"
+    REPLY: "رد فلسفي وقور ومثير للنقاش العميق: {content}"
+    TOOL_POST: "اقترح أداة ذكاء اصطناعي ثورية في 2026: {content}. قدم وصفاً صادماً، خطوتين فقط للاستفادة في سيادة الفرد، ثم سؤال استفزازي قوي."
+
+logging:
+  level: INFO
+  format: "%(asctime)s | %(levelname)s | %(message)s"
+  logger_name: SovereignPeak2026
+
+features:
+  ai_tools_posts:
+    enabled_probability: 0.35
+    topics:
+      - "إنتاجية"
+      - "خصوصية"
+      - "أتمتة"
+      - "إبداع"
+      - "سيادة رقمية"
