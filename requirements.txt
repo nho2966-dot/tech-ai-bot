@@ -1,7 +1,8 @@
-tweepy
-feedparser
-requests
-beautifulsoup4
-openai
-python-dotenv
-numpy
+tweepy==4.16.0
+feedparser==6.0.12
+requests==2.32.5
+beautifulsoup4==4.12.3
+openai==2.21.0
+python-dotenv==1.2.1
+google-genai==1.63.0
+pyyaml==6.0.3
