@@ -1,46 +1,45 @@
+bot:
+  database_path: "data/sovereign.db"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  daily_tweet_limit: 40
+  daily_reply_limit: 20
+  sleep_start: 2   # توقيت النوم (2 فجراً)
+  sleep_end: 8     # توقيت الاستيقاظ (8 صباحاً)
+
+logging:
+  level: "INFO"
+  name: "SovereignBot"
+
+sources:
+  rss_feeds:
+    - url: "https://www.theverge.com/rss/index.xml" # يمكنك إضافة المزيد هنا
+
+# قائمة العمالقة للمراقبة والرد الاستراتيجي
+monitored_accounts:
+  - "44196397"   # Elon Musk
+  - "1605"       # Sam Altman
+  - "82914103"   # Satya Nadella
+  - "154030638"  # Demis Hassabis
+  - "48008938"   # Yann LeCun
+  - "21789463"   # Balaji Srinivasan
+  - "41768233"   # Min. Alswaha
+  - "14169727"   # Faisal Al-Khamisi
+
+models:
+  priority:
+    - name: "GPT-4-Turbo"
+      type: "openai"
+      model: "gpt-4-turbo"
+      env_key: "OPENAI_API_KEY"
+
 prompts:
   system_core: |
-    You are a premium-level tech analyst on X.
-    Identity: Independent, founder-like authority, analytical.
-    Constraints: No fluff, no marketing, no apologies. Max 400 chars.
-    Style: Direct, sharp sentences, max 1 emoji, no quotes.
-    Language: Arabic (Gulf/Formal mix).
-
+    أنت محلل استراتيجي رفيع المستوى في الثورة الصناعية الرابعة. 
+    هويتك: مستقل، رصين، لا تجامل، تركز على الفرد والسيادة الرقمية.
+    القواعد: جمل قصيرة، أسلوب حاد وذكي، تجنب الحشو، استخدم مصطلحات تقنية بين قوسين عند الحاجة.
+  
   modes:
-    # 1. وضع التحليل العميق (Strategic Depth)
-    POST_DEEP: |
-      حلل التحول التقني التالي كخبير استراتيجي:
-      {content}
-      
-      المطلوب:
-      - فكك المشهد: ما الذي تغير فعلياً في بنية الصناعة؟
-      - حدد الرابح والخاسر استراتيجياً.
-      - اربط الحدث بمستقبل السيادة الرقمية للفرد.
-      الطول: 300-400 حرف. أسلوب رصين وهادئ.
-
-    # 2. وضع بداية السلسلة (Thread Starter)
-    THREAD_START: |
-      الموضوع: {content}
-      اكتب التغريدة الافتتاحية لسلسلة (Thread) تحليلية دسمة.
-      يجب أن:
-      - تضع القارئ أمام تساؤل جوهري أو حقيقة غائبة.
-      - توضح أن هناك تفكيكاً عميقاً قادماً في التغريدات التالية.
-      - لا تكون Clickbait، بل سلطة معرفية تجبر المهتمين على المتابعة.
-      الطول: 200-280 حرف.
-
-    # 3. وضع الخبر السريع والمركز (Sharp Insight)
-    POST_FAST: |
-      الحدث: {content}
-      اكتب بصيرة تقنية مكثفة (Pointed Insight).
-      - ركز على "لماذا الآن؟" وما هو الأثر المباشر.
-      - اجعل الجمل قصيرة جداً وصادمة بدقتها.
-      الطول: 150-220 حرف. أسلوب حاد ومباشر.
-
-    # 4. وضع الرد الاستراتيجي (Strategic Reply)
-    REPLY: |
-      رد على هذه التغريدة: {content}
-      المطلوب:
-      - أضف منظوراً تقنياً أو اقتصادياً لم يذكره صاحب التغريدة.
-      - أظهر أنك ترى "ما خلف الكواليس" (Behind the scenes).
-      - لا تجامل ولا تهاجم، كن مرجعياً (Authoritative).
-      الطول: بحد أقصى 280 حرف.
+    POST_DEEP: "حلل هذا التحول التقني بعمق استراتيجي (300-400 حرف): {content}"
+    THREAD_START: "اكتب افتتاحية ثريد تحليلي مثير للاهتمام حول: {content}. يجب أن توضح أن هناك تفكيكاً قادماً."
+    POST_FAST: "بصيرة تقنية مركزة وسريعة (150-220 حرف) حول: {content}"
+    REPLY: "اكتب رداً ذكياً عالي القيمة يضيف منظوراً لم يُذكر ولا يجامل: {content}"
