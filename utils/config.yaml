@@ -1,9 +1,114 @@
-x_api_keys:
-  api_key: "${X_API_KEY}"
-  api_secret: "${X_API_SECRET}"
-  access_token: "${X_ACCESS_TOKEN}"
-  access_secret: "${X_ACCESS_SECRET}"
-  bearer_token: "${X_BEARER_TOKEN}"
+# sovereign-config.yaml
+# تاريخ التحديث: 15 فبراير 2026
+# الغرض: إعدادات مركزية للبوت السيادي (SovereignBot) - تكلفة صفرية، تفاعل عالي، محتوى مثير
 
-gemini_config:
-  api_key: "${GEMINI_API_KEY}"
+bot:
+  name: SovereignPeak2026
+  version: "v5.50-enhanced"
+  database_path: "sovereign_v550.db"
+  daily_tweet_limit: 12
+  reply_delay_seconds: 45
+  post_delay:
+    min_seconds: 60
+    max_seconds: 240
+  rtl:
+    embed: "\u202b"
+    mark:   "\u200f"
+    pop:    "\u202c"
+
+api_keys:
+  # أسماء المتغيرات البيئية (من .env)
+  groq:         GROQ_API_KEY
+  google:       GOOGLE_API_KEY
+  openrouter:   OPENROUTER_API_KEY
+  xai:          XAI_API_KEY
+
+models:
+  priority:
+    - name: Groq-Free
+      type: openai
+      base_url: "https://api.groq.com/openai/v1"
+      model: "llama-3.3-70b-versatile"
+      temperature: 0.6
+      max_tokens: 190
+      timeout: 35
+
+    - name: Gemini-Flash
+      type: google
+      model: "gemini-1.5-flash"
+      temperature: 0.6
+      max_output_tokens: 190
+
+    - name: OR-Free
+      type: openai
+      base_url: "https://openrouter.ai/api/v1"
+      model: "google/gemini-2.0-flash-exp:free"
+      temperature: 0.6
+      max_tokens: 190
+
+    - name: Grok-Brain
+      type: openai
+      base_url: "https://api.x.ai/v1"
+      model: "grok-4-1-fast-reasoning"
+      temperature: 0.6
+      max_tokens: 190
+
+sources:
+  rss:
+    - url: "https://www.jook.me/rss/technology"
+      max_items: 5
+      weight: 1.0
+
+    - url: "https://www.arabnews.com/rss/technology"
+      max_items: 4
+      weight: 0.8
+
+    - url: "https://techcrunch.com/feed/"
+      max_items: 6
+      weight: 1.5
+
+    - url: "https://www.theverge.com/rss/index.xml"
+      max_items: 6
+      weight: 1.5
+
+    - url: "https://feeds.feedburner.com/Techmeme"
+      max_items: 5
+      weight: 1.2
+
+features:
+  ai_tools_posts:
+    enabled: true
+    probability: 0.35
+    topics:
+      - "إنتاجية"
+      - "خصوصية"
+      - "أتمتة"
+      - "إبداع"
+      - "سيادة رقمية"
+
+  polls:
+    enabled_probability: 0.30
+    duration_minutes: 1440
+    default_options:
+      - "اتفق بشدة"
+      - "أحتاج تفكير"
+      - "أرفض تماماً"
+
+  hashtags:
+    default: " #سيادة_رقمية #HUMAIN_OS #AI2026"
+
+prompts:
+  system_core: |
+    أنت مستشار تقني نخبوي خليجي. 
+    ابدأ بجملة صادمة أو صورة ذهنية قوية، اربطها مباشرة بالسيادة الرقمية للفرد (HUMAIN OS)، 
+    كن فلسفياً، عميقاً، مثيراً للنقاش، لغة وقورة لكن مشوقة. أقل من 240 حرف.
+
+  modes:
+    POST:          "حلل بأسلوب 'جوك' الصادم والمثير: {content}"
+    REPLY:         "رد فلسفي وقور ومثير للنقاش العميق: {content}"
+    TOOL_POST:     "اقترح أداة ذكاء اصطناعي ثورية في 2026: {content}. قدم وصفاً صادماً، خطوتين فقط للاستفادة في سيادة الفرد، ثم سؤال استفزازي قوي."
+
+logging:
+  level: INFO
+  format: "%(asctime)s | %(levelname)s | %(message)s"
+  name: SovereignPeak2026
