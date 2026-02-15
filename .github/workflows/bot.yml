@@ -1,44 +1,28 @@
-name: SovereignBot 2026 Run
+name: Sovereign Cycle
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # يعمل رأس كل ساعة
+  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # تحديث نسخة بايثون إلى 3.11 لتفادي تحذيرات Google
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          python-version: '3.11'
-
+          python-version: '3.9'
       - name: Install dependencies
         run: |
-          pip install tweepy feedparser requests openai python-dotenv google-genai pyyaml beautifulsoup4
-      - name: Run SovereignBot
+          pip install tweepy feedparser requests beautifulsoup4 python-dotenv openai PyYAML
+      - name: Run Bot
         env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: python main.py
-
-      - name: Commit and Push DB Changes
-        run: |
-          git config --global user.name "SovereignBot-Bot"
-          git config --global user.email "bot@sovereign.peak"
-          git add sovereign_v550.db
-          git commit -m "Update Sovereign Database [skip ci]" || echo "No changes to commit"
-          git push
