@@ -2,18 +2,17 @@ name: Sovereign AI Bot Run
 
 on:
   schedule:
-    - cron: '0 * * * *' # تشغيل تلقائي كل ساعة
-  workflow_dispatch:      # إمكانية التشغيل اليدوي للتجربة
+    - cron: '0 * * * *' # تشغيل كل ساعة
+  workflow_dispatch:      # تشغيل يدوي
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -24,9 +23,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Execute Sovereign Bot
-        # هذا القسم هو الأهم لربط الأسرار بالكود
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # هنا تم ربط مفتاحك GEMINI_KEY بالاسم الذي يحتاجه الكود
+          GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
