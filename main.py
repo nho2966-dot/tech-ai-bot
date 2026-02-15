@@ -13,6 +13,7 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
+# دعم مكتبة Google GenAI لعام 2026
 try:
     from google import genai
     from google.genai import types
@@ -35,7 +36,7 @@ class SovereignBot:
         self._init_logging()
         self._init_db()
 
-        # Google GenAI Init
+        # تهيئة محرك ذكاء جوجل
         self.google_client = None
         google_key = os.getenv(self.cfg['api_keys'].get('google', 'GOOGLE_API_KEY'))
         if google_key and genai is not None:
@@ -45,12 +46,14 @@ class SovereignBot:
             except Exception as e:
                 self.logger.error(f"⚠️ Google GenAI Init Failed: {e}")
 
-        # X (Twitter) Client Init
+        # تهيئة الاتصال بمنصة X
         try:
             self.x = tweepy.Client(
                 bearer_token=os.getenv("X_BEARER_TOKEN"),
-                consumer_key=os.getenv("X_API_KEY"),                consumer_secret=os.getenv("X_API_SECRET"),
-                access_token=os.getenv("X_ACCESS_TOKEN"),           access_token_secret=os.getenv("X_ACCESS_SECRET"),
+                consumer_key=os.getenv("X_API_KEY"),
+                consumer_secret=os.getenv("X_API_SECRET"),
+                access_token=os.getenv("X_ACCESS_TOKEN"),
+                access_token_secret=os.getenv("X_ACCESS_SECRET"),
                 wait_on_rate_limit=True
             )
             me = self.x.get_me(user_auth=True)
@@ -117,12 +120,11 @@ class SovereignBot:
             except Exception as e:
                 self.logger.warning(f"🔄 Bypass {model_cfg['name']}: {str(e)[:50]}")
                 continue
-        return f"{rtl['embed']}{rtl['mark']}السيادة الرقمية تبدأ من الوعي بالتقنية.{rtl['pop']}"
+        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو القوة في عصر الثورة الرابعة.{rtl['pop']}"
 
     def fetch(self):
         headers = {'User-Agent': self.cfg['bot']['user_agent']}
         feeds = self.cfg.get('sources', {}).get('rss_feeds', [])
-        
         for feed_cfg in feeds:
             url = feed_cfg.get('url') if isinstance(feed_cfg, dict) else feed_cfg
             try:
@@ -136,9 +138,9 @@ class SovereignBot:
                     with sqlite3.connect(self.cfg['bot']['database_path']) as conn:
                         conn.execute("INSERT OR IGNORE INTO queue (h, title) VALUES (?,?)", (h, title))
                         conn.commit()
-                self.logger.info(f"📡 Fetched: {url}")
+                self.logger.info(f"📡 RSS Done: {url}")
             except Exception as e:
-                self.logger.error(f"❌ RSS Error ({url}): {e}")
+                self.logger.error(f"❌ RSS Failed ({url}): {e}")
 
     def handle_interactions(self):
         last_id = self._get_meta("last_mention_id", "1")
@@ -155,13 +157,16 @@ class SovereignBot:
                         self.x.create_tweet(text=reply, in_reply_to_tweet_id=m.id)
                         c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(m.id), datetime.now().isoformat()))
                         c.commit()
+                        time.sleep(2) # فاصل بسيط بين الردود
             self._update_meta("last_mention_id", new_last)
         except: pass
 
     def dispatch(self):
         today = datetime.now().date().isoformat()
         count = int(self._get_meta(f"daily_count_{today}", "0"))
-        if count >= self.cfg['bot']['daily_tweet_limit']: return
+        if count >= self.cfg['bot']['daily_tweet_limit']:
+            self.logger.info("📅 Daily limit reached.")
+            return
         
         content, queue_hash = None, None
         with sqlite3.connect(self.cfg['bot']['database_path']) as c:
@@ -176,6 +181,7 @@ class SovereignBot:
 
         if content:
             try:
+                self.logger.info(f"📝 Preparing to post: {content[:50]}...")
                 poll_cfg = self.cfg['twitter'].get('poll', {})
                 if random.random() < poll_cfg.get('enabled_probability', 0):
                     self.x.create_tweet(
@@ -193,7 +199,7 @@ class SovereignBot:
                         c2.execute("UPDATE queue SET status='PUBLISHED' WHERE h=?", (queue_hash,))
                         c2.commit()
                 self._update_meta(f"daily_count_{today}", str(count + 1))
-                self.logger.info("🚀 Published Successfully")
+                self.logger.info("🚀 TWEET PUBLISHED SUCCESSFULLY!")
             except Exception as e:
                 self.logger.error(f"❌ Dispatch Error: {e}")
 
@@ -208,9 +214,17 @@ class SovereignBot:
             c.commit()
 
     def run(self):
+        self.logger.info("⚙️ Starting Sovereign Cycle v550...")
+        # 1. Fetch data (Internal, no X API cost)
         self.fetch()
-        self.handle_interactions()
+        
+        # 2. Priority: Dispatch Tweet
         self.dispatch()
+        
+        # 3. Handle Interactions (After delay to avoid rate limits)
+        time.sleep(10) 
+        self.handle_interactions()
+        self.logger.info("🏁 Cycle Completed.")
 
 if __name__ == "__main__":
     bot = SovereignBot("utils/config.yaml")
