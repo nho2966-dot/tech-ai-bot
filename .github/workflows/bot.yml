@@ -19,10 +19,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          pip install tweepy feedparser requests openai python-dotenv google-genai pyyaml
-
+          pip install tweepy feedparser requests openai python-dotenv google-genai pyyaml beautifulsoup4
       - name: Run SovereignBot
         env:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
