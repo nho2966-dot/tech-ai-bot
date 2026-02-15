@@ -27,9 +27,9 @@ monitored_accounts:
 
 models:
   priority:
-    - name: "GPT-4-Turbo"
+    - name: "GPT-4o"
       type: "openai"
-      model: "gpt-4-turbo"
+      model: "gpt-4o" # تم التغيير من gpt-4-turbo إلى gpt-4o
       env_key: "OPENAI_API_KEY"
 
 prompts:
