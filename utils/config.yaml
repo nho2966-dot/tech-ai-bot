@@ -1,114 +1,96 @@
-# sovereign-config.yaml
-# تاريخ التحديث: 15 فبراير 2026
-# الغرض: إعدادات مركزية للبوت السيادي (SovereignBot) - تكلفة صفرية، تفاعل عالي، محتوى مثير
+# 🛡️ إعدادات النظام السيادي v550.2026
 
+# مفاتيح الربط - الأسماء هنا يجب أن تطابق الأسماء في Secrets (GitHub) أو ملف .env
+api_keys:
+  google: "GOOGLE_API_KEY"
+  openai: "OPENAI_API_KEY"
+
+# إعدادات البوت العامة
 bot:
-  name: SovereignPeak2026
-  version: "v5.50-enhanced"
-  database_path: "sovereign_v550.db"
+  database_path: "data/sovereign_v550.db"
   daily_tweet_limit: 12
   reply_delay_seconds: 45
+  user_agent: "SovereignBot/2026 (Industry 4.0 Focus)"
   post_delay:
-    min_seconds: 60
-    max_seconds: 240
+    min_seconds: 600
+    max_seconds: 1800
+  # إعدادات دعم اللغة العربية (Right-to-Left)
   rtl:
-    embed: "\u202b"
-    mark:   "\u200f"
-    pop:    "\u202c"
+    embed: "\u202B"
+    mark: "🛡️ "
+    pop: ""
 
-api_keys:
-  # أسماء المتغيرات البيئية (من .env)
-  groq:         GROQ_API_KEY
-  google:       GOOGLE_API_KEY
-  openrouter:   OPENROUTER_API_KEY
-  xai:          XAI_API_KEY
-
+# نماذج الذكاء الاصطناعي وترتيب الأولويات
 models:
   priority:
-    - name: Groq-Free
-      type: openai
-      base_url: "https://api.groq.com/openai/v1"
-      model: "llama-3.3-70b-versatile"
-      temperature: 0.6
-      max_tokens: 190
-      timeout: 35
+    - name: "Gemini 2.0 Pro"
+      type: "google"
+      model: "gemini-2.0-pro-exp-02-05" # تحديث 2026
+      env_key: "GOOGLE_API_KEY"
+      temperature: 0.7
+      max_output_tokens: 250
+    
+    - name: "GPT-4o"
+      type: "openai"
+      model: "gpt-4o"
+      env_key: "OPENAI_API_KEY"
+      temperature: 0.7
+      max_tokens: 250
 
-    - name: Gemini-Flash
-      type: google
-      model: "gemini-1.5-flash"
-      temperature: 0.6
-      max_output_tokens: 190
-
-    - name: OR-Free
-      type: openai
-      base_url: "https://openrouter.ai/api/v1"
-      model: "google/gemini-2.0-flash-exp:free"
-      temperature: 0.6
-      max_tokens: 190
-
-    - name: Grok-Brain
-      type: openai
-      base_url: "https://api.x.ai/v1"
-      model: "grok-4-1-fast-reasoning"
-      temperature: 0.6
-      max_tokens: 190
-
-sources:
-  rss:
-    - url: "https://www.jook.me/rss/technology"
-      max_items: 5
-      weight: 1.0
-
-    - url: "https://www.arabnews.com/rss/technology"
-      max_items: 4
-      weight: 0.8
-
-    - url: "https://techcrunch.com/feed/"
-      max_items: 6
-      weight: 1.5
-
-    - url: "https://www.theverge.com/rss/index.xml"
-      max_items: 6
-      weight: 1.5
-
-    - url: "https://feeds.feedburner.com/Techmeme"
-      max_items: 5
-      weight: 1.2
-
-features:
-  ai_tools_posts:
-    enabled: true
-    probability: 0.35
-    topics:
-      - "إنتاجية"
-      - "خصوصية"
-      - "أتمتة"
-      - "إبداع"
-      - "سيادة رقمية"
-
-  polls:
-    enabled_probability: 0.30
-    duration_minutes: 1440
-    default_options:
-      - "اتفق بشدة"
-      - "أحتاج تفكير"
-      - "أرفض تماماً"
-
-  hashtags:
-    default: " #سيادة_رقمية #HUMAIN_OS #AI2026"
-
+# الأوامر التوجيهية (Prompts) لضمان جودة المحتوى
 prompts:
-  system_core: |
-    أنت مستشار تقني نخبوي خليجي. 
-    ابدأ بجملة صادمة أو صورة ذهنية قوية، اربطها مباشرة بالسيادة الرقمية للفرد (HUMAIN OS)، 
-    كن فلسفياً، عميقاً، مثيراً للنقاش، لغة وقورة لكن مشوقة. أقل من 240 حرف.
+  system_core: >
+    أنت خبير تقني في الثورة الصناعية الرابعة (Industry 4.0). 
+    تحدث بلهجة خليجية بيضاء، احترافية وذكية. 
+    ركز على الفرد وكيف يستفيد من التقنية (الذكاء الاصطناعي، الأتمتة، البيانات). 
+    ممنوع استخدام أي لغة غير العربية (إلا المصطلحات التقنية بين قوسين). 
+    ممنوع الهلوسة أو المعلومات القديمة. 
+    اجعل التغريدة قصيرة، قوية، وتحث على التفكير.
 
   modes:
-    POST:          "حلل بأسلوب 'جوك' الصادم والمثير: {content}"
-    REPLY:         "رد فلسفي وقور ومثير للنقاش العميق: {content}"
-    TOOL_POST:     "اقترح أداة ذكاء اصطناعي ثورية في 2026: {content}. قدم وصفاً صادماً، خطوتين فقط للاستفادة في سيادة الفرد، ثم سؤال استفزازي قوي."
+    POST: "حلل الخبر التالي بأسلوب استراتيجي يركز على تمكين الأفراد: {content}"
+    REPLY: "رد على هذا المنشن بذكاء وأدب، وعزز فكرة السيادة التقنية: {content}"
+    TOOL_POST: "تحدث عن أداة ذكاء اصطناعي (AI Tool) في مجال {content} تفيد الفرد في حياته المهنية."
 
+# مصادر الأخبار (RSS Feeds)
+sources:
+  rss_feeds:
+    - url: "https://www.arabnews.com/rss/technology"
+      max_items: 5
+    - url: "https://techcrunch.com/feed/"
+      max_items: 5
+    - url: "https://www.theverge.com/rss/index.xml"
+      max_items: 3
+    - url: "https://feeds.feedburner.com/Techmeme"
+      max_items: 5
+
+# الميزات المتقدمة
+features:
+  hashtags:
+    default: " #الذكاء_الاصطناعي #الثورة_الصناعية_الرابعة #السيادة_الرقمية"
+  
+  ai_tools_posts:
+    enabled: true
+    probability: 0.40 # 40% من التغريدات ستكون عن أدوات AI
+    topics:
+      - "تحليل البيانات الشخصية"
+      - "أتمتة المهام اليومية"
+      - "صناعة المحتوى الإبداعي"
+      - "البرمجة بدون كود (No-code)"
+      - "الأمن السيبراني للفرد"
+
+# إعدادات منصة X (التفاعل والاستطلاعات)
+twitter:
+  poll:
+    enabled_probability: 0.25 # 25% من التغريدات ستتضمن استطلاع رأي
+    duration_minutes: 1440
+    default_options:
+      - "أتفق تماماً"
+      - "أحتاج لمزيد من البحث"
+      - "التقنية مخيفة"
+
+# إعدادات السجلات (Logs)
 logging:
-  level: INFO
+  name: "SovereignLog"
+  level: "INFO"
   format: "%(asctime)s | %(levelname)s | %(message)s"
-  name: SovereignPeak2026
