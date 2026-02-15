@@ -1,28 +1,42 @@
-name: Sovereign Cycle
+name: SovereignBot CI
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: '0 * * * *' # يعمل رأس كل ساعة
-  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
+    - cron: "0 * * * *"  # تشغيل كل ساعة، يمكن تغييره
 
 jobs:
-  build:
+  build-and-run:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python
-        uses: actions/setup-python@v2
+      # 1. استنساخ الريبو
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # 2. إعداد بايثون 3.11
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: 3.11
+
+      # 3. تثبيت المكتبات المطلوبة بالإصدارات المحددة
       - name: Install dependencies
         run: |
-          pip install tweepy feedparser requests beautifulsoup4 python-dotenv openai PyYAML
-      - name: Run Bot
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. تشغيل البوت
+      - name: Run SovereignBot
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_ACCOUNT_ID: ${{ secrets.X_ACCOUNT_ID }}
         run: python main.py
