@@ -2,9 +2,8 @@ name: SovereignBot 2026 Run
 
 on:
   schedule:
-    # تشغيل كل ساعة (يمكنك تعديل التوقيت حسب رغبتك)
     - cron: '0 * * * *'
-  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً للتجربة
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,18 +13,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      # تحديث نسخة بايثون إلى 3.11 لتفادي تحذيرات Google
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Dependencies
         run: |
-          pip install tweepy feedparser requests openai python-dotenv google-generativeai pyyaml
+          pip install tweepy feedparser requests openai python-dotenv google-genai pyyaml
 
       - name: Run SovereignBot
         env:
-          # ربط أسرار GitHub ببيئة التشغيل
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
@@ -35,7 +34,7 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-        run: python main.py # تأكد أن اسم ملف الكود هو main.py
+        run: python main.py
 
       - name: Commit and Push DB Changes
         run: |
