@@ -14,39 +14,24 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from openai import OpenAI
 
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = None
-    types = None
-
 load_dotenv()
 
 class SovereignBot:
     def __init__(self, config_path="utils/config.yaml"):
-        self.cfg = None
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                self.cfg = yaml.safe_load(f)
-        except Exception as e:
-            print(f"❌ Error loading config: {e}")
-            exit(1)
+        with open(config_path, 'r', encoding='utf-8') as f:
+            self.cfg = yaml.safe_load(f)
 
         self._init_logging()
         self._init_db()
 
-        # تهيئة الذكاء الاصطناعي
-        self.google_client = None
-        google_key = os.getenv(self.cfg['api_keys'].get('google', 'GOOGLE_API_KEY'))
-        if google_key and genai is not None:
-            try:
-                self.google_client = genai.Client(api_key=google_key)
-                self.logger.info("✅ Google GenAI Initialized")
-            except Exception as e:
-                self.logger.error(f"⚠️ Google GenAI Init Failed: {e}")
+        # تهيئة OpenAI مع دعم العمق التحليلي
+        self.openai_clients = []
+        for model_cfg in self.cfg['models']['priority']:
+            api_key = os.getenv(model_cfg['env_key'])
+            if api_key and model_cfg['type'] == "openai":
+                self.openai_clients.append((model_cfg, OpenAI(api_key=api_key, base_url=model_cfg.get('base_url'))))
 
-        # تهيئة منصة X
+        # تهيئة عميل X
         try:
             self.x = tweepy.Client(
                 bearer_token=os.getenv("X_BEARER_TOKEN"),
@@ -58,19 +43,21 @@ class SovereignBot:
             )
             me = self.x.get_me(user_auth=True)
             self.bot_id = str(me.data.id) if me and me.data else None
-            self.logger.info(f"🛡️ Connected to X | ID: {self.bot_id}")
+            self.logger.info(f"🛡️ Sovereign Bot Active | ID: {self.bot_id}")
         except Exception as e:
-            self.logger.critical(f"🛑 X API Failed: {e}")
+            self.logger.critical(f"🛑 Connection Failed: {e}")
             exit(1)
+
+        self.monitored_accounts = self.cfg.get('monitored_accounts', [])
 
     def _init_logging(self):
         l_cfg = self.cfg.get('logging', {})
         logging.basicConfig(
             level=getattr(logging, l_cfg.get('level', 'INFO')),
-            format=l_cfg.get('format', '%(asctime)s | %(levelname)s | %(message)s'),
+            format='%(asctime)s | %(levelname)s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        self.logger = logging.getLogger(l_cfg.get('name', 'SovereignBot'))
+        self.logger = logging.getLogger('SovereignBot')
 
     def _init_db(self):
         db_path = self.cfg['bot']['database_path']
@@ -81,131 +68,101 @@ class SovereignBot:
             c.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, created_at TEXT)")
             c.commit()
 
+    def is_sleep_time(self):
+        """بروتوكول التخفي: التوقف في ساعات النوم لمحاكاة البشر"""
+        current_hour = datetime.now().hour
+        start = self.cfg['bot'].get('sleep_start', 2)
+        end = self.cfg['bot'].get('sleep_end', 8)
+        if start < end:
+            return start <= current_hour < end
+        return current_hour >= start or current_hour < end
+
     def _scrape_article(self, url):
         try:
             headers = {'User-Agent': self.cfg['bot']['user_agent']}
             r = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(r.content, 'html.parser')
             paragraphs = soup.find_all('p')
-            article_text = " ".join([p.get_text() for p in paragraphs[:8]])
-            return article_text[:1500]
-        except Exception as e:
-            self.logger.warning(f"⚠️ Scrape failed for {url}: {e}")
-            return ""
+            return " ".join([p.get_text() for p in paragraphs[:8]])[:1500]
+        except: return ""
 
-    def _brain(self, content: str = "", mode: str = "POST") -> str:
+    def _brain(self, content: str, mode: str):
         sys_rules = self.cfg['prompts']['system_core']
         prompt_tmpl = self.cfg['prompts']['modes'].get(mode, "{content}")
         user_prompt = prompt_tmpl.format(content=content)
-        rtl = self.cfg['bot']['rtl']
 
-        for model_cfg in self.cfg['models']['priority']:
-            api_key = os.getenv(model_cfg['env_key'])
-            if not api_key: continue
+        for model_cfg, client in self.openai_clients:
             try:
-                text = ""
-                if model_cfg['type'] == "openai":
-                    client = OpenAI(api_key=api_key, base_url=model_cfg.get('base_url'))
-                    res = client.chat.completions.create(
-                        model=model_cfg['model'],
-                        messages=[{"role": "system", "content": sys_rules}, {"role": "user", "content": user_prompt}],
-                        temperature=0.7, max_tokens=250
-                    )
-                    text = res.choices[0].message.content.strip()
-                elif model_cfg['type'] == "google" and self.google_client:
-                    res = self.google_client.models.generate_content(
-                        model=model_cfg['model'],
-                        config=types.GenerateContentConfig(system_instruction=sys_rules, temperature=0.7, max_output_tokens=250),
-                        contents=[{"role": "user", "parts": [{"text": user_prompt}]}]
-                    )
-                    text = res.candidates[0].content.parts[0].text.strip()
+                res = client.chat.completions.create(
+                    model=model_cfg['model'],
+                    messages=[{"role": "system", "content": sys_rules},
+                              {"role": "user", "content": user_prompt}],
+                    temperature=0.7, # توازن بين الإبداع والرصانة
+                    max_tokens=450
+                )
+                text = res.choices[0].message.content.strip()
+                text = re.sub(r'<.*?>', '', text)
                 
-                if not text: continue
-                text = re.sub(r'<(thinking|reasoning|think)>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
-                text = text[:230].rstrip(' .,!؟')
-                # إضافة إيموجي هادف حسب سياق الرد
-                return f"{rtl['embed']}{rtl['mark']}{text}{self.cfg['features']['hashtags']['default']}{rtl['pop']}"
+                # تنويع طول النص لكسر النمط الآلي
+                limit = 400 if mode in ["POST_DEEP", "THREAD_START"] else 280
+                max_len = random.randint(min(200, limit), limit)
+                return text[:max_len].rstrip(' .,!؟')
             except Exception as e:
-                self.logger.warning(f"🔄 Bypass {model_cfg['name']}: {str(e)[:50]}")
-                continue
-        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو القوة المطلقة في عصرنا الحاضر.{rtl['pop']}"
-
-    def fetch(self):
-        headers = {'User-Agent': self.cfg['bot']['user_agent']}
-        feeds = self.cfg.get('sources', {}).get('rss_feeds', [])
-        for feed_cfg in feeds:
-            url = feed_cfg.get('url') if isinstance(feed_cfg, dict) else feed_cfg
-            try:
-                r = requests.get(url, headers=headers, timeout=15)
-                feed = feedparser.parse(r.content)
-                for e in feed.entries[:5]:
-                    title = (e.get('title') or "").strip()
-                    link = e.get('link') or ""
-                    if not title: continue
-                    h = hashlib.sha256(title.encode('utf-8')).hexdigest()
-                    with sqlite3.connect(self.cfg['bot']['database_path']) as conn:
-                        conn.execute("INSERT OR IGNORE INTO queue (h, title, link) VALUES (?,?,?)", (h, title, link))
-                        conn.commit()
-                self.logger.info(f"📡 RSS Sync Completed: {url}")
-            except Exception as e:
-                self.logger.error(f"❌ RSS Error: {e}")
-
-    def handle_interactions(self):
-        """الرد الذكي على المنشنز باستخدام سياق المحادثة"""
-        last_id = self._get_meta("last_mention_id", "1")
-        try:
-            mentions = self.x.get_users_mentions(id=self.bot_id, since_id=last_id, max_results=10)
-            if not mentions or not mentions.data: return
-            
-            new_last = last_id
-            for m in mentions.data:
-                new_last = max(new_last, str(m.id))
-                with sqlite3.connect(self.cfg['bot']['database_path']) as c:
-                    # التحقق من عدم الرد مرتين على نفس الشخص في نفس المنشن
-                    if c.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(m.id),)).fetchone(): continue
-                    
-                    self.logger.info(f"💬 Analyzing mention from ID: {m.id}")
-                    reply_text = self._brain(m.text, "REPLY")
-                    
-                    if reply_text:
-                        self.x.create_tweet(text=reply_text, in_reply_to_tweet_id=m.id)
-                        c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(m.id), datetime.now().isoformat()))
-                        c.commit()
-                        self.logger.info(f"✅ Replied to mention: {m.id}")
-                        time.sleep(5) # فاصل زمني لتجنب الـ Rate Limit
-            self._update_meta("last_mention_id", new_last)
-        except Exception as e:
-            self.logger.error(f"⚠️ Interaction Error: {e}")
+                self.logger.warning(f"🔄 AI Bypass: {e}")
+        return "السيادة التقنية هي حجر الزاوية في عصر الذكاء."
 
     def dispatch(self):
+        if self.is_sleep_time(): return
+
         today = datetime.now().date().isoformat()
         count = int(self._get_meta(f"daily_count_{today}", "0"))
-        if count >= self.cfg['bot']['daily_tweet_limit']: return
-        
-        content, queue_hash = None, None
-        with sqlite3.connect(self.cfg['bot']['database_path']) as c:
-            if random.random() < self.cfg['features']['ai_tools_posts']['probability']:
-                topic = random.choice(self.cfg['features']['ai_tools_posts']['topics'])
-                content = self._brain(topic, "TOOL_POST")
-            else:
-                row = c.execute("SELECT h, title, link FROM queue WHERE status='PENDING' ORDER BY RANDOM() LIMIT 1").fetchone()
-                if row:
-                    article_body = self._scrape_article(row[2])
-                    input_text = f"Title: {row[1]}\nContext: {article_body}" if article_body else row[1]
-                    content = self._brain(input_text, "POST")
-                    queue_hash = row[0]
+        last_ts = int(self._get_meta(f"last_post_ts_{today}", "0"))
 
-        if content:
+        if count >= self.cfg['bot'].get('daily_tweet_limit', 40): return
+        if time.time() - last_ts < 7200: return # فاصل ساعتين
+
+        with sqlite3.connect(self.cfg['bot']['database_path']) as c:
+            row = c.execute("SELECT h, title, link FROM queue WHERE status='PENDING' ORDER BY RANDOM() LIMIT 1").fetchone()
+            if row:
+                article = self._scrape_article(row[2])
+                dice = random.random()
+                mode = "THREAD_START" if dice < 0.2 else ("POST_DEEP" if len(article) > 700 else "POST_FAST")
+                
+                content = self._brain(f"Title: {row[1]}\nContext: {article}", mode)
+                if content:
+                    try:
+                        time.sleep(random.uniform(30, 120)) # تأخير عشوائي بشري
+                        self.x.create_tweet(text=content)
+                        c.execute("UPDATE queue SET status='PUBLISHED' WHERE h=?", (row[0],))
+                        self._update_meta(f"daily_count_{today}", str(count + 1))
+                        self._update_meta(f"last_post_ts_{today}", str(int(time.time())))
+                        self.logger.info(f"🚀 Published: {mode}")
+                    except Exception as e:
+                        self.logger.error(f"❌ Dispatch Error: {e}")
+
+    def handle_replies(self):
+        if self.is_sleep_time(): return
+        
+        today = datetime.now().date().isoformat()
+        r_count = int(self._get_meta(f"replies_today_{today}", "0"))
+        if r_count >= self.cfg['bot'].get('daily_reply_limit', 20): return
+
+        for acc in self.monitored_accounts:
             try:
-                self.x.create_tweet(text=content)
-                if queue_hash:
-                    with sqlite3.connect(self.cfg['bot']['database_path']) as c2:
-                        c2.execute("UPDATE queue SET status='PUBLISHED' WHERE h=?", (queue_hash,))
-                        c2.commit()
-                self._update_meta(f"daily_count_{today}", str(count + 1))
-                self.logger.info("🚀 Sovereign Tweet Dispatched!")
-            except Exception as e:
-                self.logger.error(f"❌ Dispatch Error: {e}")
+                tweets = self.x.get_users_tweets(id=acc, max_results=5).data or []
+                for t in tweets:
+                    with sqlite3.connect(self.cfg['bot']['database_path']) as c:
+                        if c.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(t.id),)).fetchone(): continue
+                        
+                        reply = self._brain(t.text, "REPLY")
+                        time.sleep(random.uniform(60, 180)) # تأخير أطول للردود
+                        self.x.create_tweet(text=reply, in_reply_to_tweet_id=t.id)
+                        
+                        c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(t.id), datetime.now().isoformat()))
+                        self._update_meta(f"replies_today_{today}", str(r_count + 1))
+                        self.logger.info(f"💬 Strategic Reply to {acc}")
+                        return # رد واحد لكل دورة لحماية الحساب
+            except: continue
 
     def _get_meta(self, key, default="0"):
         with sqlite3.connect(self.cfg['bot']['database_path']) as c:
@@ -219,12 +176,18 @@ class SovereignBot:
 
     def run(self):
         self.logger.info("⚙️ Sovereign Cycle Initiated...")
-        self.fetch()
+        # 1. جلب الأخبار
+        feed = feedparser.parse(self.cfg['sources']['rss_feeds'][0]['url'])
+        for e in feed.entries[:5]:
+            h = hashlib.sha256(e.title.encode()).hexdigest()
+            with sqlite3.connect(self.cfg['bot']['database_path']) as c:
+                c.execute("INSERT OR IGNORE INTO queue (h, title, link) VALUES (?,?,?)", (h, e.title, e.link))
+        
+        # 2. النشر والرد
         self.dispatch()
-        time.sleep(15) # انتظار أمان قبل فحص التفاعلات
-        self.handle_interactions()
+        self.handle_replies()
         self.logger.info("🏁 Cycle Completed.")
 
 if __name__ == "__main__":
-    bot = SovereignBot("utils/config.yaml")
+    bot = SovereignBot()
     bot.run()
