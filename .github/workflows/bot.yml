@@ -1,18 +1,19 @@
-name: Sovereign Bot Runner
+name: Sovereign AI Bot Run
 
 on:
   schedule:
-    - cron: '0 * * * *' # يعمل كل ساعة
-  workflow_dispatch: # للتشغيل اليدوي
+    - cron: '0 * * * *' # تشغيل تلقائي كل ساعة
+  workflow_dispatch:      # إمكانية التشغيل اليدوي للتجربة
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
 
-      - name: Set up Python
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -22,8 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Sovereign Bot
-        # هنا يكمن الحل: تمرير الأسرار لمتغيرات البيئة
+      - name: Execute Sovereign Bot
+        # هذا القسم هو الأهم لربط الأسرار بالكود
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
