@@ -13,7 +13,7 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# دعم مكتبة Google GenAI لعام 2026
+# دعم مكتبة Google GenAI الحديثة 2026
 try:
     from google import genai
     from google.genai import types
@@ -30,23 +30,23 @@ class SovereignBot:
             with open(config_path, 'r', encoding='utf-8') as f:
                 self.cfg = yaml.safe_load(f)
         except Exception as e:
-            print(f"❌ Error loading config: {e}")
+            print(f"❌ Error loading config file: {e}")
             exit(1)
 
         self._init_logging()
         self._init_db()
 
-        # تهيئة محرك ذكاء جوجل
+        # تهيئة عملاء الذكاء الاصطناعي
         self.google_client = None
         google_key = os.getenv(self.cfg['api_keys'].get('google', 'GOOGLE_API_KEY'))
         if google_key and genai is not None:
             try:
                 self.google_client = genai.Client(api_key=google_key)
-                self.logger.info("✅ Google GenAI Initialized")
+                self.logger.info("✅ Google GenAI Client Initialized")
             except Exception as e:
-                self.logger.error(f"⚠️ Google GenAI Init Failed: {e}")
+                self.logger.error(f"⚠️ Google Client Init Failed: {e}")
 
-        # تهيئة الاتصال بمنصة X
+        # تهيئة عميل منصة X مع دعم معالجة حدود الطلبات تلقائياً
         try:
             self.x = tweepy.Client(
                 bearer_token=os.getenv("X_BEARER_TOKEN"),
@@ -60,7 +60,7 @@ class SovereignBot:
             self.bot_id = str(me.data.id) if me and me.data else None
             self.logger.info(f"🛡️ Connected to X | ID: {self.bot_id}")
         except Exception as e:
-            self.logger.critical(f"🛑 X API Failed: {e}")
+            self.logger.critical(f"🛑 X API Connection Failed: {e}")
             exit(1)
 
     def _init_logging(self):
@@ -87,6 +87,7 @@ class SovereignBot:
         user_prompt = prompt_tmpl.format(content=content)
         rtl = self.cfg['bot']['rtl']
 
+        # تجربة النماذج حسب الأولية المحددة في YAML
         for model_cfg in self.cfg['models']['priority']:
             api_key = os.getenv(model_cfg['env_key'])
             if not api_key: continue
@@ -114,13 +115,15 @@ class SovereignBot:
                     text = res.candidates[0].content.parts[0].text.strip()
                 
                 if not text: continue
+                # تنظيف النص من أي وسوم تفكير داخلية (Thinking tags)
                 text = re.sub(r'<(thinking|reasoning|think)>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
                 text = text[:230].rstrip(' .,!؟')
                 return f"{rtl['embed']}{rtl['mark']}{text}{self.cfg['features']['hashtags']['default']}{rtl['pop']}"
             except Exception as e:
-                self.logger.warning(f"🔄 Bypass {model_cfg['name']}: {str(e)[:50]}")
+                self.logger.warning(f"🔄 Bypass {model_cfg['name']}: {str(e)[:50]}...")
                 continue
-        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو القوة في عصر الثورة الرابعة.{rtl['pop']}"
+        # نص احتياطي في حال فشل جميع النماذج
+        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو درعك في العصر الرقمي.{rtl['pop']}"
 
     def fetch(self):
         headers = {'User-Agent': self.cfg['bot']['user_agent']}
@@ -138,7 +141,7 @@ class SovereignBot:
                     with sqlite3.connect(self.cfg['bot']['database_path']) as conn:
                         conn.execute("INSERT OR IGNORE INTO queue (h, title) VALUES (?,?)", (h, title))
                         conn.commit()
-                self.logger.info(f"📡 RSS Done: {url}")
+                self.logger.info(f"📡 RSS Sync: {url}")
             except Exception as e:
                 self.logger.error(f"❌ RSS Failed ({url}): {e}")
 
@@ -157,7 +160,7 @@ class SovereignBot:
                         self.x.create_tweet(text=reply, in_reply_to_tweet_id=m.id)
                         c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(m.id), datetime.now().isoformat()))
                         c.commit()
-                        time.sleep(2) # فاصل بسيط بين الردود
+                        time.sleep(2) # حماية من السبام
             self._update_meta("last_mention_id", new_last)
         except: pass
 
@@ -170,6 +173,7 @@ class SovereignBot:
         
         content, queue_hash = None, None
         with sqlite3.connect(self.cfg['bot']['database_path']) as c:
+            # احتمالية نشر أداة AI أو خبر من الـ RSS
             if random.random() < self.cfg['features']['ai_tools_posts']['probability']:
                 topic = random.choice(self.cfg['features']['ai_tools_posts']['topics'])
                 content = self._brain(topic, "TOOL_POST")
@@ -181,13 +185,12 @@ class SovereignBot:
 
         if content:
             try:
-                self.logger.info(f"📝 Preparing to post: {content[:50]}...")
                 poll_cfg = self.cfg['twitter'].get('poll', {})
                 if random.random() < poll_cfg.get('enabled_probability', 0):
                     self.x.create_tweet(
                         text=content,
                         poll={
-                            "options": poll_cfg.get('default_options', ["نعم", "لا"]),
+                            "options": poll_cfg.get('default_options', ["أتفق", "أحتاج بحث"]),
                             "duration_minutes": poll_cfg.get('duration_minutes', 1440)
                         }
                     )
@@ -215,14 +218,10 @@ class SovereignBot:
 
     def run(self):
         self.logger.info("⚙️ Starting Sovereign Cycle v550...")
-        # 1. Fetch data (Internal, no X API cost)
+        # ترتيب العمليات لضمان النشر قبل استهلاك حدود API
         self.fetch()
-        
-        # 2. Priority: Dispatch Tweet
         self.dispatch()
-        
-        # 3. Handle Interactions (After delay to avoid rate limits)
-        time.sleep(10) 
+        time.sleep(10) # فاصل زمني للأمان
         self.handle_interactions()
         self.logger.info("🏁 Cycle Completed.")
 
