@@ -1,128 +1,185 @@
 import os
 import time
-import yaml
 import random
+import hashlib
+import sqlite3
+import logging
 import feedparser
 import tweepy
-import requests
+import google.generativeai as genai
+from datetime import datetime
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-import openai
-from google import genai  # استخدام google-genai v1.63.0
 
-# تحميل المفاتيح من .env
+# 1. الإعدادات واللوج (Logging)
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
-
-# إعدادات OpenAI و Gemini
-openai.api_key = OPENAI_API_KEY
-client_genai = genai.TextGenerationClient(api_key=GEMINI_API_KEY)
-
-# تحميل الإعدادات من YAML
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-
-# إعداد تويتر
-auth = tweepy.OAuth1UserHandler(
-    TWITTER_API_KEY, TWITTER_API_SECRET,
-    TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    level=logging.INFO,
+    handlers=[logging.FileHandler("sovereign_bot.log"), logging.StreamHandler()]
 )
-twitter = tweepy.API(auth, wait_on_rate_limit=True)
+logger = logging.getLogger("SovereignBot")
 
-# مراقبة الحسابات الاستراتيجية
-monitored_accounts = config.get("monitored_accounts", [])
+# 2. محرك الذكاء الاصطناعي (Gemini) مع تخصيص اللهجة والأسلوب
+class SovereignAI:
+    def __init__(self, api_key):
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.sys_prompt = (
+            "أنت خبير تقني سيادي في الثورة الصناعية الرابعة. "
+            "أسلوبك: خليجي بيضاء، رصين، مباشر، حاد الذكاء. "
+            "الهدف: تمكين الأفراد تقنياً. تجنب الكليشيهات والرموز الكثيرة."
+        )
 
-# RSS feeds
-rss_feeds = config.get("sources", {}).get("rss_feeds", [])
+    def generate(self, prompt, max_chars=280, creative=False):
+        try:
+            config = genai.types.GenerationConfig(temperature=0.8 if creative else 0.4)
+            full_prompt = f"{self.sys_prompt}\n\nالمهمة: {prompt}"
+            response = self.model.generate_content(full_prompt, generation_config=config)
+            # إضافة بصمة رقمية غير مرئية لمنع التكرار الصارم في X
+            safe_suffix = "\n\u200b" + "".join(random.choices(["\u200c", "\u200b"], k=3))
+            return (response.text.strip() + safe_suffix)[:max_chars]
+        except Exception as e:
+            logger.error(f"AI Error: {e}")
+            return None
 
-# حدود النشر والرد
-DAILY_TWEET_LIMIT = 3
-DAILY_REPLY_LIMIT = 10
+# 3. إدارة الذاكرة وقاعدة البيانات (SQLite)
+class BotMemory:
+    def __init__(self, db_path="data/sovereign.db"):
+        os.makedirs("data", exist_ok=True)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self._setup()
 
-# توقيت النوم
-SLEEP_START = config.get("bot", {}).get("sleep_start", 2)
-SLEEP_END = config.get("bot", {}).get("sleep_end", 8)
+    def _setup(self):
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, type TEXT, ts TEXT)")
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        self.conn.commit()
 
-def in_sleep_hours():
-    current_hour = time.localtime().tm_hour
-    return SLEEP_START <= current_hour < SLEEP_END
+    def is_duplicate(self, content):
+        h = hashlib.md5(content.strip().encode()).hexdigest()
+        self.cursor.execute("SELECT 1 FROM history WHERE hash=?", (h,))
+        if self.cursor.fetchone(): return True
+        self.cursor.execute("INSERT INTO history VALUES (?, 'POST', ?)", (h, datetime.now().isoformat()))
+        self.conn.commit()
+        return False
 
-# وظائف مساعدة
-def get_rss_articles():
-    articles = []
-    for feed in rss_feeds:
-        parsed = feedparser.parse(feed["url"])
-        for entry in parsed.entries[:5]:
-            articles.append(entry.title + " " + entry.link)
-    return articles
+    def get_meta(self, key, default="0"):
+        self.cursor.execute("SELECT value FROM meta WHERE key=?", (key,))
+        row = self.cursor.fetchone()
+        return row[0] if row else default
 
-def generate_tweet(content, mode="POST_FAST"):
-    prompt_template = config["prompts"]["modes"].get(mode, "{content}")
-    prompt = prompt_template.format(content=content)
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "system", "content": config["prompts"]["system_core"]},
-                  {"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=200
-    )
-    return response.choices[0].message.content.strip()
+    def set_meta(self, key, value):
+        self.cursor.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
+        self.conn.commit()
 
-def generate_reply(tweet_content):
-    prompt = config["prompts"]["modes"]["REPLY"].format(content=tweet_content)
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "system", "content": config["prompts"]["system_core"]},
-                  {"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=150
-    )
-    return response.choices[0].message.content.strip()
+# 4. المنظومة التشغيلية المتكاملة
+class SovereignBot:
+    def __init__(self):
+        self.ai = SovereignAI(os.getenv("GEMINI_API_KEY"))
+        self.memory = BotMemory()
+        self.x = tweepy.Client(
+            bearer_token=os.getenv("X_BEARER_TOKEN"),
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET"),
+            wait_on_rate_limit=True
+        )
+        self.acc_id = os.getenv("X_ACCOUNT_ID")
 
-def post_tweet(text):
-    try:
-        twitter.update_status(status=text)
-        print(f"Tweeted: {text}")
-    except Exception as e:
-        print(f"Error posting tweet: {e}")
-
-def reply_to_tweet(tweet_id, text):
-    try:
-        twitter.update_status(status=text, in_reply_to_status_id=tweet_id, auto_populate_reply_metadata=True)
-        print(f"Replied: {text}")
-    except Exception as e:
-        print(f"Error replying: {e}")
-
-def main():
-    # نشر التغريدات اليومية
-    if not in_sleep_hours():
-        articles = get_rss_articles()
-        daily_tweets = random.sample(articles, min(DAILY_TWEET_LIMIT, len(articles)))
-        for tweet in daily_tweets:
-            content = generate_tweet(tweet)
-            post_tweet(content)
-            time.sleep(10)
-
-        # الردود على التغريدات الجديدة من الحسابات المراقبة
-        for account_id in monitored_accounts:
+    def fetch_news(self):
+        feeds = [
+            "https://www.theverge.com/rss/index.xml",
+            "https://techcrunch.com/feed/",
+            "https://www.engadget.com/rss.xml"
+        ]
+        news = []
+        for url in feeds:
             try:
-                tweets = twitter.user_timeline(user_id=account_id, count=20)
-                replied = 0
-                for t in tweets:
-                    if replied >= DAILY_REPLY_LIMIT:
-                        break
-                    if not t.favorited:
-                        reply_text = generate_reply(t.text)
-                        reply_to_tweet(t.id, reply_text)
-                        replied += 1
-                        time.sleep(5)
+                f = feedparser.parse(url)
+                for entry in f.entries[:5]:
+                    news.append({"title": entry.title, "link": entry.link})
+            except: continue
+        return news
+
+    def is_peak_hour(self):
+        # توقيت مكة المكرمة/دبي: الصباح، الظهر، والمساء
+        current_hour = datetime.now().hour
+        peak_hours = [8, 9, 10, 13, 14, 15, 20, 21, 22, 23]
+        return current_hour in peak_hours
+
+    def post_strategic_content(self):
+        """نشر 'Scoop' تقني + Thread + Poll"""
+        news = self.fetch_news()
+        if not news: return
+        
+        # اختيار خبر عشوائي لم ينشر من قبل
+        random.shuffle(news)
+        selected = news[0]
+        
+        # 1. التغريدة الأساسية (Main Scoop)
+        prompt = f"حلل هذا الخبر بأسلوب 'السبق الصحفي' للأفراد في منطقتنا: {selected['title']} {selected['link']}"
+        main_text = self.ai.generate(prompt, creative=True)
+        
+        if main_text and not self.memory.is_duplicate(main_text):
+            try:
+                resp = self.x.create_tweet(text=main_text)
+                main_id = resp.data['id']
+                logger.info(f"🚀 Main Tweet Published: {main_id}")
+
+                # 2. السلسلة التحليلية (Thread)
+                thread_prompt = f"اكتب نقطة تحليلية واحدة عميقة حول أثر هذا الخبر على الفرد تقنياً: {selected['title']}"
+                thread_text = self.ai.generate(thread_prompt, max_chars=280)
+                time.sleep(10)
+                thread_resp = self.x.create_tweet(text=thread_text, in_reply_to_tweet_id=main_id)
+
+                # 3. الاستطلاع (Poll) لزيادة التفاعل
+                self.x.create_tweet(
+                    text="بناءً على هذا التحول، كيف ترى جاهزية الفرد العربي لتبني هذه التقنية؟",
+                    poll_options=["جاهزية عالية", "نحتاج وعي أكبر", "تخوف من الخصوصية", "تأثير محدود"],
+                    poll_duration_minutes=1440,
+                    in_reply_to_tweet_id=thread_resp.data['id']
+                )
             except Exception as e:
-                print(f"Error fetching/replying to {account_id}: {e}")
+                logger.error(f"X Post Error: {e}")
+
+    def smart_replies(self):
+        """الردود الذكية الصارمة بناءً على المنشنات"""
+        last_id = self.memory.get_meta("last_mention_id", "1")
+        try:
+            mentions = self.x.get_users_mentions(id=self.acc_id, since_id=last_id)
+            if not mentions.data: return
+
+            for tweet in reversed(mentions.data):
+                if self.memory.is_duplicate(f"reply_{tweet.id}"): continue
+                if str(tweet.author_id) == str(self.acc_id): continue # لا يرد على نفسه
+
+                # فلتر الصلة بالذكاء الاصطناعي وادواته
+                tech_keywords = ["ai", "ذكاء", "تقنية", "مستقبل", "صناعة", "روبوت", "تطوير"]
+                if any(k in tweet.text.lower() for k in tech_keywords):
+                    reply = self.ai.generate(f"رد بذكاء ووقار تقني على: {tweet.text}", max_chars=200)
+                    self.x.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                    logger.info(f"💬 Replied to {tweet.id}")
+                    time.sleep(15)
+            
+            self.memory.set_meta("last_mention_id", mentions.data[0].id)
+        except Exception as e:
+            logger.error(f"Replies Error: {e}")
+
+    def run(self):
+        logger.info("🛡️ Sovereign Bot Active Cycle Initiated")
+        
+        # دائماً تفقد الردود
+        self.smart_replies()
+        
+        # النشر الاستراتيجي في أوقات الذروة فقط
+        if self.is_peak_hour():
+            last_post_hour = self.memory.get_meta("last_post_hour", "-1")
+            if last_post_hour != str(datetime.now().hour):
+                self.post_strategic_content()
+                self.memory.set_meta("last_post_hour", str(datetime.now().hour))
+        
+        logger.info("🏁 Cycle Completed.")
 
 if __name__ == "__main__":
-    main()
+    SovereignBot().run()
