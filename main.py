@@ -10,7 +10,7 @@ from datetime import datetime
 import tweepy
 import feedparser
 import requests
-from bs4 import BeautifulSoup  # المكتبة الجديدة
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -82,15 +82,13 @@ class SovereignBot:
             c.commit()
 
     def _scrape_article(self, url):
-        """قراءة محتوى المقال بالكامل وتجهيزه للذكاء الاصطناعي"""
         try:
             headers = {'User-Agent': self.cfg['bot']['user_agent']}
             r = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(r.content, 'html.parser')
-            # استخراج النص من الفقرات فقط لتقليل الضجيج
             paragraphs = soup.find_all('p')
-            article_text = " ".join([p.get_text() for p in paragraphs[:8]]) # جلب أول 8 فقرات
-            return article_text[:1500] # العودة بأول 1500 حرف كحد أقصى
+            article_text = " ".join([p.get_text() for p in paragraphs[:8]])
+            return article_text[:1500]
         except Exception as e:
             self.logger.warning(f"⚠️ Scrape failed for {url}: {e}")
             return ""
@@ -125,11 +123,12 @@ class SovereignBot:
                 if not text: continue
                 text = re.sub(r'<(thinking|reasoning|think)>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
                 text = text[:230].rstrip(' .,!؟')
+                # إضافة إيموجي هادف حسب سياق الرد
                 return f"{rtl['embed']}{rtl['mark']}{text}{self.cfg['features']['hashtags']['default']}{rtl['pop']}"
             except Exception as e:
                 self.logger.warning(f"🔄 Bypass {model_cfg['name']}: {str(e)[:50]}")
                 continue
-        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو درعك في العصر الرقمي.{rtl['pop']}"
+        return f"{rtl['embed']}{rtl['mark']}الوعي التقني هو القوة المطلقة في عصرنا الحاضر.{rtl['pop']}"
 
     def fetch(self):
         headers = {'User-Agent': self.cfg['bot']['user_agent']}
@@ -139,8 +138,7 @@ class SovereignBot:
             try:
                 r = requests.get(url, headers=headers, timeout=15)
                 feed = feedparser.parse(r.content)
-                max_items = 5
-                for e in feed.entries[:max_items]:
+                for e in feed.entries[:5]:
                     title = (e.get('title') or "").strip()
                     link = e.get('link') or ""
                     if not title: continue
@@ -148,9 +146,36 @@ class SovereignBot:
                     with sqlite3.connect(self.cfg['bot']['database_path']) as conn:
                         conn.execute("INSERT OR IGNORE INTO queue (h, title, link) VALUES (?,?,?)", (h, title, link))
                         conn.commit()
-                self.logger.info(f"📡 RSS Done: {url}")
+                self.logger.info(f"📡 RSS Sync Completed: {url}")
             except Exception as e:
                 self.logger.error(f"❌ RSS Error: {e}")
+
+    def handle_interactions(self):
+        """الرد الذكي على المنشنز باستخدام سياق المحادثة"""
+        last_id = self._get_meta("last_mention_id", "1")
+        try:
+            mentions = self.x.get_users_mentions(id=self.bot_id, since_id=last_id, max_results=10)
+            if not mentions or not mentions.data: return
+            
+            new_last = last_id
+            for m in mentions.data:
+                new_last = max(new_last, str(m.id))
+                with sqlite3.connect(self.cfg['bot']['database_path']) as c:
+                    # التحقق من عدم الرد مرتين على نفس الشخص في نفس المنشن
+                    if c.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(m.id),)).fetchone(): continue
+                    
+                    self.logger.info(f"💬 Analyzing mention from ID: {m.id}")
+                    reply_text = self._brain(m.text, "REPLY")
+                    
+                    if reply_text:
+                        self.x.create_tweet(text=reply_text, in_reply_to_tweet_id=m.id)
+                        c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(m.id), datetime.now().isoformat()))
+                        c.commit()
+                        self.logger.info(f"✅ Replied to mention: {m.id}")
+                        time.sleep(5) # فاصل زمني لتجنب الـ Rate Limit
+            self._update_meta("last_mention_id", new_last)
+        except Exception as e:
+            self.logger.error(f"⚠️ Interaction Error: {e}")
 
     def dispatch(self):
         today = datetime.now().date().isoformat()
@@ -165,9 +190,8 @@ class SovereignBot:
             else:
                 row = c.execute("SELECT h, title, link FROM queue WHERE status='PENDING' ORDER BY RANDOM() LIMIT 1").fetchone()
                 if row:
-                    # ميزة التحليل العميق: سحب محتوى المقال أولاً
                     article_body = self._scrape_article(row[2])
-                    input_text = f"العنوان: {row[1]}\nالمحتوى: {article_body}" if article_body else row[1]
+                    input_text = f"Title: {row[1]}\nContext: {article_body}" if article_body else row[1]
                     content = self._brain(input_text, "POST")
                     queue_hash = row[0]
 
@@ -179,27 +203,9 @@ class SovereignBot:
                         c2.execute("UPDATE queue SET status='PUBLISHED' WHERE h=?", (queue_hash,))
                         c2.commit()
                 self._update_meta(f"daily_count_{today}", str(count + 1))
-                self.logger.info("🚀 TWEET PUBLISHED (Deep Analysis Mode)")
+                self.logger.info("🚀 Sovereign Tweet Dispatched!")
             except Exception as e:
                 self.logger.error(f"❌ Dispatch Error: {e}")
-
-    def handle_interactions(self):
-        last_id = self._get_meta("last_mention_id", "1")
-        try:
-            mentions = self.x.get_users_mentions(id=self.bot_id, since_id=last_id, max_results=5)
-            if not mentions or not mentions.data: return
-            new_last = last_id
-            for m in mentions.data:
-                new_last = max(new_last, str(m.id))
-                with sqlite3.connect(self.cfg['bot']['database_path']) as c:
-                    if c.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(m.id),)).fetchone(): continue
-                    reply = self._brain(m.text, "REPLY")
-                    if reply:
-                        self.x.create_tweet(text=reply, in_reply_to_tweet_id=m.id)
-                        c.execute("INSERT INTO replies (tweet_id, created_at) VALUES (?,?)", (str(m.id), datetime.now().isoformat()))
-                        c.commit()
-            self._update_meta("last_mention_id", new_last)
-        except: pass
 
     def _get_meta(self, key, default="0"):
         with sqlite3.connect(self.cfg['bot']['database_path']) as c:
@@ -212,10 +218,12 @@ class SovereignBot:
             c.commit()
 
     def run(self):
+        self.logger.info("⚙️ Sovereign Cycle Initiated...")
         self.fetch()
         self.dispatch()
-        time.sleep(10)
+        time.sleep(15) # انتظار أمان قبل فحص التفاعلات
         self.handle_interactions()
+        self.logger.info("🏁 Cycle Completed.")
 
 if __name__ == "__main__":
     bot = SovereignBot("utils/config.yaml")
