@@ -13,12 +13,8 @@ logging:
 sources:
   rss_feeds:
     - url: "https://www.theverge.com/rss/index.xml"
-    - url: "https://www.engadget.com/rss.xml"
-    - url: "https://techcrunch.com/feed/"
-    - url: "https://arstechnica.com/feed/"
-    - url: "https://www.gsmarena.com/rss-news-releases.php"
-    - url: "https://9to5mac.com/feed/"
-    - url: "https://www.anandtech.com/rss"
+    - url: "https://www.techcrunch.com/feed/"
+    - url: "https://www.gsmarena.com/rss-news-reviews.php"
 
 monitored_accounts:
   - "44196397"   # Elon Musk
@@ -29,8 +25,6 @@ monitored_accounts:
   - "21789463"   # Balaji Srinivasan
   - "41768233"   # Min. Alswaha
   - "14169727"   # Faisal Al-Khamisi
-  - "28364225"   # Marques Brownlee (MKBHD)
-  - "752673"     # Linus Sebastian
 
 models:
   priority:
@@ -38,7 +32,7 @@ models:
       type: "openai"
       model: "gpt-4o"
       env_key: "OPENAI_API_KEY"
-    - name: "Gemini-1.5-Flash"
+    - name: "Gemini"
       type: "gemini"
       model: "gemini-1.5-flash"
       env_key: "GEMINI_API_KEY"
@@ -49,6 +43,33 @@ prompts:
     هويتك: مستقل، رصين، لا تجامل، تركز على الفرد والسيادة الرقمية.
     القواعد: جمل قصيرة، أسلوب حاد وذكي، تجنب الحشو، استخدم مصطلحات تقنية بين قوسين عند الحاجة.
 
+  topics:
+    devices:
+      - "أحدث الهواتف الذكية وإصداراتها الجديدة مقابل القديمة."
+      - "مقارنة بين أجهزة اللابتوب الرائدة من Apple وSamsung."
+      - "أجهزة اللوحية الذكية وتفوقها في 2026."
+      - "أحدث سماعات وأكسسوارات Wearables."
+    
+    tech_news:
+      - "تسريبات موثوقة عن أجهزة جديدة من كبار المصنعين."
+      - "ابتكارات الذكاء الاصطناعي للأفراد: أدوات إنتاجية وتحليل بيانات."
+      - "تحديثات الأمن السيبراني والثغرات الأخيرة."
+    
+    ai_usage:
+      - "استخدام الذكاء الاصطناعي لإنتاج المحتوى الشخصي."
+      - "أدوات AI مفتوحة المصدر وأحدث واجهاتها."
+      - "تأثير AI على سيادة الفرد الرقمية."
+      - "نصائح للتحكم بالبيانات عند استخدام أدوات AI."
+    
+    social_engineering:
+      - "تكتيكات الهندسة الاجتماعية الحديثة وحماية الحسابات."
+      - "تحليل التسريبات الرقمية وأثرها على الأفراد."
+    
+    general_tech:
+      - "تحديثات الأنظمة: Windows, MacOS, Android, iOS."
+      - "مراجعات سريعة لأدوات وتقنيات جديدة."
+      - "تسليط الضوء على الشركات التقنية الرائدة وابتكاراتها."
+    
   modes:
     POST_DEEP: "حلل هذا التحول التقني بعمق استراتيجي (300-400 حرف): {content}"
     THREAD_START: "اكتب افتتاحية ثريد تحليلي مثير للاهتمام حول: {content}. يجب أن توضح أن هناك تفكيكاً قادماً."
