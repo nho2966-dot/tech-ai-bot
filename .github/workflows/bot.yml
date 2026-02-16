@@ -1,41 +1,29 @@
-name: Sovereign AI Bot v2
+name: Sovereign Task Final
 on:
   schedule:
-    - cron: '0 */6 * * *' # يعمل كل 6 ساعات لضمان التفاعل المستمر
+    - cron: '0 */3 * * *' # يعمل كل 3 ساعات لضمان عدم تجاوز الكوتا أبداً
   workflow_dispatch:
 
 jobs:
-  execute-sovereign-task:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
-      - name: Install Essentials
-        run: pip install -r requirements.txt
-
-      - name: Deploy Sovereign Engine
+      - run: pip install -r requirements.txt
+      - name: Run Sovereign Bot
         env:
-          # مفاتيح AI (كما تظهر في صورتك)
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          
-          # مفاتيح X (Twitter)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
-
-      - name: Cache Memory
+      - name: Cache Database
         uses: actions/upload-artifact@v4
         with:
-          name: sovereign-memory
+          name: bot-memory
           path: sovereign_memory.db
