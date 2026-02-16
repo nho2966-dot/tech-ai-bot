@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SovereignBot")
 
-# 2. محرك الذكاء الاصطناعي (Gemini 2.0) - التركيز على القيمة العملية
+# 2. محرك الذكاء الاصطناعي (Gemini 2.0)
 class SovereignAI:
     def __init__(self, api_key):
         if not api_key:
@@ -30,8 +30,8 @@ class SovereignAI:
         self.sys_prompt = (
             "أنت مستشار استراتيجي في الذكاء الاصطناعي وأحدث أدواته. "
             "أسلوبك: احترافي جداً، رصين، مباشر، وخليجي بيضاء وقورة. "
-            "المهمة: تحليل أدوات AI الجديدة فور صدورها وشرح (كيفية الاستخدام) و(الفائدة العملية الملموسة) للمتابع. "
-            "تجنب الرموز الكثيرة والحشو الإنشائي. ركز على التمكين الرقمي للفرد."
+            "المهمة: تحليل أدوات AI الجديدة فور صدورها وشرح قيمتها الملموسة. "
+            "تجنب الرموز الكثيرة والحشو الإنشائي."
         )
 
     def generate(self, prompt, max_chars=280, creative=False):
@@ -42,11 +42,8 @@ class SovereignAI:
                 max_output_tokens=400
             )
             response = self.client.models.generate_content(
-                model=self.model_id,
-                contents=prompt,
-                config=config
+                model=self.model_id, contents=prompt, config=config
             )
-            # بصمة رقمية مشفرة (Invisible Fingerprint) لمنع الحظر
             safe_suffix = "\n\u200b" + "".join(random.choices(["\u200c", "\u200b"], k=3))
             return (response.text.strip() + safe_suffix)[:max_chars]
         except Exception as e:
@@ -83,15 +80,14 @@ class BotMemory:
         self.cursor.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
         self.conn.commit()
 
-# 4. المنظومة التشغيلية المتكاملة
+# 4. المنظومة التشغيلية
 class SovereignBot:
     def __init__(self):
-        # توافقية مع اسم المفتاح الخاص بك GEMINI_KEY
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
         self.ai = SovereignAI(api_key)
         self.memory = BotMemory()
         
-        # إعداد X Client
+        # تم إغلاق القوس بشكل صحيح هنا
         self.x = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -99,3 +95,41 @@ class SovereignBot:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET"),
             wait_on_rate_limit=True
+        )
+        self.acc_id = os.getenv("X_ACCOUNT_ID")
+
+    def fetch_ai_scoops(self):
+        feeds = [
+            "https://www.futuretools.io/rss",
+            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
+        ]
+        news = []
+        for url in feeds:
+            try:
+                f = feedparser.parse(url)
+                for entry in f.entries[:5]:
+                    news.append({"title": entry.title, "link": entry.link})
+            except: continue
+        return news
+
+    def post_strategic_content(self):
+        news = self.fetch_ai_scoops()
+        if not news: return
+        selected = random.choice(news)
+        
+        prompt = f"حلل أداة AI هذه برؤية عملية: {selected['title']}. الرابط: {selected['link']}"
+        main_text = self.ai.generate(prompt, creative=True)
+        
+        if main_text and not self.memory.is_duplicate(main_text):
+            try:
+                self.x.create_tweet(text=main_text)
+                logger.info("🚀 Tweet Published Successfully")
+            except Exception as e:
+                logger.error(f"X Post Error: {e}")
+
+    def run(self):
+        # تشغيل المنطق الأساسي
+        self.post_strategic_content()
+
+if __name__ == "__main__":
+    SovereignBot().run()
