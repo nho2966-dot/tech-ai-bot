@@ -1,82 +1,77 @@
 import os
 import logging
-import time
-from google import genai  # مكتبة Gemini
-import openai
+import feedparser
 import tweepy
+from google import genai
+from dotenv import load_dotenv
 
-# إعدادات Logging
+# --- 1. الإعدادات والذاكرة الفائقة ---
+load_dotenv()
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-# ==== 1. إعداد مفاتيح البيئة ====
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# --- 2. مفاتيح API ---
 TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
 TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
 TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
-GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")  # JSON
+TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
 
-# ==== 2. إعداد عملاء الذكاء الاصطناعي ====
-
-# Gemini (Google GenAI)
-gemini_client = genai.GenAIClient()
-
-# OpenAI
-openai.api_key = OPENAI_API_KEY
-
-# Tweepy
+# --- 3. إعداد Twitter API ---
 auth = tweepy.OAuth1UserHandler(
     TWITTER_API_KEY, TWITTER_API_SECRET,
-    TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET
+    TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET
 )
-twitter_client = tweepy.API(auth)
+twitter_api = tweepy.API(auth)
 
-# ==== 3. دوال استدعاء الذكاء الاصطناعي ====
+# --- 4. إعداد Google GenAI ---
+gemini_client = genai.TextGenerationClient()  # ⚡ الإصلاح الأساسي هنا
+
+# --- 5. مثال على استخدام GenAI ---
 def call_gemini(prompt):
-    """استدعاء Gemini (Google GenAI)"""
     try:
         response = gemini_client.generate_text(
             model="gemini-2.0-flash",
             prompt=prompt
         )
+        # بعض الإصدارات قد تحتاج response.result بدل response.text
         return response.text
     except Exception as e:
         logging.error(f"Gemini error: {e}")
         return None
 
-def call_openai(prompt):
-    """استدعاء OpenAI GPT"""
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"OpenAI error: {e}")
-        return None
+# --- 6. قراءة RSS --- 
+RSS_FEEDS = [
+    "https://www.theverge.com/rss/index.xml",
+    "https://techcrunch.com/feed/"
+]
 
-# ==== 4. دالة نشر التغريدة ====
-def post_tweet(text):
-    try:
-        twitter_client.update_status(text)
-        logging.info("تم نشر التغريدة بنجاح ✅")
-    except Exception as e:
-        logging.error(f"Twitter error: {e}")
+def fetch_news():
+    articles = []
+    for feed in RSS_FEEDS:
+        d = feedparser.parse(feed)
+        for entry in d.entries[:3]:  # آخر 3 أخبار من كل مصدر
+            articles.append({
+                "title": entry.title,
+                "link": entry.link
+            })
+    return articles
 
-# ==== 5. التشغيل الرئيسي ====
+# --- 7. نشر التغريدات باستخدام الذكاء الاصطناعي ---
+def tweet_news():
+    news_list = fetch_news()
+    for news in news_list:
+        prompt = f"اكتب تغريدة جذابة ومختصرة عن الخبر التالي:\n{news['title']}\nرابط: {news['link']}"
+        tweet_text = call_gemini(prompt)
+        if tweet_text:
+            try:
+                twitter_api.update_status(tweet_text)
+                logging.info(f"✅ تم نشر التغريدة: {tweet_text[:50]}...")
+            except Exception as e:
+                logging.error(f"خطأ في نشر التغريدة: {e}")
+        else:
+            logging.warning("تخطي خبر بسبب خطأ في الذكاء الاصطناعي")
+
+# --- 8. تشغيل البوت ---
 if __name__ == "__main__":
-    prompt = "اكتب تغريدة جذابة عن أحدث أخبار الذكاء الاصطناعي."
-    
-    # تجربة Gemini أولاً
-    tweet_text = call_gemini(prompt)
-    
-    # إذا فشل Gemini جرب OpenAI
-    if not tweet_text:
-        tweet_text = call_openai(prompt)
-    
-    if tweet_text:
-        post_tweet(tweet_text)
-    else:
-        logging.error("فشل في توليد التغريدة من كلا الخدمتين ❌")
+    logging.info("🚀 بدء تشغيل البوت...")
+    tweet_news()
+    logging.info("🏁 انتهى التشغيل.")
