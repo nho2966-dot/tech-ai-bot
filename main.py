@@ -1,126 +1,110 @@
 import os
 import time
 import random
-import hashlib
-import sqlite3
 import logging
 import feedparser
 import tweepy
-from datetime import datetime
-from dotenv import load_dotenv
-
-# استيراد المكتبات الخاصة بالمحركات الثلاثة
 from google import genai
 from google.genai import types
 from openai import OpenAI as OpenAIClient
 
-# 1. إعدادات النظام واللوج
-load_dotenv()
+# 1. إعدادات النظام
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("SovereignFailover")
+logger = logging.getLogger("SovereignShield")
 
-# 2. كلاس المحركات الذكية (التسلسل: جمناي -> جوك -> كوين)
 class SovereignAI:
     def __init__(self):
-        # تحميل المفاتيح من البيئة
-        self.gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
-        self.groq_key = os.getenv("GROQ_API_KEY")
-        self.openai_key = os.getenv("OPENAI_API_KEY")
+        # مطابقة الأسماء مع الصورة التي أرفقتها
+        self.keys = {
+            "gemini": os.getenv("GEMINI_KEY"),
+            "groq": os.getenv("GROQ_API_KEY"),
+            "openai": os.getenv("OPENAI_API_KEY"),
+            "qwen": os.getenv("QWEN_API_KEY")
+        }
         
         self.sys_prompt = (
-            "أنت خبير تقني سيادي متخصص في Artificial Intelligence and its latest tools والأمن السيبراني. "
-            "الهدف: تحليل الأخبار للأفراد وتوعيتهم من الهندسة الاجتماعية. الأسلوب: خليجي، وقور، مهني، ومختصر."
+            "أنت مستشار سيادي في Artificial Intelligence and its latest tools والأمن السيبراني. "
+            "حلل الخبر بأسلوب خليجي وقور، مهني، ومختصر جداً للأفراد. حذر من الهندسة الاجتماعية."
         )
 
-    def generate_content(self, prompt, creative=False):
-        # --- المرحلة الأولى: جمناي (Gemini) ---
-        try:
-            logger.info("Trying Stage 1: Gemini...")
-            client = genai.Client(api_key=self.gemini_key)
-            resp = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.sys_prompt,
-                    temperature=0.7 if creative else 0.3
-                )
-            )
-            if resp.text: return resp.text.strip()
-        except Exception as e:
-            logger.warning(f"⚠️ Gemini failed: {str(e)[:50]}")
-
-        # --- المرحلة الثانية: جوك (Groq) ---
-        if self.groq_key:
+    def generate(self, prompt):
+        # --- المرحلة 1: جمناي (GEMINI_KEY) ---
+        if self.keys["gemini"]:
             try:
-                logger.info("Trying Stage 2: Groq (Joke)...")
-                client = OpenAIClient(api_key=self.groq_key, base_url="https://api.groq.com/openai/v1")
+                logger.info("🤖 استخدام جمناي...")
+                client = genai.Client(api_key=self.keys["gemini"])
+                resp = client.models.generate_content(
+                    model="gemini-2.0-flash", contents=prompt,
+                    config=types.GenerateContentConfig(system_instruction=self.sys_prompt)
+                )
+                if resp.text: return resp.text.strip()
+            except Exception as e: logger.warning(f"⚠️ فشل جمناي: {str(e)[:50]}")
+
+        # --- المرحلة 2: جوك (GROQ_API_KEY) ---
+        if self.keys["groq"]:
+            try:
+                logger.info("⚡ استخدام جوك (Groq)...")
+                client = OpenAIClient(api_key=self.keys["groq"], base_url="https://api.groq.com/openai/v1")
                 resp = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": self.sys_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7 if creative else 0.3
+                    messages=[{"role": "system", "content": self.sys_prompt}, {"role": "user", "content": prompt}]
                 )
                 return resp.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"⚠️ Groq failed: {str(e)[:50]}")
+            except Exception as e: logger.warning(f"⚠️ فشل جوك: {str(e)[:50]}")
 
-        # --- المرحلة الثالثة: كوين (OpenAI) ---
-        if self.openai_key:
+        # --- المرحلة 3: كوين (OPENAI_API_KEY) ---
+        if self.keys["openai"]:
             try:
-                logger.info("Trying Stage 3: OpenAI (Queen)...")
-                client = OpenAIClient(api_key=self.openai_key)
+                logger.info("👑 استخدام كوين (OpenAI)...")
+                client = OpenAIClient(api_key=self.keys["openai"])
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": self.sys_prompt},
-                        {"role": "user", "content": prompt}
-                    ]
+                    messages=[{"role": "system", "content": self.sys_prompt}, {"role": "user", "content": prompt}]
                 )
                 return resp.choices[0].message.content.strip()
-            except Exception as e:
-                logger.error(f"❌ All engines failed: {str(e)[:50]}")
-        
+            except Exception as e: logger.warning(f"⚠️ فشل كوين: {str(e)[:50]}")
+
+        # --- المرحلة 4: Qwen (QWEN_API_KEY) ---
+        if self.keys["qwen"]:
+            try:
+                logger.info("🏮 استخدام Qwen...")
+                # تفترض مكتبة OpenAI للتبسيط كون أغلبهم متوافقين
+                client = OpenAIClient(api_key=self.keys["qwen"], base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+                resp = client.chat.completions.create(
+                    model="qwen-plus",
+                    messages=[{"role": "system", "content": self.sys_prompt}, {"role": "user", "content": prompt}]
+                )
+                return resp.choices[0].message.content.strip()
+            except Exception as e: logger.error(f"❌ فشل الكل: {e}")
+
         return None
 
-# 3. المنظومة التشغيلية للبوت
 class SovereignBot:
     def __init__(self):
         self.ai = SovereignAI()
-        self.x_client = tweepy.Client(
+        self.x = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        self.is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
-    def execute(self):
-        # جلب أحدث الأخبار التقنية والأمنية
-        feeds = [
-            "https://thehackernews.com/feeds/posts/default",
-            "https://openai.com/news/rss.xml"
-        ]
-        pool = []
-        for url in feeds:
-            f = feedparser.parse(url)
-            pool.extend(f.entries[:2])
+    def run(self):
+        feed = feedparser.parse("https://thehackernews.com/feeds/posts/default")
+        if not feed.entries: return
+        item = feed.entries[0]
         
-        if not pool: return
-        item = random.choice(pool)
-        
-        # التوليد عبر نظام التسلسل
-        content = self.ai.generate_content(f"حلل استراتيجياً للأفراد: {item.title}. المصدر: {item.link}")
+        # تنفيذ التحليل بنظام التسلسل
+        content = self.ai.generate(f"حلل أمنياً للأفراد: {item.title}. الرابط: {item.link}")
         
         if content:
             try:
-                # نشر التغريدة مع بصمة غير مرئية لمنع التكرار
-                self.x_client.create_tweet(text=f"{content[:270]}\n\u200c🛡️")
-                logger.info("✅ Mission Accomplished successfully!")
+                # نشر التغريدة
+                self.x.create_tweet(text=f"{content[:275]}\n🛡️")
+                logger.info("✅ تم النشر بنجاح سيادي!")
             except Exception as e:
                 logger.error(f"X Post Error: {e}")
 
 if __name__ == "__main__":
-    SovereignBot().execute()
+    SovereignBot().run()
