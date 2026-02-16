@@ -9,13 +9,28 @@ import random
 from datetime import datetime, timedelta, timezone
 from google import genai
 
-# 1. الإعدادات واللوج
+# إعداد اللوج
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(name)s - %(message)s")
 logger = logging.getLogger("SovereignBot")
 
 def load_config():
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    # البحث عن الملف في المجلد الحالي أو المجلد الأب لضمان النجاح في GitHub Actions
+    possible_paths = [
+        os.path.join(os.getcwd(), "config.yaml"),
+        "config.yaml",
+        "/home/runner/work/tech-ai-bot/tech-ai-bot/config.yaml"
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+    
+    # إعدادات طوارئ إذا فشل النظام تماماً في إيجاد الملف
+    return {
+        'bot': {'database_path': 'data/bot.db', 'sleep_start': 0, 'sleep_end': 5},
+        'sources': {'rss_feeds': [{'url': 'https://about.google/products/'}]},
+        'prompts': {'system_core': 'Artificial Intelligence and its latest tools'}
+    }
 
 config = load_config()
 
@@ -24,32 +39,30 @@ class SovereignBot:
         self.db_path = config['bot']['database_path']
         self._init_db()
         self.gemini_key = os.getenv("GEMINI_KEY")
-        self.sys_instruction = config['prompts']['system_core'].replace(
-            "Industrial Revolution", "Artificial Intelligence and its latest tools"
-        )
-        # إعداد عملاء X (الإصدار 1.1 و 2.0)
-        auth = tweepy.OAuth1UserHandler(
-            os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
-            os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
-        )
-        self.api_v1 = tweepy.API(auth)
-        self.client_v2 = tweepy.Client(
+        # المصطلح المعتمد
+        self.sys_instruction = "Focus on Artificial Intelligence and its latest tools for individuals, with a Gulf dialect. Be professional and accurate."
+        
+        # إعداد Twitter API v2
+        self.client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        self.bot_id = self.client_v2.get_me().data.id
+        try:
+            self.bot_id = self.client.get_me().data.id
+        except:
+            self.bot_id = None
 
     def _init_db(self):
-        if not os.path.exists(os.path.dirname(self.db_path)): os.makedirs(os.path.dirname(self.db_path))
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir): os.makedirs(db_dir)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
             conn.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
 
-    def generate_ai_content(self, prompt_text):
-        """توليد محتوى احترافي باستخدام Gemini"""
+    def generate_content(self, prompt_text):
         try:
             client = genai.Client(api_key=self.gemini_key)
             response = client.models.generate_content(
@@ -59,39 +72,34 @@ class SovereignBot:
             )
             return response.text.strip()
         except Exception as e:
-            logger.error(f"❌ خطأ Gemini: {e}")
+            logger.error(f"❌ Gemini Error: {e}")
             return None
 
     def handle_replies(self):
-        """الرد الذكي على الإشارات (Mentions)"""
-        logger.info("📡 جاري فحص الإشارات (Mentions)...")
+        """الرد الذكي على الإشارات"""
+        if not self.bot_id: return
         try:
-            mentions = self.client_v2.get_users_mentions(self.bot_id, expansions=['author_id'])
+            mentions = self.client.get_users_mentions(self.bot_id)
             if not mentions.data: return
-
             for tweet in mentions.data:
                 with sqlite3.connect(self.db_path) as conn:
-                    if conn.execute("SELECT tweet_id FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone():
-                        continue
-
-                # توليد رد ذكي خليجي
-                prompt = f"رد باختصار وذكاء بلهجة خليجية بيضاء على هذه التغريدة: {tweet.text}. ركز على أدوات AI و Google وانشر الفائدة للفرد."
-                reply_text = self.generate_ai_content(prompt)
-
+                    if conn.execute("SELECT tweet_id FROM replies WHERE tweet_id=?", (str(tweet.id),)).fetchone(): continue
+                
+                reply_text = self.generate_content(f"رد بذكاء ولهجة خليجية على: {tweet.text}. ركز على فوائد AI وأدوات جوجل.")
                 if reply_text:
-                    self.client_v2.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
+                    self.client.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
                     with sqlite3.connect(self.db_path) as conn:
                         conn.execute("INSERT INTO replies (tweet_id) VALUES (?)", (str(tweet.id),))
-                    logger.info(f"✅ تم الرد على التغريدة: {tweet.id}")
-                    time.sleep(5) # لتجنب الـ Rate Limit
+                    time.sleep(2)
         except Exception as e:
-            logger.error(f"❌ خطأ في الردود: {e}")
+            logger.error(f"❌ Reply Error: {e}")
 
     def run_publisher(self):
-        """النشر الاستهدافي للأخبار والأدوات"""
+        """النشر الاستهدافي الطويل (X Premium)"""
+        # توقيت الخليج
         gulf_tz = timezone(timedelta(hours=4))
-        if config['bot']['sleep_start'] <= datetime.now(gulf_tz).hour < config['bot']['sleep_end']:
-            return
+        hour = datetime.now(gulf_tz).hour
+        if config['bot']['sleep_start'] <= hour < config['bot']['sleep_end']: return
 
         feeds = [f['url'] for f in config['sources']['rss_feeds']]
         for url in feeds:
@@ -101,20 +109,17 @@ class SovereignBot:
                 with sqlite3.connect(self.db_path) as conn:
                     if conn.execute("SELECT hash FROM history WHERE hash=?", (content_hash,)).fetchone(): continue
 
-                prompt = f"صغ مقالاً طويلاً (X Premium) عن: {entry.title}. وضح القيمة للفرد من أدوات Google والذكاء الاصطناعي. اذكر المصدر: {url}."
-                content = self.generate_ai_content(prompt)
-
+                # صياغة المنشور الطويل
+                prompt = f"اكتب منشوراً طويلاً (Premium) عن أداة أو خبر: {entry.title}. وضح الفائدة للأفراد بلهجة خليجية. المصدر: Google Products."
+                content = self.generate_content(prompt)
+                
                 if content:
-                    self.client_v2.create_tweet(text=content)
+                    self.client.create_tweet(text=content)
                     with sqlite3.connect(self.db_path) as conn:
                         conn.execute("INSERT INTO history (hash) VALUES (?)", (content_hash,))
-                    logger.info("✅ تم نشر تغريدة استهدافية.")
                     return
 
-    def execute(self):
-        """تشغيل النظام بالكامل"""
-        self.handle_replies() # فحص الردود أولاً
-        self.run_publisher() # ثم النشر
-
 if __name__ == "__main__":
-    SovereignBot().execute()
+    bot = SovereignBot()
+    bot.handle_replies()
+    bot.run_publisher()
