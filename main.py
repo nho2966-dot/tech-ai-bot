@@ -1,216 +1,106 @@
 import os
-import time
-import random
+import csv
 import logging
-import feedparser
-import tweepy
-import sqlite3
-import re
-import requests
-import uuid
 from datetime import datetime
-from google import genai
+import requests
+import random
 
-# إعداد اللوج السيادي
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s")
-logger = logging.getLogger("SovereignBot")
+# === Logging setup ===
+logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-def clean_text(text):
-    """تنظيف النصوص لضمان أعلى جودة في معالجة الذكاء الاصطناعي"""
-    text = re.sub(r'http\S+', '', text)
-    text = re.sub(r'<.*?>', '', text)
-    return text.strip()
+# === قراءة مفاتيح البيئة ===
+CONFIG_YAML = os.getenv("CONFIG_YAML")
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+QWEN_API_KEY = os.getenv("QWEN_API_KEY")
+TAVILY_KEY = os.getenv("TAVILY_KEY")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID")
+TG_TOKEN = os.getenv("TG_TOKEN")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
+X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
+X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
+X_API_KEY = os.getenv("X_API_KEY")
+X_API_SECRET = os.getenv("X_API_SECRET")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 
-class SovereignBot:
-    def __init__(self):
-        self.db_path = "sovereign_memory.db"
-        self._init_db()
-        
-        # تهيئة عملاء X (الإصدارين 1.1 و 2.0)
-        try:
-            auth = tweepy.OAuth1UserHandler(
-                os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
-                os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
-            )
-            self.api_v1 = tweepy.API(auth)
-            self.client_v2 = tweepy.Client(
-                bearer_token=os.getenv("X_BEARER_TOKEN"),
-                consumer_key=os.getenv("X_API_KEY"),
-                consumer_secret=os.getenv("X_API_SECRET"),
-                access_token=os.getenv("X_ACCESS_TOKEN"),
-                access_token_secret=os.getenv("X_ACCESS_SECRET")
-            )
-            logger.info("✅ تم تهيئة عملاء X بنجاح")
-        except Exception as e:
-            logger.error(f"❌ فشل تهيئة عملاء X: {e}")
-            raise e
+# === إعداد المحركات البديلة ===
+ENGINES = {
+    "gemini": GEMINI_KEY,
+    "google": GOOGLE_API_KEY,
+    "openai": OPENAI_API_KEY,
+    "openrouter": OPENROUTER_API_KEY,
+    "qwen": QWEN_API_KEY,
+    "xai": XAI_API_KEY,
+    "tavily": TAVILY_KEY,
+}
 
-        # تهيئة عميل الذكاء الاصطناعي لمرة واحدة
-        try:
-            self.ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-            logger.info("✅ تم تهيئة عميل AI بنجاح")
-        except Exception as e:
-            logger.error(f"❌ فشل تهيئة AI Client: {e}")
-            raise e
+# === وظيفة اختيار المحرك المتاح ===
+def choose_engine(preferred=None):
+    if preferred and ENGINES.get(preferred):
+        return preferred, ENGINES[preferred]
+    # اختيار أي محرك متاح بشكل عشوائي
+    available = {k: v for k, v in ENGINES.items() if v}
+    if not available:
+        logging.error("لا يوجد أي محرك مفعل! تحقق من مفاتيح البيئة.")
+        return None, None
+    engine = random.choice(list(available.keys()))
+    return engine, available[engine]
 
-        self.user_id = None
+# === وظيفة تسجيل الأحداث في CSV ===
+def log_event(prompt, response, engine):
+    filename = "bot_log.csv"
+    fieldnames = ["datetime", "engine", "prompt", "response"]
+    exists = os.path.isfile(filename)
+    with open(filename, mode='a', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not exists:
+            writer.writeheader()
+        writer.writerow({
+            "datetime": datetime.now().isoformat(),
+            "engine": engine,
+            "prompt": prompt,
+            "response": response
+        })
 
-    def _init_db(self):
-        """تهيئة قاعدة البيانات وإنشاء الجداول إذا لم تكن موجودة"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS history (
-                        content_hash TEXT PRIMARY KEY, 
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS processed_mentions (
-                        mention_id TEXT PRIMARY KEY, 
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            logger.info("✅ تم تهيئة قاعدة البيانات بنجاح")
-        except Exception as e:
-            logger.error(f"❌ خطأ في تهيئة قاعدة البيانات: {e}")
-            raise e
-
-    def download_image(self, url):
-        """تحميل الصورة باسم فريد (UUID) لضمان عدم تداخل العمليات"""
-        if not url:
-            return None
-        try:
-            response = requests.get(url, timeout=15)
-            if response.status_code == 200:
-                filename = f"temp_img_{uuid.uuid4().hex}.jpg"
-                with open(filename, "wb") as f:
-                    f.write(response.content)
-                return filename
-        except Exception as e:
-            logger.warning(f"⚠️ فشل تحميل الصورة من الرابط: {e}")
-        return None
-
-    def generate_ai_content(self, prompt, is_reply=False):
-        sys_msg = (
-            "أنت خبير تقني خليجي. ركز على Artificial Intelligence and its latest tools للأفراد. "
-            "اللهجة: خليجية بيضاء. استبدل 'الثورة الصناعية' بـ 'Artificial Intelligence and its latest tools'."
-        )
-        if is_reply: 
-            sys_msg += " (رد ذكي وقصير جداً)."
-        
-        try:
-            response = self.ai_client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-                config={'system_instruction': sys_msg}
-            )
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"❌ خطأ AI: {e}")
-            return None
-
-    def publish_news(self):
-        """جلب الأخبار التقنية وصياغتها ونشرها"""
-        feed_urls = [
-            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml",
-            "https://hnrss.org/newest?q=AI+tools"
-        ]
-        max_tweets = 3
-        posted_count = 0
-
-        for url in feed_urls:
-            try:
-                feed = feedparser.parse(url)
-            except Exception as e:
-                logger.warning(f"⚠️ فشل قراءة الـ RSS: {e}")
-                continue
-
-            for entry in feed.entries:
-                if posted_count >= max_tweets:
-                    break
-
-                content_hash = str(hash(entry.title + entry.link))
-                with sqlite3.connect(self.db_path) as conn:
-                    if conn.execute("SELECT content_hash FROM history WHERE content_hash = ?", (content_hash,)).fetchone():
-                        continue
-
-                # استخراج الصورة
-                img_url = None
-                if 'media_content' in entry:
-                    img_url = entry.media_content[0].get('url')
-                elif 'media_thumbnail' in entry:
-                    img_url = entry.media_thumbnail[0].get('url')
-                elif 'links' in entry:
-                    for link in entry.links:
-                        if 'image' in link.get('type', ''):
-                            img_url = link.href
-
-                prompt = f"حول هذا الخبر لنصيحة خليجية مفيدة: {clean_text(entry.title)}"
-                content = self.generate_ai_content(prompt)
-
-                if not content:
-                    continue
-
-                media_ids = []
-                img_path = self.download_image(img_url) if img_url else None
-                if img_path:
-                    try:
-                        media = self.api_v1.media_upload(filename=img_path)
-                        media_ids = [media.media_id]
-                        os.remove(img_path)
-                    except Exception as e:
-                        logger.warning(f"⚠️ فشل رفع الوسائط: {e}")
-
-                try:
-                    time.sleep(random.randint(45, 90))
-                    self.client_v2.create_tweet(text=content, media_ids=media_ids if media_ids else None)
-                    with sqlite3.connect(self.db_path) as conn:
-                        conn.execute("INSERT INTO history (content_hash) VALUES (?)", (content_hash,))
-                    posted_count += 1
-                    logger.info(f"✅ تم نشر التغريدة {posted_count}")
-                except Exception as e:
-                    logger.error(f"❌ فشل النشر على X: {e}")
-
-    def reply_mentions(self):
-        """الرد على المنشنز الذكية"""
-        try:
-            if not self.user_id:
-                self.user_id = self.client_v2.get_me().data.id
-
-            mentions = self.client_v2.get_users_mentions(self.user_id, max_results=10).data
-            if not mentions:
-                return
-
-            for mention in mentions:
-                with sqlite3.connect(self.db_path) as conn:
-                    if conn.execute("SELECT mention_id FROM processed_mentions WHERE mention_id = ?", (mention.id,)).fetchone():
-                        continue
-
-                prompt = f"رد على هذه التغريدة بذكاء وبلهجة خليجية: {clean_text(mention.text)}"
-                reply_text = self.generate_ai_content(prompt, is_reply=True)
-                if reply_text:
-                    try:
-                        self.client_v2.create_tweet(
-                            text=f"@{mention.author.username} {reply_text}",
-                            in_reply_to_tweet_id=mention.id
-                        )
-                        with sqlite3.connect(self.db_path) as conn:
-                            conn.execute("INSERT INTO processed_mentions (mention_id) VALUES (?)", (mention.id,))
-                        logger.info(f"✅ تم الرد على المنشن: {mention.id}")
-                    except Exception as e:
-                        logger.error(f"❌ فشل الرد على المنشن: {e}")
-
-        except Exception as e:
-            logger.error(f"❌ خطأ أثناء معالجة المنشنز: {e}")
-
-def main():
+# === وظيفة إرسال التنبيهات إلى Telegram ===
+def send_telegram(message):
+    if not TG_CHAT_ID or not TG_TOKEN:
+        logging.warning("مفاتيح Telegram غير مفعلة.")
+        return
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {"chat_id": TG_CHAT_ID, "text": message}
     try:
-        bot = SovereignBot()
-        bot.publish_news()
-        bot.reply_mentions()
+        r = requests.post(url, data=payload, timeout=10)
+        if r.status_code == 200:
+            logging.info("تم إرسال التنبيه إلى Telegram بنجاح.")
+        else:
+            logging.error(f"خطأ في إرسال Telegram: {r.text}")
     except Exception as e:
-        logger.error(f"❌ البوت فشل في التشغيل: {e}")
+        logging.error(f"استثناء عند إرسال Telegram: {e}")
 
+# === مثال على وظيفة الرد على المستخدم ===
+def get_response(prompt, preferred_engine=None):
+    engine, key = choose_engine(preferred_engine)
+    if not engine:
+        return "لا يوجد محرك متاح حاليًا."
+    
+    # هنا ضع منطق الطلب لكل محرك (API call) حسب مفتاحه
+    # للمثال سنقوم برد تجريبي
+    response = f"[{engine.upper()} رد تجريبي] على: {prompt}"
+    
+    log_event(prompt, response, engine)
+    send_telegram(f"محرك: {engine} | استجابة على: {prompt}")
+    
+    return response
+
+# === مثال على التشغيل ===
 if __name__ == "__main__":
-    main()
+    while True:
+        user_input = input("أدخل السؤال: ").strip()
+        if user_input.lower() in ["exit", "quit"]:
+            break
+        reply = get_response(user_input)
+        print(f"🤖 الرد: {reply}")
