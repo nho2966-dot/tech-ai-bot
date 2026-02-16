@@ -2,9 +2,8 @@ name: Super-Sovereign AI Deployment
 
 on:
   schedule:
-    # سيتم التشغيل مرتين يومياً (كل 12 ساعة) لضمان السيادة المعلوماتية
     - cron: '0 */12 * * *'
-  workflow_dispatch: # للسماح لك بتشغيل البوت يدوياً متى أردت
+  workflow_dispatch:
 
 jobs:
   build-and-run:
@@ -21,17 +20,16 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install tweepy==4.16.0 feedparser==6.0.12 google-genai==1.63.0 openai==1.63.0 python-dotenv==1.2.1
 
       - name: Run Sovereign Engine
         env:
-          # مفاتيح الذكاء الاصطناعي (مطابقة لصور حسابك)
+          # تأكد أن هذه الأسماء مطابقة تماماً لما وضعته في Settings > Secrets
           X_GEMINI_KEY: ${{ secrets.X_GEMINI_KEY }}
           X_GROQ_API_KEY: ${{ secrets.X_GROQ_API_KEY }}
           X_OPENAI_API_KEY: ${{ secrets.X_OPENAI_API_KEY }}
           X_QWEN_API_KEY: ${{ secrets.X_QWEN_API_KEY }}
           
-          # مفاتيح النشر على X (تويتر)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -39,8 +37,7 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
 
-      - name: Persistence - Upload Database Logs
-        # رفع قاعدة البيانات بعد النشر لضمان بقاء "ذاكرة" النظام حية
+      - name: Upload Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
