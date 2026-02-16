@@ -8,30 +8,36 @@ import re
 import requests
 import feedparser
 import tweepy
+import time
 from datetime import datetime
 from google import genai
 
-# === إعداد اللوج السيادي ===
-logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
+# -------------------------
+# إعداد اللوج السيادي
+# -------------------------
+logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("SovereignBot")
 
-# === وظائف التنظيف والتأخير ===
+# -------------------------
+# دوال مساعدة وتنظيف
+# -------------------------
 def clean_text(text):
+    """تنظيف النصوص لضمان جودة معالجة الـ AI للأفراد"""
     text = re.sub(r'http\S+', '', text)
     text = re.sub(r'<.*?>', '', text)
     return text.strip()
 
-def apply_delay(min_sec=30, max_sec=60):
+def apply_delay(min_sec=45, max_sec=90):
+    """تأخير عشوائي لتجنب الحظر في بيئة الأتمتة"""
     wait = random.randint(min_sec, max_sec)
-    logger.info(f"⏳ انتظار سيادي {wait} ثانية...")
-    time_sleep(wait)
+    logger.info(f"⏳ انتظار سيادي {wait} ثانية لتقليل ضغط الـ API...")
+    time.sleep(wait)
 
-def time_sleep(seconds):
-    import time
-    time.sleep(seconds)
-
-# === نظام إدارة المحركات والتقارير ===
+# -------------------------
+# نظام السجلات والتقارير
+# -------------------------
 def log_event(prompt, response, engine):
+    """تسجيل العمليات في CSV للمتابعة التاريخية"""
     filename = "bot_log.csv"
     fieldnames = ["datetime", "engine", "prompt", "response"]
     exists = os.path.isfile(filename)
@@ -41,11 +47,12 @@ def log_event(prompt, response, engine):
         writer.writerow({
             "datetime": datetime.now().isoformat(),
             "engine": engine,
-            "prompt": prompt[:50],
-            "response": response[:50]
+            "prompt": prompt[:100],
+            "response": response[:100]
         })
 
 def send_telegram(message):
+    """إرسال تقرير فوري عبر Telegram للأجهزة الشخصية"""
     token = os.getenv("TG_TOKEN")
     chat_id = os.getenv("TG_CHAT_ID")
     if token and chat_id:
@@ -53,15 +60,17 @@ def send_telegram(message):
         try:
             requests.post(url, data={"chat_id": chat_id, "text": message}, timeout=10)
         except Exception as e:
-            logger.error(f"⚠️ خطأ تلجرام: {e}")
+            logger.error(f"⚠️ فشل إرسال تنبيه تلجرام: {e}")
 
-# === بوت السيادة الرقمية ===
+# -------------------------
+# كلاس البوت السيادي
+# -------------------------
 class SovereignBot:
     def __init__(self):
         self.db_path = "sovereign_memory.db"
         self._init_db()
         
-        # تهيئة عملاء X (API v1.1 للصور و v2 للنصوص)
+        # تهيئة عملاء X (الوسائط عبر v1.1 والتغريد عبر v2)
         try:
             auth = tweepy.OAuth1UserHandler(
                 os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
@@ -84,13 +93,15 @@ class SovereignBot:
             conn.execute("CREATE TABLE IF NOT EXISTS processed_mentions (mention_id TEXT PRIMARY KEY, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
 
     def generate_ai_content(self, prompt, is_reply=False):
-        # مصفوفة المحركات المتاحة
+        """نظام المحركات البديلة لضمان الاستمرارية"""
         engines = {
             "gemini": os.getenv("GEMINI_KEY"),
-            "openai": os.getenv("OPENAI_API_KEY") # يمكن إضافة البقية هنا بنفس الطريقة
+            "openai": os.getenv("OPENAI_API_KEY")
         }
         available = {k: v for k, v in engines.items() if v}
-        if not available: return None
+        if not available: 
+            logger.error("❌ لا توجد مفاتيح AI مفعلة!")
+            return None
 
         engine_name = random.choice(list(available.keys()))
         sys_instruction = (
@@ -100,7 +111,7 @@ class SovereignBot:
         )
 
         try:
-            # هنا نستخدم Gemini كمحرك أساسي
+            # استخدام Gemini كمحرك أساسي نظراً لقوته في اللهجة
             client = genai.Client(api_key=available[engine_name])
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
@@ -115,6 +126,7 @@ class SovereignBot:
             return None
 
     def download_image(self, url):
+        """تحميل الصور بهوية فريدة UUID لمنع التداخل"""
         try:
             response = requests.get(url, timeout=15)
             if response.status_code == 200:
@@ -125,44 +137,79 @@ class SovereignBot:
         except: return None
 
     def run_automation(self):
-        """الدورة الآلية بالكامل بدون أي مدخلات يدوية"""
-        logger.info("🚀 بدء المهمة الآلية...")
+        """الدورة الآلية بالكامل (بدون أي مدخلات يدوية)"""
+        logger.info("🚀 بدء المهمة الآلية السيادية...")
         
-        # 1. جلب الأخبار من الـ RSS
-        feed = feedparser.parse("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml")
-        posted = 0
-        for entry in feed.entries:
-            if posted >= 2: break # نكتفي بتغريدتين لكل دورة
-            
-            content_hash = str(hash(entry.title + entry.link))
-            with sqlite3.connect(self.db_path) as conn:
-                if conn.execute("SELECT content_hash FROM history WHERE content_hash = ?", (content_hash,)).fetchone():
-                    continue
+        # 1. الرد على المنشنات أولاً
+        self.process_mentions()
+        
+        # 2. جلب الأخبار من RSS والنشر
+        feed_urls = [
+            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml",
+            "https://hnrss.org/newest?q=AI+tools"
+        ]
+        posted_count = 0
+        
+        for url in feed_urls:
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                if posted_count >= 2: break # حد آمن للتغريد التلقائي
+                
+                content_hash = str(hash(entry.title + entry.link))
+                with sqlite3.connect(self.db_path) as conn:
+                    if conn.execute("SELECT content_hash FROM history WHERE content_hash = ?", (content_hash,)).fetchone():
+                        continue
 
-            # استخراج صورة إن وجدت
-            img_url = entry.media_content[0]['url'] if 'media_content' in entry else None
-            
-            content = self.generate_ai_content(f"لخص هذا الخبر للأفراد بلهجة خليجية: {clean_text(entry.title)}")
-            if content:
-                media_ids = []
-                img_path = self.download_image(img_url) if img_url else None
-                if img_path:
+                # استخراج صورة
+                img_url = None
+                if 'media_content' in entry: img_url = entry.media_content[0]['url']
+                elif 'media_thumbnail' in entry: img_url = entry.media_thumbnail[0]['url']
+
+                content = self.generate_ai_content(f"صغ معلومة مفيدة للأفراد من هذا الخبر: {clean_text(entry.title)}")
+                if content:
+                    media_ids = []
+                    img_path = self.download_image(img_url) if img_url else None
+                    if img_path:
+                        try:
+                            media = self.api_v1.media_upload(filename=img_path)
+                            media_ids = [media.media_id]
+                            os.remove(img_path)
+                        except: pass
+
                     try:
-                        media = self.api_v1.media_upload(filename=img_path)
-                        media_ids = [media.media_id]
-                        os.remove(img_path)
-                    except: pass
+                        apply_delay(60, 120)
+                        self.client_v2.create_tweet(text=content, media_ids=media_ids if media_ids else None)
+                        with sqlite3.connect(self.db_path) as conn:
+                            conn.execute("INSERT INTO history (content_hash) VALUES (?)", (content_hash,))
+                        send_telegram(f"✅ تم نشر تغريدة: {content[:100]}...")
+                        posted_count += 1
+                    except Exception as e:
+                        logger.error(f"❌ فشل نشر التغريدة: {e}")
 
-                try:
-                    apply_delay(40, 80)
-                    self.client_v2.create_tweet(text=content, media_ids=media_ids if media_ids else None)
-                    with sqlite3.connect(self.db_path) as conn:
-                        conn.execute("INSERT INTO history (content_hash) VALUES (?)", (content_hash,))
-                    send_telegram(f"✅ تم نشر تغريدة: {content[:50]}...")
-                    posted += 1
-                except Exception as e:
-                    logger.error(f"❌ فشل النشر: {e}")
+    def process_mentions(self):
+        """الرد الآلي على المتابعين"""
+        try:
+            me = self.client_v2.get_me()
+            mentions = self.client_v2.get_users_mentions(me.data.id, max_results=5)
+            if not mentions or not mentions.data: return
 
+            with sqlite3.connect(self.db_path) as conn:
+                for tweet in mentions.data:
+                    if conn.execute("SELECT mention_id FROM processed_mentions WHERE mention_id = ?", (tweet.id,)).fetchone():
+                        continue
+                    
+                    reply = self.generate_ai_content(clean_text(tweet.text), is_reply=True)
+                    if reply:
+                        apply_delay(30, 60)
+                        self.client_v2.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                        conn.execute("INSERT INTO processed_mentions (mention_id) VALUES (?)", (tweet.id,))
+                        logger.info(f"✅ تم الرد على المنشن {tweet.id}")
+        except Exception as e:
+            logger.error(f"❌ خطأ في معالجة المنشنات: {e}")
+
+# -------------------------
+# التشغيل الرئيسي الآلي
+# -------------------------
 if __name__ == "__main__":
     bot = SovereignBot()
     bot.run_automation()
