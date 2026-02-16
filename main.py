@@ -9,170 +9,108 @@ import re
 from datetime import datetime, timedelta, timezone
 from google import genai
 
-# -------------------------
-# 1. نظام التحميل واللوج السيادي
-# -------------------------
+# 1. إعدادات اللوج والبيئة
+logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(name)s - %(message)s")
+logger = logging.getLogger("SovereignBot")
+
 def load_config():
-    """تحميل الإعدادات من المسار المحدد utils/config.yaml"""
     config_path = os.path.join("utils", "config.yaml")
-    if not os.path.exists(config_path):
-        config_path = "config.yaml"
-    
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    except Exception as e:
-        print(f"❌ خطأ فادح: تعذر العثور على ملف الإعدادات: {e}")
-        raise
+    if not os.path.exists(config_path): config_path = "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 config = load_config()
 
-logging.basicConfig(
-    level=config['logging']['level'],
-    format="🛡️ %(asctime)s - %(name)s - %(message)s"
-)
-logger = logging.getLogger(config['logging']['name'])
-
-# -------------------------
-# 2. كلاس البوت السيادي المطور
-# -------------------------
-class SovereignBot:
+# 2. كلاس إدارة المحتوى والذكاء الاصطناعي
+class ContentEngine:
     def __init__(self):
-        self.db_path = config['bot']['database_path']
-        self._init_db()
-        
-        # تهيئة عميل X (Twitter) 
-        try:
-            self.client = tweepy.Client(
-                bearer_token=os.getenv("X_BEARER_TOKEN"),
-                consumer_key=os.getenv("X_API_KEY"),
-                consumer_secret=os.getenv("X_API_SECRET"),
-                access_token=os.getenv("X_ACCESS_TOKEN"),
-                access_token_secret=os.getenv("X_ACCESS_SECRET")
-            )
-            logger.info("✅ تم الاتصال بمنصة X بنجاح")
-        except Exception as e:
-            logger.error(f"❌ خطأ في مفاتيح X API: {e}")
-
-    def _init_db(self):
-        db_dir = os.path.dirname(self.db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS history 
-                (hash TEXT PRIMARY KEY, title TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)
-            """)
-
-    def is_sleep_time(self):
-        """الالتزام بتوقيت الخليج المحلي (GMT+4) بدلاً من توقيت السيرفر"""
-        # ضبط التوقيت على توقيت عمان/الإمارات (GMT+4)
-        gulf_tz = timezone(timedelta(hours=4))
-        now_gulf = datetime.now(gulf_tz)
-        current_hour = now_gulf.hour
-        
-        start = config['bot']['sleep_start']
-        end = config['bot']['sleep_end']
-        
-        logger.info(f"🕒 الوقت الحالي بتوقيت الخليج: {now_gulf.strftime('%H:%M')}")
-        
-        # منطق فحص النوم (يتعامل مع عبور منتصف الليل)
-        if start < end:
-            is_sleep = start <= current_hour < end
-        else: 
-            is_sleep = current_hour >= start or current_hour < end
-            
-        return is_sleep
-
-    def clean_text(self, text):
-        return re.sub(r'<.*?>', '', text).strip()
-
-    def generate_ai_content(self, mode, context):
-        """توليد محتوى سيادي يخدم المواطن العربي بلهجة خليجية"""
-        sys_core = config['prompts']['system_core'].replace(
+        self.gemini_key = os.getenv("GEMINI_KEY")
+        self.sys_instruction = config['prompts']['system_core'].replace(
             "الثورة الصناعية", "Artificial Intelligence and its latest tools"
         )
-        
-        raw_prompt = config['prompts']['modes'].get(mode, config['prompts']['modes']['POST_FAST'])
-        # تعديل البرومبت لدمج الهوية العربية والخليجية
-        hybrid_prompt = (
-            f"حلل هذا الخبر: {context}. "
-            f"صغ لي تغريدة {raw_prompt} بلهجة خليجية بيضاء راقية. "
-            "ركز على الفائدة المباشرة للمواطن العربي، وتجنب أخبار الشركات تماماً. "
-            "استخدم مصطلحات تقنية بين قوسين عند الحاجة."
-        )
 
+    def try_gemini(self, context, attempt=1):
+        """المحرك الأول: Gemini مع Retry ذكي"""
+        if attempt > 3: return None
         try:
-            ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
-            response = ai_client.models.generate_content(
+            client = genai.Client(api_key=self.gemini_key)
+            prompt = f"حلل تقنياً للفرد: {context}. صغ تغريدة خليجية بيضاء، ركز على الأدوات (tools)، استخدم مصطلحات إنجليزية بين قوسين، وتجنب أخبار الشركات."
+            
+            response = client.models.generate_content(
                 model="gemini-2.0-flash",
-                contents=hybrid_prompt,
-                config={'system_instruction': sys_core}
+                contents=prompt,
+                config={'system_instruction': self.sys_instruction}
             )
             return response.text.strip()
         except Exception as e:
-            logger.error(f"❌ فشل توليد المحتوى: {e}")
-            return None
+            logger.warning(f"⚠️ محاولة Gemini رقم {attempt} فشلت: {e}")
+            time.sleep(5) # انتظار بسيط قبل الإعادة
+            return self.try_gemini(context, attempt + 1)
 
-    def run_mission(self):
-        # فحص النوم أولاً
+    def try_alternative(self, mode="JOKE"):
+        """المحركات البديلة: Joke أو Coin عند فشل الذكاء الاصطناعي"""
+        if mode == "JOKE":
+            return "الذكاء الاصطناعي (AI) صار مثل الملح في الأكل، بكل مكان! بس الأهم تعرف كيف تستخدمه لصالحك مو بس تتابعه. 😎 #تقنية"
+        return "تحديث تقني: تذكر دائماً أن أمن بياناتك (Data Privacy) يبدأ بوعيك بالأدوات التي تستخدمها. استثمر في عقلك! 💡 #AI"
+
+# 3. البوت الأساسي
+class SovereignBot:
+    def __init__(self):
+        self.db_path = config['bot']['database_path']
+        self.engine = ContentEngine()
+        self._init_db()
+        self.client = tweepy.Client(
+            bearer_token=os.getenv("X_BEARER_TOKEN"),
+            consumer_key=os.getenv("X_API_KEY"),
+            consumer_secret=os.getenv("X_API_SECRET"),
+            access_token=os.getenv("X_ACCESS_TOKEN"),
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
+        )
+
+    def _init_db(self):
+        if not os.path.exists(os.path.dirname(self.db_path)): os.makedirs(os.path.dirname(self.db_path))
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
+
+    def is_sleep_time(self):
+        """التزام بتوقيت الخليج (GMT+4)"""
+        gulf_tz = timezone(timedelta(hours=4))
+        now_gulf = datetime.now(gulf_tz)
+        logger.info(f"🕒 الوقت الحالي بتوقيت الخليج: {now_gulf.strftime('%H:%M')}")
+        hour = now_gulf.hour
+        start, end = config['bot']['sleep_start'], config['bot']['sleep_end']
+        return start <= hour < end if start < end else (hour >= start or hour < end)
+
+    def run(self):
         if self.is_sleep_time():
-            logger.info("🌙 البوت في وضع النوم (Sleep Mode) حسب توقيت الخليج المحلي.")
+            logger.info("🌙 وضع النوم نشط. نراك قريباً.")
             return
 
-        logger.info("📡 جلب كوكتيل الأخبار (عالمي + عربي)...")
-        
-        # دمج المصادر من config مع مصادر عربية إضافية
-        rss_sources = [f['url'] for f in config['sources']['rss_feeds']]
-        rss_sources.extend([
-            "https://aitnews.com/category/artificial-intelligence/feed/",
-            "https://www.tech-wd.com/wd/category/news/feed/"
-        ])
+        # جلب الأخبار
+        feeds = [f['url'] for f in config['sources']['rss_feeds']]
+        for url in feeds:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:3]:
+                content_hash = str(hash(entry.title))
+                
+                with sqlite3.connect(self.db_path) as conn:
+                    if conn.execute("SELECT hash FROM history WHERE hash=?", (content_hash,)).fetchone(): continue
 
-        all_entries = []
-        for url in rss_sources:
-            try:
-                feed = feedparser.parse(url)
-                all_entries.extend(feed.entries[:5])
-            except: continue
+                # نظام المحركات المتتابع (Gemini -> البديل)
+                tweet_text = self.engine.try_gemini(entry.title)
+                if not tweet_text:
+                    logger.info("🔄 الانتقال للمحرك البديل (Joke/Coin)...")
+                    tweet_text = self.engine.try_alternative()
 
-        # ترتيب حسب الأحدث
-        all_entries.sort(key=lambda x: x.get('published_parsed', 0), reverse=True)
+                if tweet_text:
+                    try:
+                        self.client.create_tweet(text=tweet_text[:280])
+                        with sqlite3.connect(self.db_path) as conn:
+                            conn.execute("INSERT INTO history (hash) VALUES (?)", (content_hash,))
+                        logger.info(f"✅ تم النشر: {tweet_text[:50]}...")
+                        return # نشر تغريدة واحدة في كل دورة
+                    except Exception as e:
+                        logger.error(f"❌ خطأ في X: {e}")
 
-        posted_count = 0
-        for entry in all_entries:
-            if posted_count >= 1: break # تغريدة واحدة في كل تشغيل للأكشن
-            
-            clean_title = self.clean_text(entry.title)
-            content_hash = str(hash(clean_title))
-
-            with sqlite3.connect(self.db_path) as conn:
-                if conn.execute("SELECT hash FROM history WHERE hash=?", (content_hash,)).fetchone():
-                    continue
-
-            # توليد المحتوى
-            tweet_text = self.generate_ai_content("POST_FAST", clean_title)
-            
-            if tweet_text:
-                try:
-                    # إضافة لمسة نهائية
-                    final_post = f"{tweet_text}\n\n#AI #تقنية #الذكاء_الاصطناعي"
-                    
-                    self.client.create_tweet(text=final_post)
-                    
-                    with sqlite3.connect(self.db_path) as conn:
-                        conn.execute("INSERT INTO history (hash, title) VALUES (?, ?)", 
-                                     (content_hash, clean_title))
-                    
-                    logger.info(f"✅ تم النشر بنجاح: {clean_title[:50]}...")
-                    posted_count += 1
-                except Exception as e:
-                    logger.error(f"❌ خطأ في النشر على X: {e}")
-
-# -------------------------
-# 3. التشغيل التنفيذي
-# -------------------------
 if __name__ == "__main__":
-    bot = SovereignBot()
-    bot.run_mission()
+    SovereignBot().run()
