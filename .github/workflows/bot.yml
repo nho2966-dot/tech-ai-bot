@@ -1,15 +1,16 @@
-name: Sovereign AI Bot Run
+name: Super-Sovereign AI Deployment
 
 on:
   schedule:
-    - cron: '0 * * * *' # تشغيل كل ساعة
-  workflow_dispatch:      # تشغيل يدوي
+    # سيتم التشغيل مرتين يومياً (كل 12 ساعة) لضمان السيادة المعلوماتية
+    - cron: '0 */12 * * *'
+  workflow_dispatch: # للسماح لك بتشغيل البوت يدوياً متى أردت
 
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -22,14 +23,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Execute Sovereign Bot
+      - name: Run Sovereign Engine
         env:
-          # هنا تم ربط مفتاحك GEMINI_KEY بالاسم الذي يحتاجه الكود
-          GEMINI_API_KEY: ${{ secrets.GEMINI_KEY }}
+          # مفاتيح الذكاء الاصطناعي (مطابقة لصور حسابك)
+          X_GEMINI_KEY: ${{ secrets.X_GEMINI_KEY }}
+          X_GROQ_API_KEY: ${{ secrets.X_GROQ_API_KEY }}
+          X_OPENAI_API_KEY: ${{ secrets.X_OPENAI_API_KEY }}
+          X_QWEN_API_KEY: ${{ secrets.X_QWEN_API_KEY }}
+          
+          # مفاتيح النشر على X (تويتر)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          X_ACCOUNT_ID: ${{ secrets.X_ACCOUNT_ID }}
         run: python main.py
+
+      - name: Persistence - Upload Database Logs
+        # رفع قاعدة البيانات بعد النشر لضمان بقاء "ذاكرة" النظام حية
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sovereign-logs
+          path: sovereign_v2.db
