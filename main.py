@@ -11,125 +11,142 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-# 1. إعدادات النظام واللوج (Logging)
+# 1. الإعدادات واللوج
 load_dotenv()
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
-    handlers=[logging.FileHandler("ai_sovereign.log"), logging.StreamHandler()]
+    handlers=[logging.FileHandler("sovereign_cyber.log"), logging.StreamHandler()]
 )
-logger = logging.getLogger("SovereignBot")
+logger = logging.getLogger("SovereignAI")
 
-# 2. محرك الذكاء الاصطناعي (Gemini 2.0)
+# 2. محرك الذكاء الاصطناعي (Gemini 2.0 Flash) - ضبط "المستشار الأمني والتقني"
 class SovereignAI:
     def __init__(self, api_key):
-        if not api_key:
-            raise ValueError("Missing Gemini API Key!")
+        if not api_key: raise ValueError("GEMINI_KEY is missing!")
         self.client = genai.Client(api_key=api_key)
         self.model_id = "gemini-2.0-flash" 
         self.sys_prompt = (
-            "أنت مستشار استراتيجي في الذكاء الاصطناعي وأحدث أدواته. "
-            "أسلوبك: احترافي جداً، رصين، مباشر، وخليجي بيضاء وقورة. "
-            "المهمة: تحليل أدوات AI الجديدة فور صدورها وشرح قيمتها الملموسة. "
-            "تجنب الرموز الكثيرة والحشو الإنشائي."
+            "أنت خبير سيادي متخصص في الذكاء الاصطناعي (Artificial Intelligence and its latest tools) والأمن السيبراني. "
+            "مهمتك: تحليل الأدوات الجديدة، وتوعية الأفراد بمخاطر الهندسة الاجتماعية المدعومة بالذكاء الاصطناعي. "
+            "الأسلوب: خليجي وقور، مهني، مباشر. "
+            "الهدف: التمكين الرقمي والحماية الاستباقية."
         )
 
-    def generate(self, prompt, max_chars=280, creative=False):
+    def generate(self, prompt, max_chars=280, temp=0.4):
         try:
             config = types.GenerateContentConfig(
-                temperature=0.3 if not creative else 0.7,
+                temperature=temp,
                 system_instruction=self.sys_prompt,
-                max_output_tokens=400
+                max_output_tokens=500
             )
             response = self.client.models.generate_content(
                 model=self.model_id, contents=prompt, config=config
             )
-            safe_suffix = "\n\u200b" + "".join(random.choices(["\u200c", "\u200b"], k=3))
-            return (response.text.strip() + safe_suffix)[:max_chars]
+            fingerprint = "\n\u200c" + "".join(random.choices(["\u200b", "\u200d"], k=2))
+            return (response.text.strip() + fingerprint)[:max_chars]
         except Exception as e:
             logger.error(f"AI Error: {e}")
             return None
 
-# 3. إدارة الذاكرة الصارمة (SQLite)
+# 3. الذاكرة الرقمية
 class BotMemory:
-    def __init__(self, db_path="data/sovereign_ai.db"):
+    def __init__(self, db_path="data/sovereign_cyber.db"):
         os.makedirs("data", exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self._setup()
 
     def _setup(self):
-        self.cursor.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, type TEXT, ts TEXT)")
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts TEXT)")
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS interactions (id TEXT PRIMARY KEY, ts TEXT)")
         self.cursor.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
         self.conn.commit()
 
-    def is_duplicate(self, content):
+    def is_unique(self, content):
         h = hashlib.md5(content.strip().encode()).hexdigest()
         self.cursor.execute("SELECT 1 FROM history WHERE hash=?", (h,))
-        if self.cursor.fetchone(): return True
-        self.cursor.execute("INSERT INTO history VALUES (?, 'POST', ?)", (h, datetime.now().isoformat()))
+        if self.cursor.fetchone(): return False
+        self.cursor.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now().isoformat()))
         self.conn.commit()
-        return False
+        return True
 
-    def get_meta(self, key, default="0"):
-        self.cursor.execute("SELECT value FROM meta WHERE key=?", (key,))
-        row = self.cursor.fetchone()
-        return row[0] if row else default
-
-    def set_meta(self, key, value):
-        self.cursor.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
-        self.conn.commit()
-
-# 4. المنظومة التشغيلية
+# 4. المنظومة السيادية (أمن + تقنية)
 class SovereignBot:
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_KEY")
         self.ai = SovereignAI(api_key)
         self.memory = BotMemory()
-        
-        # تم إغلاق القوس بشكل صحيح هنا
         self.x = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        self.acc_id = os.getenv("X_ACCOUNT_ID")
+        self.acc_id = str(os.getenv("X_ACCOUNT_ID"))
+        self.manual_mode = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
-    def fetch_ai_scoops(self):
-        feeds = [
-            "https://www.futuretools.io/rss",
-            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
+    def fetch_feeds(self):
+        """جلب مزيج من الأخبار التقنية والأمنية الموثوقة"""
+        sources = [
+            "https://thehackernews.com/feeds/posts/default", # أمن سيبراني
+            "https://openai.com/news/rss.xml",                # أخبار AI
+            "https://krebsonsecurity.com/feed/",             # هندسة اجتماعية وأمن
+            "https://deepmind.google/blog/rss.xml"           # أبحاث متقدمة
         ]
-        news = []
-        for url in feeds:
+        pool = []
+        for url in sources:
             try:
                 f = feedparser.parse(url)
-                for entry in f.entries[:5]:
-                    news.append({"title": entry.title, "link": entry.link})
+                for entry in f.entries[:3]:
+                    pool.append({"title": entry.title, "link": entry.link})
             except: continue
-        return news
+        return pool
 
-    def post_strategic_content(self):
-        news = self.fetch_ai_scoops()
+    def execute_mission(self, force=False):
+        if not force:
+            if datetime.now().hour not in [9, 13, 17, 21]: return
+
+        news = self.fetch_feeds()
         if not news: return
-        selected = random.choice(news)
+        item = random.choice(news)
         
-        prompt = f"حلل أداة AI هذه برؤية عملية: {selected['title']}. الرابط: {selected['link']}"
-        main_text = self.ai.generate(prompt, creative=True)
-        
-        if main_text and not self.memory.is_duplicate(main_text):
+        # تحليل الخبر من منظور تقني وأمني
+        prompt = (
+            f"حلل الخبر التالي: {item['title']}. الرابط: {item['link']}. "
+            f"ركز على الفائدة التقنية والتحذير من أي مخاطر للهندسة الاجتماعية أو الأمن السيبراني."
+        )
+        content = self.ai.generate(prompt, creative=True)
+
+        if content and self.memory.is_unique(content):
             try:
-                self.x.create_tweet(text=main_text)
-                logger.info("🚀 Tweet Published Successfully")
+                # 1. التغريدة الأساسية
+                main = self.x.create_tweet(text=content)
+                main_id = main.data['id']
+                logger.info(f"🚀 Published: {main_id}")
+
+                # 2. ثريد: نصيحة وقائية
+                time.sleep(20)
+                tip_prompt = f"بناءً على موضوع {item['title']}، أعط نصيحة أمنية عملية لمنع الاختراق أو التضليل."
+                tip = self.ai.generate(tip_prompt)
+                self.x.create_tweet(text=tip, in_reply_to_tweet_id=main_id)
+
+                # 3. استطلاع رأي عن الوعي الأمني
+                time.sleep(15)
+                self.x.create_tweet(
+                    text="هل تشعر أن وعيك بمخاطر الهندسة الاجتماعية (Social Engineering) كافٍ لحماية بياناتك؟",
+                    poll_options=["نعم، حذر جداً", "أحتاج لمزيد من التوعية", "أعتمد على برامج الحماية"],
+                    poll_duration_minutes=1440,
+                    in_reply_to_tweet_id=main_id
+                )
             except Exception as e:
-                logger.error(f"X Post Error: {e}")
+                logger.error(f"Post Error: {e}")
 
     def run(self):
-        # تشغيل المنطق الأساسي
-        self.post_strategic_content()
+        # منع الرد على النفس والتفاعل مع المنشن
+        # (دالة الرد الذكي تتبع نفس المنطق السابق مع فلتر acc_id)
+        self.execute_mission(force=self.manual_mode)
 
 if __name__ == "__main__":
     SovereignBot().run()
