@@ -1,9 +1,8 @@
-name: Run Sovereign Expert Bot
-
+name: run-bot
 on:
   schedule:
-    - cron: '0 * * * *' # يشتغل تلقائياً كل ساعة
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً متى ما بغيت
+    - cron: '0 */3 * * *' # يعمل كل 3 ساعات
+  workflow_dispatch: # للتشغيل اليدوي
 
 jobs:
   run-bot:
@@ -18,19 +17,25 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Download previous database
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: bot-memory
           path: data/
-        continue-on-error: true # عشان ما يفشل أول مرة والقاعدة لسه مو موجودة
+        continue-on-error: true
 
-      - name: Run Bot
+      - name: Run Python Script
         env:
+          # ربط جميع العقول حسب صورتك المرفقة
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          # ربط منصة X
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -38,9 +43,8 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
 
-      - name: Upload updated database
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bot-memory
           path: data/expert_v26.db
-          retention-days: 7
