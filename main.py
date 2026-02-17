@@ -9,13 +9,15 @@ import tweepy
 import feedparser
 from bs4 import BeautifulSoup
 from io import BytesIO
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from google import genai
 
+# إعداد السجلات لمتابعة الأداء
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 class SovereignExpert:
     def __init__(self):
+        # ربط المفاتيح السرية
         self.keys = {
             "gemini": os.getenv("GEMINI_KEY"),
             "x_api": os.getenv("X_API_KEY"),
@@ -40,8 +42,9 @@ class SovereignExpert:
             )
             auth = tweepy.OAuth1UserHandler(self.keys["x_api"], self.keys["x_secret"], self.keys["x_token"], self.keys["x_token_secret"])
             self.api_v1 = tweepy.API(auth)
-            logging.info("✅ أنظمة الخبير جاهزة..")
-        except Exception as e: logging.error(f"❌ خطأ اتصال: {e}")
+            logging.info("✅ أنظمة الخبير متصلة وجاهزة..")
+        except Exception as e: 
+            logging.error(f"❌ خطأ في ربط X: {e}")
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
@@ -58,61 +61,73 @@ class SovereignExpert:
         except: return None
 
     def fetch_exclusive_news(self):
-        # سحب من مصادر متنوعة لتقليل التكرار
+        logging.info("🌐 جاري البحث عن أخبار تقنية جديدة...")
         feeds = [
             "https://techcrunch.com/category/artificial-intelligence/feed/",
             "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
         ]
         for url in feeds:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:2]:
+            for entry in feed.entries[:5]: # سحب آخر 5 أخبار
                 h = hashlib.md5(entry.link.encode()).hexdigest()
                 with sqlite3.connect(self.db_path) as conn:
+                    # نتحقق إذا الخبر قديم أو تم نشره سابقاً
                     if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
                         conn.execute("INSERT OR REPLACE INTO waiting_room VALUES (?, ?, ?, ?)",
                                     (h, entry.title, entry.link, datetime.now(timezone.utc)))
+        logging.info("✅ تم تحديث قائمة الأخبار بنجاح.")
 
     def handle_posting(self):
-        now = datetime.now(timezone.utc)
-        # إضافة عنصر العشوائية في وقت النشر (بين 0 لـ 5 دقائق إضافية)
-        random_delay = random.randint(0, 5)
+        """نظام النشر القسري لضمان ظهور التغريدة الآن"""
+        self.fetch_exclusive_news() # جلب الأخبار أولاً
+        
         with sqlite3.connect(self.db_path) as conn:
-            target = conn.execute("SELECT hash, content, url FROM waiting_room WHERE ts <= ? LIMIT 1", 
-                                 (now - timedelta(minutes=10 + random_delay),)).fetchone()
+            # نسحب أول خبر متوفر في غرفة الانتظار فوراً
+            target = conn.execute("SELECT hash, content, url FROM waiting_room LIMIT 1").fetchone()
+            
             if target:
+                logging.info(f"🎯 تم العثور على محتوى: {target[1]}. جاري النشر...")
                 self._publish_as_human(*target)
+            else:
+                logging.warning("⚠️ لا توجد أخبار جديدة في هذه اللحظة.")
 
     def _publish_as_human(self, h, content, url):
         try:
-            # صياغة "بشرية" باحترافية خليجية
+            # صياغة بشرية خليجية متمكنة
             prompt = f"""
-            أنت خبير تقني خليجي متمكن. صغ هذا الخبر بأسلوبك الشخصي (لهجة بيضاء مهنية). 
-            ركز على الفائدة المباشرة للناس من 'أدوات الذكاء الاصطناعي'. 
-            تجنب الأسلوب الروبوتي، استخدم ايموجي واحد أو اثنين بذكاء. 
-            اختم بكلمة 'المصدر:' متبوعة بالرابط.
-            الخبر: {content} - {url}
+            بصفتك خبير تقني خليجي متمكن، اكتب تغريدة عن هذا الخبر بأسلوبك الشخصي (لهجة بيضاء مهنية).
+            - اجعلها مشوقة وتركز على أدوات الذكاء الاصطناعي وأثرها على الأفراد.
+            - استخدم إيموجي واحد مناسب.
+            - لا تذكر أنك ذكاء اصطناعي.
+            - اختم بكلمة 'المصدر:' ثم الرابط.
+            الخبر: {content}
+            الرابط: {url}
             """
-            txt = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt).text
+            response = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            txt = response.text.strip()
             
             img_url = self._get_image(url)
             m_ids = None
             if img_url:
                 img_data = requests.get(img_url).content
                 with BytesIO(img_data) as f:
-                    m = self.api_v1.media_upload(filename="post.jpg", file=f)
+                    m = self.api_v1.media_upload(filename="news_img.jpg", file=f)
                     m_ids = [m.media_id]
 
-            self.x_client.create_tweet(text=txt[:278], media_ids=m_ids)
+            self.x_client.create_tweet(text=txt[:280], media_ids=m_ids)
+            
+            # تحديث الذاكرة لمنع التكرار
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
                 conn.execute("DELETE FROM waiting_room WHERE hash=?", (h,))
                 conn.commit()
-            logging.info("🎯 تم نشر محتوى يجذب العين!")
-        except Exception as e: logging.error(f"❌ فشل النشر: {e}")
+            logging.info("🚀 مبروك! التغريدة الآن لايف على حسابك.")
+        except Exception as e: 
+            logging.error(f"❌ فشل النشر النهائي: {e}")
 
     def handle_radar(self):
-        """نظام الردود الاستهدافية لجذب المتابعين"""
-        TARGETS = ["7alsabe", "faisalsview", "elonmusk", "OpenAI", "sama"]
+        # رادار التفاعل لجذب المتابعين
+        TARGETS = ["7alsabe", "faisalsview", "elonmusk", "OpenAI"]
         for target in TARGETS:
             try:
                 user = self.x_client.get_user(username=target).data
@@ -120,26 +135,26 @@ class SovereignExpert:
                 if not tweets: continue
                 
                 for tweet in tweets:
-                    h = hashlib.md5(f"radar_{tweet.id}".encode()).hexdigest()
+                    h = hashlib.md5(f"reply_{tweet.id}".encode()).hexdigest()
                     with sqlite3.connect(self.db_path) as conn:
                         if conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone(): continue
                     
-                    if any(word in tweet.text.lower() for word in ["ai", "ذكاء", "tech", "تطبيق", "أداة"]):
+                    if any(word in tweet.text.lower() for word in ["ai", "ذكاء", "tech", "تطبيق"]):
                         self._smart_engage(tweet, target, h)
-                        time.sleep(random.randint(30, 60)) # فاصل بشري بين الردود
                         break
             except: continue
 
     def _smart_engage(self, tweet, username, h):
-        prompt = f"أنت خبير تقني خليجي، رد على تغريدة {username} بذكاء ولباقة. لا توافقه الرأي دائماً إذا كان هناك وجهة نظر تقنية أخرى. اجعل الرد يثير الفضول حول 'أدوات الذكاء الاصطناعي'. التغريدة: {tweet.text}"
-        reply = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt).text
+        prompt = f"رد كخبير تقني خليجي بذكاء على تغريدة {username} حول التقنية. اجعل الرد بشرياً جداً ومثيراً للاهتمام. التغريدة: {tweet.text}"
+        res = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        reply = res.text.strip()
         self.x_client.create_tweet(text=reply[:275], in_reply_to_tweet_id=tweet.id)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
             conn.commit()
+        logging.info(f"💬 تم الرد بنجاح على {username}")
 
 if __name__ == "__main__":
     expert = SovereignExpert()
-    expert.fetch_exclusive_news()
-    expert.handle_posting()
-    expert.handle_radar()
+    expert.handle_posting() # النشر الفوري
+    expert.handle_radar()   # التفاعل مع المؤثرين
