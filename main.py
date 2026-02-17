@@ -50,7 +50,7 @@ class SovereignBot:
 
     def _get_image(self, url):
         try:
-            res = requests.get(url, timeout=10)
+            res = requests.get(url, timeout=0)
             soup = BeautifulSoup(res.text, 'html.parser')
             img = soup.find("meta", property="og:image")
             return img["content"] if img else None
