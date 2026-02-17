@@ -1,8 +1,7 @@
-name: tech-sovereign-bot
+name: sovereign-autonomous-system
 on:
   schedule:
-    # أوقات الذروة الخليجية: 9ص، 4ع، 9م (توقيت مكة)
-    - cron: '0 6,13,18 * * *'
+    - cron: '*/20 * * * *' # تشغيل كل 20 دقيقة
   workflow_dispatch:
 
 jobs:
@@ -29,14 +28,9 @@ jobs:
 
       - name: Run Sovereign Bot
         env:
-          # مفاتيح المحركات السداسية
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
-          # مفاتيح منصة X
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -48,4 +42,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bot-memory
-          path: data/expert_v26.db
+          path: data/sovereign_final.db
