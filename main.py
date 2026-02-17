@@ -1,35 +1,38 @@
 import os
 import sqlite3
 import logging
-import time
 import hashlib
-import requests
 import tweepy
 import feedparser
 from datetime import datetime, timezone
 from google import genai
 from openai import OpenAI
 
-# إعداد السجلات لمراقبة أداء العقول
+# إعداد السجلات
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 class SovereignExpert:
     def __init__(self):
-        # 1. ربط المفاتيح بالمسميات الدقيقة من صورتك
-        self.secrets = {
+        # 1. تعريف مصفوفة المفاتيح حسب دستورك المعتمد
+        self.keys = {
             "gemini": os.getenv("GEMINI_KEY"),
             "openai": os.getenv("OPENAI_API_KEY"),
             "groq": os.getenv("GROQ_API_KEY"),
+            "openrouter": os.getenv("OPENROUTER_API_KEY"),
             "xai": os.getenv("XAI_API_KEY"),
-            # مفاتيح X
-            "x_api": os.getenv("X_API_KEY"),
-            "x_secret": os.getenv("X_API_SECRET"),
-            "x_token": os.getenv("X_ACCESS_TOKEN"),
-            "x_token_secret": os.getenv("X_ACCESS_SECRET"),
-            "x_bearer": os.getenv("X_BEARER_TOKEN")
+            "qwen": os.getenv("QWEN_API_KEY")
         }
         
-        self.db_path = "data/expert_v28.db"
+        # 2. مفاتيح منصة X
+        self.x_creds = {
+            "api": os.getenv("X_API_KEY"),
+            "secret": os.getenv("X_API_SECRET"),
+            "token": os.getenv("X_ACCESS_TOKEN"),
+            "t_secret": os.getenv("X_ACCESS_SECRET"),
+            "bearer": os.getenv("X_BEARER_TOKEN")
+        }
+
+        self.db_path = "data/expert_v26.db"
         self._init_db()
         self._setup_x()
         self._setup_brains()
@@ -41,97 +44,76 @@ class SovereignExpert:
             conn.execute("CREATE TABLE IF NOT EXISTS waiting_room (hash TEXT PRIMARY KEY, content TEXT, url TEXT, ts DATETIME)")
 
     def _setup_x(self):
-        """الربط مع منصة X باستخدام المفاتيح المحفوظة"""
         try:
             self.x_client = tweepy.Client(
-                bearer_token=self.secrets["x_bearer"],
-                consumer_key=self.secrets["x_api"],
-                consumer_secret=self.secrets["x_secret"],
-                access_token=self.secrets["x_token"],
-                access_token_secret=self.secrets["x_token_secret"]
+                bearer_token=self.x_creds["bearer"],
+                consumer_key=self.x_creds["api"],
+                consumer_secret=self.x_creds["secret"],
+                access_token=self.x_creds["token"],
+                access_token_secret=self.x_creds["t_secret"]
             )
-            logging.info("✅ نظام التواصل مع X متصل وجاهز.")
-        except Exception as e:
-            logging.error(f"❌ فشل ربط X: {e}")
+            logging.info("✅ منصة X متصلة.")
+        except Exception as e: logging.error(f"❌ خطأ X: {e}")
 
     def _setup_brains(self):
-        """تهيئة العقول المتاحة فقط بناءً على الـ Secrets"""
-        self.active_brains = {}
+        """تهيئة العقول الستة بنظام الفحص الاستباقي"""
+        self.brains = {}
+        # Gemini
+        if self.keys["gemini"]:
+            self.brains["gemini"] = genai.Client(api_key=self.keys["gemini"])
+        # OpenAI & Others (OpenAI-compatible protocol)
+        configs = {
+            "openai": (self.keys["openai"], None, "gpt-4o-mini"),
+            "groq": (self.keys["groq"], "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+            "openrouter": (self.keys["openrouter"], "https://openrouter.ai/api/v1", "google/gemini-2.0-flash-001"),
+            "xai": (self.keys["xai"], "https://api.x.ai/v1", "grok-beta"),
+            "qwen": (self.keys["qwen"], "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max")
+        }
         
-        # العقل الأول: Gemini
-        if self.secrets["gemini"]:
-            self.active_brains["gemini"] = genai.Client(api_key=self.secrets["gemini"])
+        for name, (key, url, model) in configs.items():
+            if key:
+                self.brains[name] = {"client": OpenAI(api_key=key, base_url=url), "model": model}
         
-        # العقل الثاني: OpenAI
-        if self.secrets["openai"]:
-            self.active_brains["openai"] = OpenAI(api_key=self.secrets["openai"])
-            
-        # العقل الثالث: Groq
-        if self.secrets["groq"]:
-            self.active_brains["groq"] = OpenAI(api_key=self.secrets["groq"], base_url="https://api.groq.com/openai/v1")
-            
-        # العقل الرابع: XAI (Grok)
-        if self.secrets["xai"]:
-            self.active_brains["xai"] = OpenAI(api_key=self.secrets["xai"], base_url="https://api.x.ai/v1")
+        logging.info(f"🧠 العقول الجاهزة للخدمة: {list(self.brains.keys())}")
 
-        logging.info(f"🧠 العقول التشغيلية: {list(self.active_brains.keys())}")
-
-    def _ask_specific_brain(self, name, prompt):
-        """تنفيذ الطلب حسب بروتوكول كل عقل"""
-        if name == "gemini":
-            res = self.active_brains[name].models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            return res.text.strip()
+    def generate_content(self, prompt):
+        """محرك التبديل التلقائي السلس"""
+        order = ["gemini", "openai", "groq", "xai", "openrouter", "qwen"]
         
-        # بقية العقول تستخدم بروتوكول OpenAI
-        model_names = {"openai": "gpt-4o-mini", "groq": "llama-3.3-70b-versatile", "xai": "grok-beta"}
-        res = self.active_brains[name].chat.completions.create(
-            model=model_names[name],
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=300
-        )
-        return res.choices[0].message.content.strip()
-
-    def failover_generator(self, prompt):
-        """نظام التبديل الرباعي الذكي"""
-        for brain_name in ["gemini", "openai", "groq", "xai"]:
-            if brain_name in self.active_brains:
-                try:
-                    logging.info(f"🔄 محاولة مع العقل: {brain_name}")
-                    result = self._ask_specific_brain(brain_name, prompt)
-                    if result: return result
-                except Exception as e:
-                    logging.warning(f"⚠️ {brain_name} في حالة تعذر: {e}")
-                    continue
+        for name in order:
+            if name not in self.brains: continue
+            try:
+                logging.info(f"🔄 محاولة الاستعانة بـ: {name}")
+                if name == "gemini":
+                    res = self.brains[name].models.generate_content(model="gemini-2.0-flash", contents=prompt)
+                    return res.text.strip()
+                else:
+                    res = self.brains[name]["client"].chat.completions.create(
+                        model=self.brains[name]["model"],
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    return res.choices[0].message.content.strip()
+            except Exception as e:
+                logging.warning(f"⚠️ {name} اعتذر عن الخدمة (نفاذ حصة أو ضغط). ننتقل للتالي...")
+                continue
         return None
 
-    def fetch_latest_ai_tools(self):
-        """جلب أخبار أدوات الذكاء الاصطناعي للأفراد"""
-        feed_url = "https://techcrunch.com/category/artificial-intelligence/feed/"
-        feed = feedparser.parse(feed_url)
+    def run(self):
+        # جلب الأخبار
+        feed = feedparser.parse("https://techcrunch.com/category/artificial-intelligence/feed/")
         for entry in feed.entries[:5]:
             h = hashlib.md5(entry.link.encode()).hexdigest()
             with sqlite3.connect(self.db_path) as conn:
                 if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
-                    conn.execute("INSERT OR REPLACE INTO waiting_room VALUES (?, ?, ?, ?)",
-                                (h, entry.title, entry.link, datetime.now(timezone.utc)))
-
-    def run_cycle(self):
-        self.fetch_latest_ai_tools()
-        with sqlite3.connect(self.db_path) as conn:
-            target = conn.execute("SELECT hash, content, url FROM waiting_room LIMIT 1").fetchone()
-            if target:
-                h, content, url = target
-                # صياغة الطلب بلهجة خليجية بيضاء (AI Tools for Individuals)
-                prompt = f"صغ هذا الخبر كخبير تقني خليجي متمكن. ركز على فوائد أدوات الذكاء الاصطناعي للأفراد. الخبر: {content}. الرابط: {url}"
-                
-                final_post = self.failover_generator(prompt)
-                if final_post:
-                    self.x_client.create_tweet(text=final_post[:278])
-                    conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
-                    conn.execute("DELETE FROM waiting_room WHERE hash=?", (h,))
-                    conn.commit()
-                    logging.info("🚀 تم النشر بنجاح بفضل نظام العقول المتعددة!")
+                    prompt = f"صغ هذا الخبر بلهجة خليجية بيضاء كخبير تقني، ركز على أدوات الذكاء الاصطناعي للأفراد: {entry.title}. المصدر: {entry.link}"
+                    final_text = self.generate_content(prompt)
+                    
+                    if final_text:
+                        self.x_client.create_tweet(text=final_text[:278])
+                        conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
+                        conn.commit()
+                        logging.info(f"🚀 تم النشر بنجاح عبر نظام العقول المتعددة!")
+                        break # نشر تغريدة واحدة في كل دورة
 
 if __name__ == "__main__":
-    expert = SovereignExpert()
-    expert.run_cycle()
+    SovereignExpert().run()
