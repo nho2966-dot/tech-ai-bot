@@ -27,9 +27,8 @@ class SovereignUltimateBot:
         self.replied_tweets_cache: set = set()
         self.last_mention_id: Optional[int] = None
 
-        # قائمة RSS Feeds الشاملة (عالمية + عربية + مصرية + خليجية)
+        # قائمة RSS Feeds
         self.rss_feeds = [
-            # عالمية
             "https://www.theverge.com/rss/index.xml",
             "https://techcrunch.com/feed/",
             "https://www.wired.com/feed/category/science/latest/rss",
@@ -44,7 +43,6 @@ class SovereignUltimateBot:
             "https://huggingface.co/blog/feed.xml",
             "https://www.deepmind.com/blog/rss.xml",
             "https://openai.com/blog/rss/",
-            # عربية عامة
             "https://www.tech-wd.com/wd-rss-feed.xml",
             "https://www.aitnews.com/feed/",
             "https://www.arageek.com/feed/tech",
@@ -52,7 +50,6 @@ class SovereignUltimateBot:
             "https://www.tqniah.net/feed/",
             "https://www.arabtechs.net/feed",
             "https://www.taqniah.com/feed/",
-            # مصرية
             "https://www.youm7.com/rss/Technologia",
             "https://www.almasryalyoum.com/rss",
             "https://www.masrawy.com/rss/tech",
@@ -61,7 +58,6 @@ class SovereignUltimateBot:
             "https://www.dostor.org/rss/technology",
             "https://www.vetogate.com/rss/technology",
             "https://www.cairo24.com/rss/technology",
-            # خليجية
             "https://sabq.org/feed",
             "https://www.aleqt.com/feed",
             "https://aawsat.com/rss/technologia",
@@ -110,10 +106,12 @@ class SovereignUltimateBot:
             self.my_user_id = None
 
         self.llm_clients = {
-            "xAI": OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1"),
             "Groq": OpenAI(api_key=os.getenv("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1"),
+            "Gemini": self.gemini_client,
             "OpenAI": OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
             "OpenRouter": OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1"),
+            # xAI معطل مؤقتًا حتى يتم حل مشكلة 403
+            # "xAI": OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1"),
         }
 
     @retry(
@@ -124,15 +122,15 @@ class SovereignUltimateBot:
     )
     def generate_text(self, prompt: str, system_msg: str) -> str:
         sequence = [
-            ("xAI Grok", "xAI", "grok-4-1-fast-reasoning"),
-            ("Groq Llama", "Groq", "llama-3.3-70b-versatile"),
+            ("Groq Llama 3.3", "Groq", "llama-3.3-70b-versatile"),
             ("Gemini Flash", "Gemini", "gemini-2.5-flash"),
             ("OpenAI 4o-mini", "OpenAI", "gpt-4o-mini"),
+            ("OpenRouter Gemini", "OpenRouter", "google/gemini-2.5-flash"),
         ]
 
         for name, key, model in sequence:
             try:
-                client = self.llm_clients.get(key) if key != "Gemini" else self.gemini_client
+                client = self.llm_clients.get(key)
                 if not client:
                     continue
 
@@ -164,7 +162,6 @@ class SovereignUltimateBot:
 
     def clean_forbidden_words(self, text: str) -> str:
         forbidden_replacements = {
-            # مشتقات "قسم"
             "قسم": "جد",
             "أقسم": "بجد",
             "اقسم": "بجد",
@@ -173,7 +170,6 @@ class SovereignUltimateBot:
             "قسمها": "جد",
             "قسموا": "جد",
             "قسم بالله": "بجد",
-            # ألفاظ جلالة ومشتقاتها
             "الله": "",
             "والله": "بجد",
             "بالله": "صدقني",
@@ -259,16 +255,19 @@ class SovereignUltimateBot:
         if not self.my_user_id:
             return
 
-        MAX_REPLIES = 3
+        MAX_REPLIES = 2  # قللنا لتجنب 429
         count = 0
 
         try:
             mentions = self.x_client.get_users_mentions(
                 id=self.my_user_id,
                 since_id=self.last_mention_id,
-                max_results=10,
+                max_results=5,  # قللنا لتجنب rate limit
                 tweet_fields=['conversation_id', 'author_id', 'created_at']
             )
+        except tweepy.TooManyRequests:
+            logging.warning("429 Too Many Requests في جلب المنشنات → تخطي هذه المرة")
+            return
         except Exception as e:
             logging.error(f"فشل جلب منشنات: {e}")
             return
@@ -312,7 +311,10 @@ class SovereignUltimateBot:
                 self.mark_as_replied(tid)
                 self.replied_tweets_cache.add(tid)
                 count += 1
-                time.sleep(60 + random.randint(0, 90))
+                time.sleep(180 + random.randint(0, 120))  # تأخير أطول لتجنب 429
+            except tweepy.TooManyRequests:
+                logging.warning("429 أثناء النشر → توقف مؤقت")
+                break
             except Exception as e:
                 logging.error(f"فشل رد على {tid}: {e}")
 
@@ -336,61 +338,74 @@ class SovereignUltimateBot:
         return True
 
     def run(self):
-        fresh_news = self.fetch_fresh_rss(max_per_feed=4, max_age_hours=36)
-
-        context = ""
-        if fresh_news:
-            local_first = [a for a in fresh_news if any(x in a['source'].lower() for x in ['مصر', 'youm7', 'masrawy', 'اليوم', 'البوابة', 'الوطن', 'سعود', 'إمارات', 'قطر', 'كويت'])]
-            top = local_first[0] if local_first else fresh_news[0]
-
-            context = (
-                f"\n\nخبر حديث مهم من {top['source']}:\n"
-                f"{top['title']}\n"
-                f"{top['summary'][:160]}...\nرابط: {top['link']}\n"
-                "استخدمه كإلهام إذا كان يضيف قيمة عملية مباشرة."
-            )
-
-        task = f"أعطني خبر أو أداة ذكاء اصطناعي جديدة كلياً ومفيدة للأفراد اليوم.{context}"
-
-        raw_output = self.generate_text(task, SYSTEM_PROMPT)
-
-        cleaned_output = self.clean_forbidden_words(raw_output)
-
-        if not cleaned_output:
-            return
-
-        image_desc = ""
-        content = cleaned_output
-        if "وصف_صورة:" in cleaned_output:
-            parts = cleaned_output.rsplit("وصف_صورة:", 1)
-            content = parts[0].strip()
-            image_desc = parts[1].strip()
-
-        if self.already_posted(content):
-            logging.info("محتوى مكرر → تخطي")
-            return
-
-        tweets = [t.strip() for t in content.split("---") if t.strip()]
-
         try:
+            fresh_news = self.fetch_fresh_rss(max_per_feed=4, max_age_hours=36)
+
+            context = ""
+            if fresh_news:
+                local_first = [a for a in fresh_news if any(x in a['source'].lower() for x in ['مصر', 'youm7', 'masrawy', 'اليوم', 'البوابة', 'الوطن', 'سعود', 'إمارات', 'قطر', 'كويت'])]
+                top = local_first[0] if local_first else fresh_news[0]
+
+                context = (
+                    f"\n\nخبر حديث مهم من {top['source']}:\n"
+                    f"{top['title']}\n"
+                    f"{top['summary'][:160]}...\nرابط: {top['link']}\n"
+                    "استخدمه كإلهام إذا كان يضيف قيمة عملية مباشرة."
+                )
+
+            task = f"أعطني خبر أو أداة ذكاء اصطناعي جديدة كلياً ومفيدة للأفراد اليوم.{context}"
+
+            raw_output = self.generate_text(task, SYSTEM_PROMPT)
+
+            cleaned_output = self.clean_forbidden_words(raw_output)
+
+            if not cleaned_output:
+                logging.warning("لم يتم توليد محتوى صالح")
+                return
+
+            image_desc = ""
+            content = cleaned_output
+            if "وصف_صورة:" in cleaned_output:
+                parts = cleaned_output.rsplit("وصف_صورة:", 1)
+                content = parts[0].strip()
+                image_desc = parts[1].strip()
+
+            if self.already_posted(content):
+                logging.info("محتوى مكرر → تخطي")
+                return
+
+            tweets = [t.strip() for t in content.split("---") if t.strip()]
+
             prev_id = None
             for i, txt in enumerate(tweets):
-                kwargs = {"text": txt}
-                if i == 0 and image_desc:
-                    logging.info(f"صورة مقترحة: {image_desc}")
-                if prev_id:
-                    kwargs["in_reply_to_tweet_id"] = prev_id
-                resp = self.x_client.create_tweet(**kwargs)
-                prev_id = resp.data["id"]
-                logging.info(f"نشر تغريدة {i+1}/{len(tweets)}")
+                try:
+                    kwargs = {"text": txt}
+                    if i == 0 and image_desc:
+                        logging.info(f"صورة مقترحة: {image_desc}")
+                    if prev_id:
+                        kwargs["in_reply_to_tweet_id"] = prev_id
+                    resp = self.x_client.create_tweet(**kwargs)
+                    prev_id = resp.data["id"]
+                    logging.info(f"نشر تغريدة {i+1}/{len(tweets)} بنجاح")
+                    time.sleep(5 + random.random() * 10)  # تأخير صغير بين تغريدات الثريد
+                except tweepy.TooManyRequests:
+                    logging.warning("429 أثناء النشر → توقف مؤقت")
+                    break
+                except tweepy.BadRequest as e:
+                    logging.error(f"400 Bad Request في النشر: {e}")
+                    continue
+                except Exception as e:
+                    logging.error(f"خطأ غير متوقع في النشر: {e}")
+                    continue
+
+            self.handle_mentions()
+            self.mark_posted(content)
+
         except Exception as e:
-            logging.error(f"خطأ نشر: {e}")
-
-        self.handle_mentions()
-        self.mark_posted(content)
+            logging.error(f"خطأ عام في run(): {e}")
 
 
-# ── SYSTEM_PROMPT الكامل (مع منع "قسم" + ألفاظ جلالة + فلتر قيمة عملية) ──
+# ── SYSTEM_PROMPT الكامل ──
 SYSTEM_PROMPT = r"""
 أنت شاب خليجي عاشق للتقنية والذكاء الاصطناعي، أسلوبك عفوي، حماسي، صريح، قريب من القلب. 
 تستخدم كلمات مثل: "يا جماعة"، "يجنن"، "هذا الشيء غير حياتي"، "صراحة ما توقعت"، 
