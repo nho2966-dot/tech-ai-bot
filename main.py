@@ -5,7 +5,7 @@ import tweepy
 import logging
 from datetime import datetime, date
 from openai import OpenAI
-import google.generativeai as genai
+from google import genai   # ← هذا الـ import الصحيح للمكتبة الجديدة
 import time
 
 logging.basicConfig(level=logging.INFO, format="🛡️ [نظام السيادة]: %(message)s")
@@ -23,7 +23,7 @@ class SovereignUltimateBot:
             conn.execute("CREATE TABLE IF NOT EXISTS daily_stats (day TEXT PRIMARY KEY, count INTEGER)")
 
     def _setup_all_brains(self):
-        # Gemini configure مرة واحدة
+        # Gemini configure مرة واحدة (الطريقة الجديدة)
         try:
             genai.configure(api_key=os.getenv("GEMINI_KEY"))
         except Exception as e:
@@ -40,7 +40,7 @@ class SovereignUltimateBot:
         self.brains = {
             "Groq": OpenAI(api_key=os.getenv("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1"),
             "xAI": OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1"),
-            "Gemini": genai,  # نحفظ الـ module
+            "Gemini": genai,  # نحفظ الـ genai module مباشرة
             "OpenAI": OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
             "OpenRouter": OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
         }
@@ -78,7 +78,7 @@ class SovereignUltimateBot:
                     client = self.brains[provider_key]
 
                     if provider_key == "Gemini":
-                        model = client.GenerativeModel(model_id)
+                        model = client.GenerativeModel(model_id)  # client = genai
                         res = model.generate_content(f"{system_msg}\n{prompt}")
                         text = res.text.strip()
                     else:
@@ -109,7 +109,7 @@ class SovereignUltimateBot:
                         time.sleep(10)
                         continue
                     else:
-                        break  # أخطاء أخرى → ننتقل للعقل التالي
+                        break
 
         logging.error("❌ كل العقول فشلت.")
         return None
