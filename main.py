@@ -4,109 +4,129 @@ import logging
 import time
 import hashlib
 import sys
+import feedparser
+import tweepy
 from datetime import datetime, timedelta, timezone
 from google import genai
 from openai import OpenAI
-import tweepy
 
-# إعدادات المراقبة
+# إعدادات التسجيل الاحترافية
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 class SovereignAutonomousSystem:
     def __init__(self):
-        # 🧠 العقول الأربعة المستقلة
-        self.brain_impact = genai.Client(api_key=os.getenv("GEMINI_KEY")) # Gemini
-        self.brain_verify = OpenAI(api_key=os.getenv("OPENAI_KEY"))       # OpenAI
-        self.brain_hype = OpenAI(api_key=os.getenv("GROQ_KEY"), base_url="https://api.groq.com/openai/v1") # Groq
-        self.brain_editorial = self.brain_impact # إعادة استخدام محرك Gemini للصياغة
+        # 🔗 الربط مع المسميات الموجودة في إعدادات GitHub الخاصة بك
+        self.gemini_key = os.getenv("GEMINI_KEY")
+        self.openai_key = os.getenv("OPENAI_API_KEY")  # مطابق للصورة
+        self.groq_key = os.getenv("GROQ_API_KEY")      # مطابق للصورة
         
-        self.x_client = tweepy.Client(
-            bearer_token=os.getenv("X_BEARER_TOKEN"),
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
-        )
+        # 🧠 إعداد العقول الأربعة
+        self._setup_brains()
+        
+        # 🐦 إعداد منصة X
+        try:
+            self.x_client = tweepy.Client(
+                bearer_token=os.getenv("X_BEARER_TOKEN"),
+                consumer_key=os.getenv("X_API_KEY"),
+                consumer_secret=os.getenv("X_API_SECRET"),
+                access_token=os.getenv("X_ACCESS_TOKEN"),
+                access_token_secret=os.getenv("X_ACCESS_SECRET"),
+                wait_on_rate_limit=True
+            )
+            logging.info("✅ X Platform: Connected")
+        except Exception as e:
+            logging.error(f"❌ X Platform Connection Failed: {e}")
 
-        self.db_path = "data/sovereign_v14.db"
+        self.db_path = "data/sovereign_v15.db"
         self._init_db()
+
+    def _setup_brains(self):
+        # العقل 1 & 4 (Gemini)
+        if self.gemini_key:
+            self.brain_primary = genai.Client(api_key=self.gemini_key)
+            logging.info("✅ Gemini Brain (Impact/Editorial): Ready")
+        else:
+            logging.error("❌ GEMINI_KEY is missing! Critical Error.")
+            sys.exit(1)
+        
+        # العقل 2 (OpenAI - التحقق)
+        if self.openai_key:
+            self.brain_verify = OpenAI(api_key=self.openai_key)
+            logging.info("✅ OpenAI Brain (Verification): Ready")
+        else:
+            self.brain_verify = None
+            logging.warning("⚠️ OpenAI Key missing, using Gemini as fallback")
+
+        # العقل 3 (Groq - كشف الضجيج)
+        if self.groq_key:
+            self.brain_hype = OpenAI(api_key=self.groq_key, base_url="https://api.groq.com/openai/v1")
+            logging.info("✅ Groq Brain (Hype Detection): Ready")
+        else:
+            self.brain_hype = None
+            logging.warning("⚠️ Groq Key missing, using Gemini as fallback")
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
-            # الذاكرة التحريرية وغرفة الانتظار
-            conn.execute("CREATE TABLE IF NOT EXISTS memory (hash TEXT PRIMARY KEY, type TEXT, ts DATETIME)")
+            conn.execute("CREATE TABLE IF NOT EXISTS memory (hash TEXT PRIMARY KEY, ts DATETIME)")
             conn.execute("CREATE TABLE IF NOT EXISTS waiting_room (hash TEXT PRIMARY KEY, raw_text TEXT, score REAL, ts DATETIME)")
 
-    # --- بروتوكول الذروة الخليجية ---
     def is_peak_time(self):
-        # التركيز على ذروة الاستخدام في الخليج (GMT+3 / GMT+4)
-        # من 8 صباحاً إلى 11 مساءً بتوقيت الرياض
+        # ذروة الخليج (8ص - 11م بتوقيت الرياض GMT+3)
         now_riyadh = datetime.now(timezone(timedelta(hours=3)))
         return 8 <= now_riyadh.hour <= 23
 
-    # --- محرك التقييم الرباعي ---
-    def evaluate_and_buffer(self, raw_news):
-        if not self.is_peak_time():
-            logging.info("💤 خارج أوقات الذروة الخليجية.. حفظ المحتوى للدورة القادمة.")
-            return
+    def evaluate_news(self, news_text):
+        if not self.is_peak_time(): return
+        
+        # 1. Impact Score (Gemini)
+        res_i = self.brain_primary.models.generate_content(model="gemini-2.0-flash", contents=f"Rate AI impact (0-10): {news_text}")
+        impact = float(''.join(c for c in res_i.text if c.isdigit() or c=='.') or 0)
 
-        # 1. Impact Brain (Gemini)
-        impact_res = self.brain_impact.models.generate_content(
-            model="gemini-2.0-flash", 
-            contents=f"Rate AI impact for individuals (0-10): {raw_news}"
-        )
-        impact_score = float(''.join(filter(lambda x: x.isdigit() or x=='.', impact_res.text)) or 0)
+        # 2. Verify (OpenAI or Gemini fallback)
+        if self.brain_verify:
+            res_v = self.brain_verify.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":f"Verify news (0-10): {news_text}"}])
+            verify = float(''.join(c for c in res_v.choices[0].message.content if c.isdigit() or c=='.') or 0)
+        else: verify = 8.0 
 
-        # 2. Verification Brain (OpenAI)
-        verify_res = self.brain_verify.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": f"Is this AI news verifiable? (0-10): {raw_news}"}]
-        )
-        verify_score = float(''.join(filter(lambda x: x.isdigit() or x=='.', verify_res.choices[0].message.content)) or 0)
+        # 3. Hype Penalty (Groq or Gemini fallback)
+        hype = 0.2
+        if self.brain_hype:
+            res_h = self.brain_hype.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":f"Hype penalty (0-2): {news_text}"}])
+            hype = float(''.join(c for c in res_h.choices[0].message.content if c.isdigit() or c=='.') or 0.2)
 
-        # 3. Hype Brain (Groq/Llama)
-        hype_res = self.brain_hype.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": f"Rate market hype/exaggeration (0-2): {raw_news}"}]
-        )
-        hype_penalty = float(''.join(filter(lambda x: x.isdigit() or x=='.', hype_res.choices[0].message.content)) or 0)
+        final_score = (impact + verify) / 2 - hype
+        logging.info(f"📊 Evaluation: Score={final_score:.2f} | Impact={impact} | Verify={verify} | Hype={hype}")
 
-        # المعادلة السيادية
-        final_score = (impact_score + verify_score) / 2 - hype_penalty
-
-        if final_score >= 9.2 and impact_score >= 8:
-            h = hashlib.md5(raw_news.encode()).hexdigest()
+        if final_score >= 9.2 and impact >= 8:
+            h = hashlib.md5(news_text.encode()).hexdigest()
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("INSERT OR REPLACE INTO waiting_room (hash, raw_text, score, ts) VALUES (?, ?, ?, ?)",
-                            (h, raw_news, final_score, datetime.now(timezone.utc)))
-            logging.info(f"✅ تم اجتياز الفحص الأولي (Score: {final_score:.2f}). دخول غرفة الانتظار.")
+                            (h, news_text, final_score, datetime.now(timezone.utc)))
+            logging.info("⏳ الخبر في غرفة الانتظار (تأمل لـ 20 دقيقة)...")
 
-    # --- محرك النشر بعد "التأمل" ---
-    def final_editorial_release(self):
-        logging.info("🕒 فحص غرفة الانتظار (إعادة التقييم بعد 20 دقيقة)...")
+    def process_waiting_room(self):
         with sqlite3.connect(self.db_path) as conn:
-            ready_news = conn.execute("SELECT hash, raw_text FROM waiting_room WHERE ts < ?", 
-                                     (datetime.now(timezone.utc) - timedelta(minutes=20),)).fetchall()
-            
-            for h, raw_text in ready_news:
-                # العقل الرابع: الصياغة النهائية (Editorial Brain)
-                editorial_prompt = f"اكتب تحليلاً سيادياً بلهجة خليجية لهذا الخبر، ركز على 'وش يهم الفرد؟':\n{raw_text}"
-                final_post = self.brain_editorial.models.generate_content(
-                    model="gemini-2.0-flash", contents=editorial_prompt
-                ).text
-
+            ready = conn.execute("SELECT hash, raw_text FROM waiting_room WHERE ts < ?", 
+                                (datetime.now(timezone.utc) - timedelta(minutes=20),)).fetchall()
+            for h, text in ready:
+                # 4. Editorial Brain (Gemini)
+                prompt = f"صغ هذا الخبر بلهجة خليجية مهنية جداً للأفراد، ركز على الفائدة العملية:\n{text}"
+                final_post = self.brain_primary.models.generate_content(model="gemini-2.0-flash", contents=prompt).text
+                
                 try:
-                    self.x_client.create_tweet(text=f"{final_post[:250]}\n\n#ذكاء_اصطناعي #تقنية")
+                    self.x_client.create_tweet(text=f"{final_post[:260]}")
                     conn.execute("INSERT INTO memory (hash, ts) VALUES (?, ?)", (h, datetime.now(timezone.utc)))
-                    conn.execute("DELETE FROM waiting_room WHERE hash = ?", (h,))
+                    conn.execute("DELETE FROM waiting_room WHERE hash=?", (h,))
                     conn.commit()
-                    logging.info("🎯 تم النشر بنجاح بعد فترة التأمل.")
+                    logging.info("🎯 تم النشر بنجاح!")
                 except Exception as e:
-                    logging.error(f"❌ خطأ نشر: {e}")
+                    logging.error(f"❌ النشر فشل: {e}")
 
 if __name__ == "__main__":
     bot = SovereignAutonomousSystem()
-    # هنا يتم استلام الخبر من الـ RSS أو البحث
-    # bot.evaluate_and_buffer(news_item)
-    bot.final_editorial_release()
+    # تجربة فحص أخبار جديدة
+    test_news = "OpenAI releases new personal assistant 'Operator' for all users today."
+    bot.evaluate_news(test_news)
+    # فحص الغرفة للنشر
+    bot.process_waiting_room()
