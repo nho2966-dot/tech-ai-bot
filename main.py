@@ -4,114 +4,109 @@ import logging
 import time
 import hashlib
 import sys
-import feedparser
+from datetime import datetime, timedelta, timezone
+from google import genai
+from openai import OpenAI
 import tweepy
-from datetime import datetime, timezone
-from google import genai  # العقل الأساسي
 
-# === إعداد تسجيل الأخطاء (Log) ===
+# إعدادات المراقبة
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
-class SovereignBot:
+class SovereignAutonomousSystem:
     def __init__(self):
-        # إعداد العقول والمنصات
-        self.ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
+        # 🧠 العقول الأربعة المستقلة
+        self.brain_impact = genai.Client(api_key=os.getenv("GEMINI_KEY")) # Gemini
+        self.brain_verify = OpenAI(api_key=os.getenv("OPENAI_KEY"))       # OpenAI
+        self.brain_hype = OpenAI(api_key=os.getenv("GROQ_KEY"), base_url="https://api.groq.com/openai/v1") # Groq
+        self.brain_editorial = self.brain_impact # إعادة استخدام محرك Gemini للصياغة
+        
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
             consumer_secret=os.getenv("X_API_SECRET"),
             access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET"),
-            wait_on_rate_limit=True
+            access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        self.db_path = "data/sovereign_v9.db"
+
+        self.db_path = "data/sovereign_v14.db"
         self._init_db()
-        self.sys_instruction = (
-            "Focus on Artificial Intelligence and its latest tools for individuals. Gulf dialect. "
-            "NEVER mention 'Industrial Revolution', replace it with 'Artificial Intelligence and its latest tools'. "
-            "Professional, no symbols, no Chinese characters."
-        )
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-            CREATE TABLE IF NOT EXISTS tweets (
-                hash TEXT PRIMARY KEY, 
-                tweet_id TEXT, 
-                type TEXT, 
-                ts DATETIME DEFAULT CURRENT_TIMESTAMP
-            )""")
+            # الذاكرة التحريرية وغرفة الانتظار
+            conn.execute("CREATE TABLE IF NOT EXISTS memory (hash TEXT PRIMARY KEY, type TEXT, ts DATETIME)")
+            conn.execute("CREATE TABLE IF NOT EXISTS waiting_room (hash TEXT PRIMARY KEY, raw_text TEXT, score REAL, ts DATETIME)")
 
-    def _is_posted(self, content_hash):
-        with sqlite3.connect(self.db_path) as conn:
-            return conn.execute("SELECT 1 FROM tweets WHERE hash = ?", (content_hash,)).fetchone() is not None
+    # --- بروتوكول الذروة الخليجية ---
+    def is_peak_time(self):
+        # التركيز على ذروة الاستخدام في الخليج (GMT+3 / GMT+4)
+        # من 8 صباحاً إلى 11 مساءً بتوقيت الرياض
+        now_riyadh = datetime.now(timezone(timedelta(hours=3)))
+        return 8 <= now_riyadh.hour <= 23
 
-    def _mark_posted(self, content_hash, tweet_id, t_type):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO tweets (hash, tweet_id, type) VALUES (?, ?, ?)", (content_hash, tweet_id, t_type))
-            conn.commit()
-
-    def _ask_ai(self, prompt):
-        try:
-            res = self.ai_client.models.generate_content(
-                model="gemini-2.0-flash", 
-                contents=prompt,
-                config={'system_instruction': self.sys_instruction}
-            )
-            return res.text.strip()
-        except Exception as e:
-            logging.error(f"⚠️ خطأ في العقل: {e}")
-            return None
-
-    # === نظام العقول المتسلسلة المدمج ===
-    def process_and_post(self, keyword):
-        logging.info(f"🚀 معالجة الكلمة المفتاحية: {keyword}")
-
-        # 1️⃣ العقل الأول (جمناي) - التغريدة الأساسية (الخبر)
-        main_prompt = f"اكتب خبر سكوب عن {keyword} بلهجة خليجية، ركز على فايدة الفرد."
-        main_content = self._ask_ai(main_prompt)
-        if not main_content: return
-
-        content_hash = hashlib.md5(main_content.encode()).hexdigest()
-        if self._is_posted(content_hash):
-            logging.info("⚠️ المحتوى مكرر، تم الإيقاف.")
+    # --- محرك التقييم الرباعي ---
+    def evaluate_and_buffer(self, raw_news):
+        if not self.is_peak_time():
+            logging.info("💤 خارج أوقات الذروة الخليجية.. حفظ المحتوى للدورة القادمة.")
             return
 
-        try:
-            # نشر التغريدة الأساسية
-            main_tweet = self.x_client.create_tweet(text=main_content)
-            main_id = main_tweet.data["id"]
-            self._mark_posted(content_hash, main_id, "main")
-            logging.info("✅ تم نشر التغريدة الأساسية")
+        # 1. Impact Brain (Gemini)
+        impact_res = self.brain_impact.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=f"Rate AI impact for individuals (0-10): {raw_news}"
+        )
+        impact_score = float(''.join(filter(lambda x: x.isdigit() or x=='.', impact_res.text)) or 0)
 
-            # 2️⃣ العقل الثاني (جوك) - الرد الأول (فائدة إضافية أو معلومة مرحة)
-            time.sleep(5) # فاصل أمان
-            joke_prompt = f"بناءً على هذا الخبر: '{main_content}'، عطنا معلومة تقنية 'جوك' ممتعة وسريعة للأفراد بلهجة خليجية."
-            joke_content = self._ask_ai(joke_prompt)
-            if joke_content:
-                reply_1 = self.x_client.create_tweet(text=joke_content, in_reply_to_tweet_id=main_id)
-                logging.info("✅ تم نشر رد العقل الثاني (جوك)")
+        # 2. Verification Brain (OpenAI)
+        verify_res = self.brain_verify.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": f"Is this AI news verifiable? (0-10): {raw_news}"}]
+        )
+        verify_score = float(''.join(filter(lambda x: x.isdigit() or x=='.', verify_res.choices[0].message.content)) or 0)
 
-            # 3️⃣ العقل الثالث (كوين) - الرد الثاني (أداة عملية للتحميل أو التجربة)
-            time.sleep(5)
-            coin_prompt = f"اقترح أداة ذكاء اصطناعي (AI Tool) مرتبطة بـ {keyword} تساعد الشخص في حياته اليومية، بلهجة خليجية."
-            coin_content = self._ask_ai(coin_prompt)
-            if coin_content:
-                self.x_client.create_tweet(text=f"💡 أداة ننصحك تجربها:\n{coin_content}", in_reply_to_tweet_id=reply_1.data["id"])
-                logging.info("✅ تم نشر رد العقل الثالث (كوين)")
+        # 3. Hype Brain (Groq/Llama)
+        hype_res = self.brain_hype.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": f"Rate market hype/exaggeration (0-2): {raw_news}"}]
+        )
+        hype_penalty = float(''.join(filter(lambda x: x.isdigit() or x=='.', hype_res.choices[0].message.content)) or 0)
 
-        except Exception as e:
-            if "429" in str(e):
-                logging.error("🛑 خطأ 429: زحمة طلبات. خروج آمن.")
-                sys.exit(0)
-            logging.error(f"❌ فشل في تسلسل التغريدات: {e}")
+        # المعادلة السيادية
+        final_score = (impact_score + verify_score) / 2 - hype_penalty
+
+        if final_score >= 9.2 and impact_score >= 8:
+            h = hashlib.md5(raw_news.encode()).hexdigest()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("INSERT OR REPLACE INTO waiting_room (hash, raw_text, score, ts) VALUES (?, ?, ?, ?)",
+                            (h, raw_news, final_score, datetime.now(timezone.utc)))
+            logging.info(f"✅ تم اجتياز الفحص الأولي (Score: {final_score:.2f}). دخول غرفة الانتظار.")
+
+    # --- محرك النشر بعد "التأمل" ---
+    def final_editorial_release(self):
+        logging.info("🕒 فحص غرفة الانتظار (إعادة التقييم بعد 20 دقيقة)...")
+        with sqlite3.connect(self.db_path) as conn:
+            ready_news = conn.execute("SELECT hash, raw_text FROM waiting_room WHERE ts < ?", 
+                                     (datetime.now(timezone.utc) - timedelta(minutes=20),)).fetchall()
+            
+            for h, raw_text in ready_news:
+                # العقل الرابع: الصياغة النهائية (Editorial Brain)
+                editorial_prompt = f"اكتب تحليلاً سيادياً بلهجة خليجية لهذا الخبر، ركز على 'وش يهم الفرد؟':\n{raw_text}"
+                final_post = self.brain_editorial.models.generate_content(
+                    model="gemini-2.0-flash", contents=editorial_prompt
+                ).text
+
+                try:
+                    self.x_client.create_tweet(text=f"{final_post[:250]}\n\n#ذكاء_اصطناعي #تقنية")
+                    conn.execute("INSERT INTO memory (hash, ts) VALUES (?, ?)", (h, datetime.now(timezone.utc)))
+                    conn.execute("DELETE FROM waiting_room WHERE hash = ?", (h,))
+                    conn.commit()
+                    logging.info("🎯 تم النشر بنجاح بعد فترة التأمل.")
+                except Exception as e:
+                    logging.error(f"❌ خطأ نشر: {e}")
 
 if __name__ == "__main__":
-    bot = SovereignBot()
-    # كلمات استهدافية لعام 2026
-    targets = ["مساعدات الذكاء الاصطناعي الشخصية", "أدوات الفيديو بالذكاء الاصطناعي"]
-    for target in targets:
-        bot.process_and_post(target)
-        logging.info("⏳ استراحة محارب بين الكلمات...")
-        time.sleep(60)
+    bot = SovereignAutonomousSystem()
+    # هنا يتم استلام الخبر من الـ RSS أو البحث
+    # bot.evaluate_and_buffer(news_item)
+    bot.final_editorial_release()
