@@ -1,8 +1,9 @@
-name: run-bot
+name: tech-sovereign-bot
 on:
   schedule:
-    - cron: '0 */3 * * *' # يعمل كل 3 ساعات
-  workflow_dispatch: # للتشغيل اليدوي
+    # أوقات الذروة الخليجية: 9ص، 4ع، 9م (توقيت مكة)
+    - cron: '0 6,13,18 * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -19,23 +20,23 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Download artifact
+      - name: Download memory
         uses: actions/download-artifact@v4
         with:
           name: bot-memory
           path: data/
         continue-on-error: true
 
-      - name: Run Python Script
+      - name: Run Sovereign Bot
         env:
-          # ربط جميع العقول حسب صورتك المرفقة
+          # مفاتيح المحركات السداسية
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
-          # ربط منصة X
+          # مفاتيح منصة X
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -43,7 +44,7 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
 
-      - name: Upload artifact
+      - name: Upload memory
         uses: actions/upload-artifact@v4
         with:
           name: bot-memory
