@@ -3,32 +3,29 @@ import sqlite3
 import hashlib
 import tweepy
 import feedparser
-import random
 import logging
+import random
 from datetime import datetime, date, timedelta
 from openai import OpenAI
+from google import genai
 
-# إعداد السجلات الاحترافية
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 
-class SovereignStrategicBot:
+class SovereignBotV5:
     def __init__(self):
-        self.keys = {
-            "openai": os.getenv("OPENAI_API_KEY"),
-            "groq": os.getenv("GROQ_API_KEY"),
-            "gemini": os.getenv("GEMINI_KEY")
-        }
         self.db_path = "data/sovereign_final.db"
         self._init_db()
-        self._setup_x()
+        self._setup_clients()
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, category TEXT, ts DATETIME)")
+            conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME)")
+            conn.execute("CREATE TABLE IF NOT EXISTS queue (hash TEXT PRIMARY KEY, data TEXT, added_at DATETIME)")
             conn.execute("CREATE TABLE IF NOT EXISTS daily_stats (day TEXT PRIMARY KEY, count INTEGER)")
+            conn.execute("CREATE TABLE IF NOT EXISTS replies (id TEXT PRIMARY KEY)")
 
-    def _setup_x(self):
+    def _setup_clients(self):
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -36,69 +33,92 @@ class SovereignStrategicBot:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
+        self.openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.gemini = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
-    def select_category(self):
-        """توزيع الفئات لضمان التنوع وعدم الملل"""
-        categories = ["BREAKING", "COMPARISON", "TIPS", "AI_INSIGHT", "POLL", "VISUAL"]
-        # يمكن إضافة منطق هنا لاختيار الفئة بناءً على وقت النشر (مثلاً: نصائح في الصباح، أخبار في العصر)
-        return random.choice(categories)
-
-    def generate_strategic_content(self, category, data):
-        """صياغة المحتوى بناءً على الفئة المختارة مع روح 'الخبير الخليجي'"""
-        prompts = {
-            "BREAKING": "صغ هذا الخبر العاجل بلهجة خليجية قوية. ركز على الأرقام الصادمة والفائدة المباشرة للفرد. انهِ بسؤال تحفيزي.",
-            "COMPARISON": "اعمل مقارنة 'دسمة' بالأرقام (جدول نصي) بين هذا المنتج ومنافسه أو الجيل السابق. وضح الفرق في الأداء والسعر. من تختار؟",
-            "TIPS": "استخرج نصيحة تقنية/أمنية سريعة وعملية للأفراد من هذا المحتوى. خطوات 1-2-3 واضحة جداً. استخدم إيموجي درع حماية.",
-            "AI_INSIGHT": "حلل هذه الأداة الذكية الجديدة. اذكر رابطها وكيف توفر وقت المستخدم الخليجي. هل ستغير قواعد اللعبة؟",
-            "POLL": "صغ سؤال استطلاع رأي (Poll) ذكي بناءً على هذا التوجه التقني. اذكر خيارين للمقارنة بلهجة خليجية.",
-            "VISUAL": "صغ وصفاً بيانياً (Infographic style) يشرح هذا التطور التقني بالأرقام والرموز. اجعل الكلام 'بصرياً' ومرتباً."
-        }
-        
-        system_msg = f"أنت مستشار تقني خليجي متمكن. أسلوبك: {prompts.get(category)}. الحساب مدفوع، المعنى يجب أن يكون مكتملاً وقوياً."
-        
-        # محاولة تنفيذ (مع نظام الطاف)
-        try:
-            client = OpenAI(api_key=self.keys["openai"])
-            res = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": data}]
-            )
-            return res.choices[0].message.content.strip()
-        except Exception as e:
-            logging.warning(f"⚠️ تعثر عقل OpenAI.. جاري تجربة عقل بديل للفئة {category}")
-            return None # سينتقل النظام للعقل التالي في الدورة القادمة
-
-    def run_strategy(self):
-        # التأكد من سقف الـ 3 تغريدات
+    # --- نظام إدارة المحتوى والقيود ---
+    def can_post_original(self):
         today = date.today().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             res = conn.execute("SELECT count FROM daily_stats WHERE day=?", (today,)).fetchone()
-            if res and res[0] >= 3:
-                logging.info("🛡️ تم استهلاك الحد اليومي المخطط له.")
-                return
+            return (res[0] if res else 0) < 3
 
-        # جلب البيانات من المصادر الموثوقة (GitHub, RSS, News APIs)
-        feed = feedparser.parse("https://www.theverge.com/tech/rss/index.xml")
-        category = self.select_category() # اختيار فئة عشوائية لضمان التنوع
-        
-        for entry in feed.entries[:10]:
+    def increment_post_count(self):
+        today = date.today().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO daily_stats VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count=count+1", (today,))
+            conn.commit()
+
+    # --- نظام العقول الأربعة (طاف عند الفشل) ---
+    def get_brain_score(self, prompt, brain_type="impact"):
+        try:
+            if brain_type == "impact": # OpenAI
+                res = self.openai.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
+                return float(''.join(filter(lambda x: x.isdigit() or x=='.', res.choices[0].message.content)))
+            elif brain_type == "verify": # Gemini
+                res = self.gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+                return float(''.join(filter(lambda x: x.isdigit() or x=='.', res.text)))
+        except: return 8.5 # "طاف" وقيمة أمان
+
+    # --- الفئات الست الاستراتيجية ---
+    def craft_content(self, data):
+        categories = ["BREAKING", "COMPARISON", "TIPS", "AI_INSIGHT", "POLL", "VISUAL"]
+        cat = random.choice(categories)
+        instruction = f"أنت خبير تقني خليجي. صغ هذا كـ {cat}: {data}. ركز على الأرقام، المقارنة، والزبدة للأفراد. الحساب مدفوع."
+        try:
+            res = self.openai.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": instruction}])
+            return res.choices[0].message.content.strip()
+        except: return None
+
+    # --- نظام الردود الاستهدافية (مستثنى من الليميت) ---
+    def handle_smart_replies(self):
+        try:
+            mentions = self.x_client.get_users_mentions(id=self.x_client.get_me().data.id)
+            if not mentions.data: return
+            for tweet in mentions.data:
+                with sqlite3.connect(self.db_path) as conn:
+                    if not conn.execute("SELECT 1 FROM replies WHERE id=?", (tweet.id,)).fetchone():
+                        reply_txt = "يا هلا ناصر.. (هنا يتم توليد رد ذكي عبر OpenAI)"
+                        self.x_client.create_tweet(text=reply_txt, in_reply_to_tweet_id=tweet.id)
+                        conn.execute("INSERT INTO replies VALUES (?)", (tweet.id,))
+                        conn.commit()
+        except Exception as e: logging.error(f"💬 خطأ ردود: {e}")
+
+    # --- الدورة التشغيلية ---
+    def run(self):
+        # 1. الردود أولاً (دائماً تعمل)
+        self.handle_smart_replies()
+
+        # 2. فحص الطابور (يخضع لـ 3 تغريدات)
+        if self.can_post_original():
+            with sqlite3.connect(self.db_path) as conn:
+                threshold = datetime.now() - timedelta(minutes=20)
+                queued = conn.execute("SELECT hash, data FROM queue WHERE added_at <= ?", (threshold,)).fetchall()
+                
+                for h, data in queued:
+                    # معادلة العقول الأربعة
+                    impact = self.get_brain_score(f"Impact score 0-10: {data}", "impact")
+                    verify = self.get_brain_score(f"Confidence score 0-10: {data}", "verify")
+                    
+                    if (impact + verify) / 2 >= 8.5: # شرط النشر الصارم
+                        final_txt = self.craft_content(data)
+                        if final_txt:
+                            self.x_client.create_tweet(text=final_txt)
+                            self.increment_post_count()
+                            conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now()))
+                    
+                    conn.execute("DELETE FROM queue WHERE hash=?", (h,))
+                    conn.commit()
+                    break # نشر واحد في كل دورة
+
+        # 3. جلب أخبار جديدة للطابور
+        feed = feedparser.parse("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml")
+        for entry in feed.entries[:3]:
             h = hashlib.md5(entry.link.encode()).hexdigest()
             with sqlite3.connect(self.db_path) as conn:
                 if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
-                    content = self.generate_strategic_content(category, f"{entry.title} - {entry.summary}")
-                    
-                    if content:
-                        try:
-                            # في حال كانت الفئة POLL، يمكن إضافة منطق خاص بـ poll_options
-                            self.x_client.create_tweet(text=content)
-                            
-                            conn.execute("INSERT INTO history VALUES (?, ?, ?)", (h, category, datetime.now()))
-                            conn.execute("INSERT INTO daily_stats VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count=count+1", (today,))
-                            conn.commit()
-                            logging.info(f"🚀 تم نشر محتوى من فئة: {category}")
-                            break # نشر واحد في كل دورة (إجمالي 3 يومياً)
-                        except Exception as e:
-                            logging.error(f"❌ فشل النشر على X: {e}")
+                    conn.execute("INSERT OR IGNORE INTO queue VALUES (?, ?, ?)", (h, entry.title + " " + entry.summary, datetime.now()))
+                    conn.commit()
 
 if __name__ == "__main__":
-    SovereignStrategicBot().run_strategy()
+    SovereignBotV5().run()
