@@ -9,7 +9,7 @@ from datetime import datetime, date
 from openai import OpenAI
 from google import genai
 
-# سجلات التنفيذ
+# إعداد السجلات (للمراقبة)
 logging.basicConfig(level=logging.INFO, format="🛡️ %(message)s")
 
 class SovereignBotDirect:
@@ -26,6 +26,7 @@ class SovereignBotDirect:
             conn.execute("CREATE TABLE IF NOT EXISTS replies (id TEXT PRIMARY KEY)")
 
     def _setup_clients(self):
+        # الربط مع منصة X والذكاء الاصطناعي
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -37,73 +38,84 @@ class SovereignBotDirect:
         self.gemini_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
     def get_smart_content(self, prompt):
-        """العقول المتتابعة: تحاول مع OpenAI، وإذا تعذر فوراً تروح لـ Gemini"""
+        """نظام العقول المتتابعة: OpenAI هو الأساس، Gemini هو البديل الجاهز"""
+        system_msg = "أنت خبير تقني خليجي متمكن. صغ الخبر بلهجة بيضاء قوية ومختصرة جداً للأفراد."
         try:
+            # المحاولة الأولى: OpenAI
             res = self.openai_client.chat.completions.create(
                 model="gpt-4o",
-                messages=[{"role": "system", "content": "أنت خبير تقني خليجي متمكن صغ الخبر بلهجة بيضاء قوية ومختصرة جداً."}, 
-                          {"role": "user", "content": prompt}]
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}]
             )
             return res.choices[0].message.content.strip()
-        except:
+        except Exception as e:
+            logging.warning(f"⚠️ العقل الأول (OpenAI) تعذر. جاري الانتقال لـ Gemini...")
             try:
+                # المحاولة الثانية: Gemini
                 res = self.gemini_client.models.generate_content(
                     model="gemini-2.0-flash",
-                    contents=f"صغ هذا الخبر بلهجة خليجية تقنية مختصرة: {prompt}"
+                    contents=f"{system_msg}\n\nالخبر: {prompt}"
                 )
                 return res.text.strip()
-            except:
+            except Exception as ge:
+                logging.error(f"❌ تعطلت العقول المتتابعة بالكامل: {ge}")
                 return None
 
     def run(self):
         today = date.today().isoformat()
         
-        # 1. التحقق من سقف النشر (3 تغريدات)
+        # 1. فحص سقف النشر اليومي (3 تغريدات)
         with sqlite3.connect(self.db_path) as conn:
             res = conn.execute("SELECT count FROM daily_stats WHERE day=?", (today,)).fetchone()
             count = res[0] if res else 0
             if count >= 3:
-                logging.info(f"✅ تم نشر 3 تغريدات اليوم. نكتفي بهذا القدر.")
+                logging.info(f"🛡️ تم اكتمال النشر اليومي ({count}/3).")
                 return
 
-        # 2. جلب الأخبار والنشر الفوري
+        # 2. جلب الأخبار من RSS والنشر الفوري
+        # المصدر: أخبار الذكاء الاصطناعي وأدواته الحديثة
         feed = feedparser.parse("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml")
         
-        for entry in feed.entries[:10]: # فحص قائمة أطول لضمان وجود جديد
+        if not feed.entries:
+            logging.info("💬 لا توجد أخبار جديدة في المصدر حالياً.")
+            return
+
+        for entry in feed.entries[:5]: 
             h = hashlib.md5(entry.link.encode()).hexdigest()
             
             with sqlite3.connect(self.db_path) as conn:
+                # التأكد من عدم تكرار الخبر
                 if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
-                    # صياغة ونشر
-                    logging.info(f"🆕 خبر جديد مكتشف: {entry.title}")
+                    logging.info(f"🆕 معالجة خبر جديد: {entry.title}")
+                    
                     final_txt = self.get_smart_content(entry.title)
                     
                     if final_txt:
                         try:
-                            # النشر المباشر بدون تعقيدات فلاتر
+                            # تنفيذ النشر في تويتر
                             self.x_client.create_tweet(text=final_txt)
                             conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now()))
                             conn.execute("INSERT INTO daily_stats VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count=count+1", (today,))
                             conn.commit()
-                            logging.info("🚀 تم النشر بنجاح.")
-                            break # نشر خبر واحد في كل دورة
+                            logging.info("🚀 تم النشر بنجاح على حسابك.")
+                            break # نشر خبر واحد في كل تشغيل للـ Bot
                         except Exception as e:
-                            logging.error(f"❌ خطأ في X API: {e}")
+                            logging.error(f"❌ فشل النشر في X: {e}")
                             break
 
-        # 3. الردود (بشكل مبسط وسريع)
+        # 3. نظام الردود الذكية (اختياري وسريع)
         try:
-            mentions = self.x_client.get_users_mentions(id=self.x_client.get_me().data.id, max_results=5)
-            if mentions.data:
+            me = self.x_client.get_me()
+            mentions = self.x_client.get_users_mentions(id=me.data.id, max_results=5)
+            if mentions and mentions.data:
                 for tweet in mentions.data:
                     with sqlite3.connect(self.db_path) as conn:
                         if not conn.execute("SELECT 1 FROM replies WHERE id=?", (tweet.id,)).fetchone():
-                            reply_txt = self.get_smart_content(f"رد على هذا الشخص بذكاء: {tweet.text}")
+                            reply_txt = self.get_smart_content(f"رد بذكاء واختصار على: {tweet.text}")
                             if reply_txt:
                                 self.x_client.create_tweet(text=reply_txt, in_reply_to_tweet_id=tweet.id)
                                 conn.execute("INSERT INTO replies VALUES (?)", (tweet.id,))
                                 conn.commit()
-                                logging.info(f"💬 تم الرد على {tweet.id}")
+                                logging.info(f"✅ تم الرد على المنشن.")
         except:
             pass
 
