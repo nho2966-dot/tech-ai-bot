@@ -68,9 +68,9 @@ class SovereignUltimateBot:
         self._setup_clients()
         self.reply_timestamps = deque(maxlen=50)
         self.replied_tweets_cache = set()
+        self.published_tweet_ids = set()  # جديد: تخزين tweet_id للمنشورات
         self.last_mention_id = None
 
-        # قائمة RSS Feeds
         self.rss_feeds = [
             "https://www.theverge.com/rss/index.xml",
             "https://techcrunch.com/feed/",
@@ -124,6 +124,7 @@ class SovereignUltimateBot:
             c.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME)")
             c.execute("CREATE TABLE IF NOT EXISTS daily_stats (day TEXT PRIMARY KEY, count INTEGER)")
             c.execute("CREATE TABLE IF NOT EXISTS replied_tweets (tweet_id TEXT PRIMARY KEY, ts DATETIME)")
+            c.execute("CREATE TABLE IF NOT EXISTS published_tweets (tweet_id TEXT PRIMARY KEY, content_hash TEXT, ts DATETIME)")
 
     def _setup_clients(self):
         try:
@@ -232,12 +233,21 @@ class SovereignUltimateBot:
     def already_posted(self, content: str) -> bool:
         h = hashlib.sha256(content.encode('utf-8')).hexdigest()
         with sqlite3.connect(self.db_path) as conn:
-            return bool(conn.execute("SELECT 1 FROM history WHERE hash = ?", (h,)).fetchone())
+            row = conn.execute("SELECT 1 FROM history WHERE hash = ?", (h,)).fetchone()
+            return bool(row)
 
-    def mark_posted(self, content: str):
+    def mark_posted(self, content: str, tweet_id: str = None):
         h = hashlib.sha256(content.encode('utf-8')).hexdigest()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("INSERT OR IGNORE INTO history (hash, ts) VALUES (?, datetime('now'))", (h,))
+            if tweet_id:
+                conn.execute("INSERT OR IGNORE INTO published_tweets (tweet_id, content_hash, ts) VALUES (?, ?, datetime('now'))", (tweet_id, h,))
+
+    def is_self_reply(self, tweet_id: str) -> bool:
+        """تحقق إذا كان التعليق ردًا على تغريدة من البوت"""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT 1 FROM published_tweets WHERE tweet_id = ?", (tweet_id,)).fetchone()
+            return bool(row)
 
     def fetch_fresh_rss(self, max_per_feed: int = 3, max_age_hours: int = 48) -> List[Dict]:
         articles = []
@@ -304,7 +314,7 @@ class SovereignUltimateBot:
                 id=self.my_user_id,
                 since_id=self.last_mention_id,
                 max_results=5,
-                tweet_fields=['conversation_id', 'author_id', 'created_at']
+                tweet_fields=['conversation_id', 'author_id', 'created_at', 'in_reply_to_tweet_id']
             )
         except tweepy.TooManyRequests:
             logging.warning("429 Too Many Requests في جلب المنشنات → تخطي")
@@ -322,6 +332,12 @@ class SovereignUltimateBot:
 
             tid = mention.id
             aid = mention.author_id
+            reply_to_id = mention.in_reply_to_tweet_id if hasattr(mention, 'in_reply_to_tweet_id') else None
+
+            # فلتر جديد: لا ترد على ردود تغريداتك (منع loop)
+            if reply_to_id and self.is_self_reply(reply_to_id):
+                logging.info(f"رد على تغريدة مني → تجاهل لمنع loop: {tid}")
+                continue
 
             if aid == self.my_user_id:
                 continue
@@ -400,6 +416,10 @@ class SovereignUltimateBot:
 
             cleaned_output = self.clean_forbidden_words(raw_output)
 
+            if "لا_قيمة" in cleaned_output.strip():
+                logging.info("المحتوى لا يضيف قيمة عملية → تخطي")
+                return
+
             if not cleaned_output:
                 logging.warning("لم يتم توليد محتوى صالح")
                 return
@@ -426,8 +446,10 @@ class SovereignUltimateBot:
                     if prev_id:
                         kwargs["in_reply_to_tweet_id"] = prev_id
                     resp = self.x_client.create_tweet(**kwargs)
-                    prev_id = resp.data["id"]
-                    logging.info(f"نشر تغريدة {i+1}/{len(tweets)} بنجاح")
+                    tweet_id = resp.data["id"]
+                    logging.info(f"نشر تغريدة {i+1}/{len(tweets)} بنجاح - ID: {tweet_id}")
+                    prev_id = tweet_id
+                    self.published_tweet_ids.add(tweet_id)
                     time.sleep(5 + random.random() * 10)
                 except tweepy.TooManyRequests:
                     logging.warning("429 أثناء النشر → توقف مؤقت")
