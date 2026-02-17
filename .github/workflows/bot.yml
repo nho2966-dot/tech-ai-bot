@@ -1,19 +1,34 @@
-name: Sovereign Task Final
+name: Run Sovereign Expert Bot
+
 on:
   schedule:
-    - cron: '0 */3 * * *' # يعمل كل 3 ساعات لضمان عدم تجاوز الكوتا أبداً
-  workflow_dispatch:
+    - cron: '0 * * * *' # يشتغل تلقائياً كل ساعة
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً متى ما بغيت
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - name: Run Sovereign Bot
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Download previous database
+        uses: actions/download-artifact@v4
+        with:
+          name: bot-memory
+          path: data/
+        continue-on-error: true # عشان ما يفشل أول مرة والقاعدة لسه مو موجودة
+
+      - name: Run Bot
         env:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -22,8 +37,10 @@ jobs:
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
-      - name: Cache Database
+
+      - name: Upload updated database
         uses: actions/upload-artifact@v4
         with:
           name: bot-memory
-          path: sovereign_memory.db
+          path: data/expert_v26.db
+          retention-days: 7
