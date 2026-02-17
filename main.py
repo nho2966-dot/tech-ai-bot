@@ -2,49 +2,49 @@ import os
 import sqlite3
 import logging
 import time
-import random
 import hashlib
 import requests
 import tweepy
 import feedparser
-from bs4 import BeautifulSoup
 from io import BytesIO
 from datetime import datetime, timezone
-from google import genai
 
-# إعداد السجلات لمتابعة الأداء
+# استيراد مكتبات العقول
+from google import genai
+from openai import OpenAI
+# ملاحظة: Groq و DeepSeek يستخدمون مكتبة OpenAI للربط بسهولة
+
 logging.basicConfig(level=logging.INFO, format="🛡️ %(asctime)s - %(message)s")
 
 class SovereignExpert:
     def __init__(self):
-        # ربط المفاتيح السرية
+        # تهيئة مفاتيح العقول من Secrets
         self.keys = {
             "gemini": os.getenv("GEMINI_KEY"),
-            "x_api": os.getenv("X_API_KEY"),
-            "x_secret": os.getenv("X_API_SECRET"),
-            "x_token": os.getenv("X_ACCESS_TOKEN"),
-            "x_token_secret": os.getenv("X_ACCESS_SECRET")
+            "openai": os.getenv("OPENAI_KEY"),
+            "groq": os.getenv("GROQ_KEY"),
+            "deepseek": os.getenv("DEEPSEEK_KEY")
         }
+        
         self.db_path = "data/expert_v26.db"
-        self._setup_brains()
-        self._setup_x()
         self._init_db()
-
-    def _setup_brains(self):
-        self.brain = genai.Client(api_key=self.keys["gemini"])
+        self._setup_x()
+        
+        # تعريف عملاء العقول
+        self.brain_gemini = genai.Client(api_key=self.keys["gemini"])
+        self.brain_openai = OpenAI(api_key=self.keys["openai"])
+        self.brain_groq = OpenAI(api_key=self.keys["groq"], base_url="https://api.groq.com/openai/v1")
+        self.brain_deepseek = OpenAI(api_key=self.keys["deepseek"], base_url="https://api.deepseek.com")
 
     def _setup_x(self):
         try:
             self.x_client = tweepy.Client(
                 bearer_token=os.getenv("X_BEARER_TOKEN"),
-                consumer_key=self.keys["x_api"], consumer_secret=self.keys["x_secret"],
-                access_token=self.keys["x_token"], access_token_secret=self.keys["x_token_secret"]
+                consumer_key=os.getenv("X_API_KEY"), consumer_secret=os.getenv("X_API_SECRET"),
+                access_token=os.getenv("X_ACCESS_TOKEN"), access_token_secret=os.getenv("X_ACCESS_SECRET")
             )
-            auth = tweepy.OAuth1UserHandler(self.keys["x_api"], self.keys["x_secret"], self.keys["x_token"], self.keys["x_token_secret"])
-            self.api_v1 = tweepy.API(auth)
-            logging.info("✅ أنظمة الخبير متصلة وجاهزة..")
-        except Exception as e: 
-            logging.error(f"❌ خطأ في ربط X: {e}")
+            logging.info("✅ تم ربط منصة X بنجاح.")
+        except Exception as e: logging.error(f"❌ خطأ في ربط X: {e}")
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
@@ -52,109 +52,77 @@ class SovereignExpert:
             conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME)")
             conn.execute("CREATE TABLE IF NOT EXISTS waiting_room (hash TEXT PRIMARY KEY, content TEXT, url TEXT, ts DATETIME)")
 
-    def _get_image(self, url):
-        try:
-            res = requests.get(url, timeout=10)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            img = soup.find("meta", property="og:image")
-            return img["content"] if img else None
-        except: return None
+    def _ask_brain(self, brain_name, prompt):
+        """وظيفة داخلية لكل عقل"""
+        if brain_name == "gemini":
+            res = self.brain_gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            return res.text.strip()
+        
+        model_map = {
+            "openai": "gpt-4o-mini",
+            "groq": "llama-3.3-70b-versatile",
+            "deepseek": "deepseek-chat"
+        }
+        client_map = {
+            "openai": self.brain_openai,
+            "groq": self.brain_groq,
+            "deepseek": self.brain_deepseek
+        }
+        
+        response = client_map[brain_name].chat.completions.create(
+            model=model_map[brain_name],
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300
+        )
+        return response.choices[0].message.content.strip()
 
-    def fetch_exclusive_news(self):
-        logging.info("🌐 جاري البحث عن أخبار تقنية جديدة...")
-        feeds = [
-            "https://techcrunch.com/category/artificial-intelligence/feed/",
-            "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
-        ]
-        for url in feeds:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:5]: # سحب آخر 5 أخبار
-                h = hashlib.md5(entry.link.encode()).hexdigest()
-                with sqlite3.connect(self.db_path) as conn:
-                    # نتحقق إذا الخبر قديم أو تم نشره سابقاً
-                    if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
-                        conn.execute("INSERT OR REPLACE INTO waiting_room VALUES (?, ?, ?, ?)",
-                                    (h, entry.title, entry.link, datetime.now(timezone.utc)))
-        logging.info("✅ تم تحديث قائمة الأخبار بنجاح.")
+    def generate_with_failover(self, prompt):
+        """نظام الإدارة الرباعي: تبديل تلقائي عند الفشل أو نفاذ الحصة"""
+        brains_order = ["gemini", "openai", "groq", "deepseek"]
+        
+        for brain in brains_order:
+            try:
+                logging.info(f"🧠 محاولة الصياغة باستخدام عقل: {brain}...")
+                result = self._ask_brain(brain, prompt)
+                if result:
+                    logging.info(f"✅ نجح العقل {brain} في المهمة.")
+                    return result
+            except Exception as e:
+                logging.warning(f"⚠️ العقل {brain} غير متاح حالياً (زحمة أو خطأ). ننتقل للتالي...")
+                continue
+        
+        logging.error("❌ جميع العقول الأربعة فشلت في الاستجابة!")
+        return None
 
     def handle_posting(self):
-        """نظام النشر القسري لضمان ظهور التغريدة الآن"""
-        self.fetch_exclusive_news() # جلب الأخبار أولاً
+        # (دالة جلب الأخبار تبقى كما هي في النسخ السابقة)
+        self.fetch_news()
         
         with sqlite3.connect(self.db_path) as conn:
-            # نسحب أول خبر متوفر في غرفة الانتظار فوراً
             target = conn.execute("SELECT hash, content, url FROM waiting_room LIMIT 1").fetchone()
-            
             if target:
-                logging.info(f"🎯 تم العثور على محتوى: {target[1]}. جاري النشر...")
-                self._publish_as_human(*target)
-            else:
-                logging.warning("⚠️ لا توجد أخبار جديدة في هذه اللحظة.")
-
-    def _publish_as_human(self, h, content, url):
-        try:
-            # صياغة بشرية خليجية متمكنة
-            prompt = f"""
-            بصفتك خبير تقني خليجي متمكن، اكتب تغريدة عن هذا الخبر بأسلوبك الشخصي (لهجة بيضاء مهنية).
-            - اجعلها مشوقة وتركز على أدوات الذكاء الاصطناعي وأثرها على الأفراد.
-            - استخدم إيموجي واحد مناسب.
-            - لا تذكر أنك ذكاء اصطناعي.
-            - اختم بكلمة 'المصدر:' ثم الرابط.
-            الخبر: {content}
-            الرابط: {url}
-            """
-            response = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            txt = response.text.strip()
-            
-            img_url = self._get_image(url)
-            m_ids = None
-            if img_url:
-                img_data = requests.get(img_url).content
-                with BytesIO(img_data) as f:
-                    m = self.api_v1.media_upload(filename="news_img.jpg", file=f)
-                    m_ids = [m.media_id]
-
-            self.x_client.create_tweet(text=txt[:280], media_ids=m_ids)
-            
-            # تحديث الذاكرة لمنع التكرار
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
-                conn.execute("DELETE FROM waiting_room WHERE hash=?", (h,))
-                conn.commit()
-            logging.info("🚀 مبروك! التغريدة الآن لايف على حسابك.")
-        except Exception as e: 
-            logging.error(f"❌ فشل النشر النهائي: {e}")
-
-    def handle_radar(self):
-        # رادار التفاعل لجذب المتابعين
-        TARGETS = ["7alsabe", "faisalsview", "elonmusk", "OpenAI"]
-        for target in TARGETS:
-            try:
-                user = self.x_client.get_user(username=target).data
-                tweets = self.x_client.get_users_tweets(id=user.id, max_results=5).data
-                if not tweets: continue
+                h, content, url = target
+                prompt = f"اكتب تغريدة خليجية احترافية عن: {content}. المصدر: {url}"
                 
-                for tweet in tweets:
-                    h = hashlib.md5(f"reply_{tweet.id}".encode()).hexdigest()
-                    with sqlite3.connect(self.db_path) as conn:
-                        if conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone(): continue
-                    
-                    if any(word in tweet.text.lower() for word in ["ai", "ذكاء", "tech", "تطبيق"]):
-                        self._smart_engage(tweet, target, h)
-                        break
-            except: continue
+                final_text = self.generate_with_failover(prompt)
+                
+                if final_text:
+                    self.x_client.create_tweet(text=final_text[:280])
+                    conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
+                    conn.execute("DELETE FROM waiting_room WHERE hash=?", (h,))
+                    conn.commit()
+                    logging.info("🚀 تم النشر بنجاح!")
 
-    def _smart_engage(self, tweet, username, h):
-        prompt = f"رد كخبير تقني خليجي بذكاء على تغريدة {username} حول التقنية. اجعل الرد بشرياً جداً ومثيراً للاهتمام. التغريدة: {tweet.text}"
-        res = self.brain.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        reply = res.text.strip()
-        self.x_client.create_tweet(text=reply[:275], in_reply_to_tweet_id=tweet.id)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now(timezone.utc)))
-            conn.commit()
-        logging.info(f"💬 تم الرد بنجاح على {username}")
+    def fetch_news(self):
+        # جلب الأخبار من RSS (نفس الكود السابق)
+        feed = feedparser.parse("https://techcrunch.com/category/artificial-intelligence/feed/")
+        for entry in feed.entries[:5]:
+            h = hashlib.md5(entry.link.encode()).hexdigest()
+            with sqlite3.connect(self.db_path) as conn:
+                if not conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone():
+                    conn.execute("INSERT OR REPLACE INTO waiting_room VALUES (?, ?, ?, ?)",
+                                (h, entry.title, entry.link, datetime.now(timezone.utc)))
 
 if __name__ == "__main__":
     expert = SovereignExpert()
-    expert.handle_posting() # النشر الفوري
-    expert.handle_radar()   # التفاعل مع المؤثرين
+    expert.handle_posting()
