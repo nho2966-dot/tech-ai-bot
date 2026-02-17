@@ -1,12 +1,19 @@
 import os
 import sqlite3
 import hashlib
-import tweepy
 import logging
-from datetime import datetime, date
+import time
+import random
+from datetime import datetime, date, timedelta
+from collections import deque
+from typing import Optional, List, Dict, Any
+
+import tweepy
 from openai import OpenAI
 from google import genai
-import time
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import feedparser
+from dateutil import parser as date_parser
 
 logging.basicConfig(level=logging.INFO, format="🛡️ [نظام السيادة]: %(message)s")
 
@@ -15,19 +22,78 @@ class SovereignUltimateBot:
     def __init__(self):
         self.db_path = "data/sovereign_final.db"
         self._init_db()
-        self._setup_all_brains()
+        self._setup_clients()
+        self.reply_timestamps = deque(maxlen=50)
+        self.replied_tweets_cache: set = set()
+        self.last_mention_id: Optional[int] = None
+
+        # قائمة RSS Feeds الموسعة (عالمية + عربية + مصرية + محلية خليجية)
+        self.rss_feeds = [
+            # ── عالمية (أساسية) ──
+            "https://www.theverge.com/rss/index.xml",
+            "https://techcrunch.com/feed/",
+            "https://www.wired.com/feed/category/science/latest/rss",
+            "https://arstechnica.com/category/tech/feed/",
+            "https://www.engadget.com/rss.xml",
+            "https://www.cnet.com/rss/news/",
+            "https://www.technologyreview.com/feed/",
+            "https://gizmodo.com/rss",
+            "https://venturebeat.com/feed/",
+            "https://thenextweb.com/feed",
+            "https://www.artificialintelligence-news.com/feed/",
+            "https://huggingface.co/blog/feed.xml",
+            "https://www.deepmind.com/blog/rss.xml",
+            "https://openai.com/blog/rss/",
+
+            # ── عربية عامة ──
+            "https://www.tech-wd.com/wd-rss-feed.xml",
+            "https://www.aitnews.com/feed/",
+            "https://www.arageek.com/feed/tech",
+            "https://arabhardware.net/feed",
+            "https://www.tqniah.net/feed/",
+            "https://www.arabtechs.net/feed",
+            "https://www.taqniah.com/feed/",
+
+            # ── مصرية (تقنية وأخبار عامة مع تركيز تقني) ──
+            "https://www.youm7.com/rss/Technologia",               # اليوم السابع – قسم تكنولوجيا
+            "https://www.almasryalyoum.com/rss",                   # المصري اليوم – تغطية تقنية
+            "https://www.masrawy.com/rss/tech",                    # مصراوي – قسم تكنولوجيا
+            "https://www.elbalad.news/rss/tech",                   # البوابة نيوز – تقنية
+            "https://www.elwatannews.com/rss/section/6",           # الوطن – قسم تكنولوجيا
+            "https://www.dostor.org/rss/technology",               # الدستور – تقنية
+            "https://www.vetogate.com/rss/technology",             # فيتو – تقنية
+            "https://www.cairo24.com/rss/technology",              # القاهرة 24 – تقنية
+
+            # ── محلية خليجية (سعودية، إماراتية، قطرية...) ──
+            "https://sabq.org/feed",
+            "https://www.aleqt.com/feed",
+            "https://aawsat.com/rss/technologia",
+            "https://www.okaz.com.sa/rss",
+            "https://www.alriyadh.com/page/rss",
+            "https://www.alyaum.com/rss",
+            "https://www.albayan.ae/tech/rss",
+            "https://www.emaratalyoum.com/rss/tech",
+            "https://wam.ae/feed/technology",
+            "https://qna.org.qa/ar-QA/RSS-Feeds/Technology",
+            "https://www.alanba.com.kw/rss/tech",
+            "https://kuwaitalyawm.media.gov.kw/rss",
+            "https://www.bna.bh/rss",
+            "https://omannews.gov.om/rss/technology",
+        ]
 
     def _init_db(self):
-        os.makedirs("data", exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME)")
-            conn.execute("CREATE TABLE IF NOT EXISTS daily_stats (day TEXT PRIMARY KEY, count INTEGER)")
+            c = conn.cursor()
+            c.execute("CREATE TABLE IF NOT EXISTS history (hash TEXT PRIMARY KEY, ts DATETIME)")
+            c.execute("CREATE TABLE IF NOT EXISTS daily_stats (day TEXT PRIMARY KEY, count INTEGER)")
+            c.execute("CREATE TABLE IF NOT EXISTS replied_tweets (tweet_id TEXT PRIMARY KEY, ts DATETIME)")
 
-    def _setup_all_brains(self):
+    def _setup_clients(self):
         try:
             self.gemini_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
         except Exception as e:
-            logging.error(f"فشل تهيئة Gemini Client: {e}")
+            logging.error(f"فشل تهيئة Gemini: {e}")
             self.gemini_client = None
 
         self.x_client = tweepy.Client(
@@ -38,158 +104,82 @@ class SovereignUltimateBot:
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
 
-        self.brains = {
+        try:
+            me = self.x_client.get_me(user_auth=True)
+            self.my_user_id = me.data.id
+            logging.info(f"Bot user ID: {self.my_user_id}")
+        except Exception as e:
+            logging.error(f"فشل جلب user ID: {e}")
+            self.my_user_id = None
+
+        self.llm_clients = {
             "xAI": OpenAI(api_key=os.getenv("XAI_API_KEY"), base_url="https://api.x.ai/v1"),
             "Groq": OpenAI(api_key=os.getenv("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1"),
-            "Gemini": self.gemini_client,
             "OpenAI": OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
-            "OpenRouter": OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1")
+            "OpenRouter": OpenAI(api_key=os.getenv("OPENROUTER_API_KEY"), base_url="https://openrouter.ai/api/v1"),
         }
 
-    def already_posted(self, content):
-        content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        today = date.today().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute("SELECT 1 FROM history WHERE hash = ?", (content_hash,)).fetchone()
-            if row:
-                return True
-            conn.execute("INSERT INTO history (hash, ts) VALUES (?, datetime('now'))", (content_hash,))
-            conn.execute(
-                "INSERT OR REPLACE INTO daily_stats (day, count) VALUES (?, COALESCE((SELECT count + 1 FROM daily_stats WHERE day=?), 1))",
-                (today, today)
-            )
-        return False
-
-    def execute_brain_sequence(self, prompt):
-        system_msg = """
-أنت شاب خليجي عاشق للتقنية والذكاء الاصطناعي، أسلوبك عفوي، حماسي، صريح، قريب من القلب. 
-تستخدم كلمات مثل: "يا جماعة"، "والله يجنن"، "هذا الشيء غير حياتي"، "صراحة ما توقعت"، 
-"جربتها وصرت أدمن"، "وش رايكم؟"، "بالله عليكم جربوها"، "هالحركة خطيرة"، "جد والله"، "صدقني".
-
-مهمتك: توليد تغريدة واحدة قوية أو thread قصير (2-4 تغريدات) عن خبر أو أداة ذكاء اصطناعي جديدة ومفيدة للأفراد اليوم.
-
-الهيكل المفضل الذي ينتشر:
-1. هوك قوي جدًا في أول تغريدة (سؤال صاعق، صدمة، قصة شخصية صغيرة، "والله...")
-2. شرح سريع + فائدة مباشرة للشخص العادي ("بيوفر لك كذا ساعة"، "يخليك تكسب فلوس بدون...")
-3. رأيك الشخصي أو تجربة محاكاة ("جربتها اليوم و...")
-4. دعوة تفاعل قوية ("وش رايكم؟"، "جربتوها؟ رد عليّ"، "ريتويت لو ناوي تجربها اليوم")
-5. 1-3 هاشتاجات فقط في نهاية آخر تغريدة (مثل #ذكاء_اصطناعي #AI_عربي #أدوات_AI)
-
-إذا كان الموضوع يستاهل thread قصير (2-4 تغريدات)، افصلهم بـ "---" بين كل تغريدة.
-اجعل الكلام ممتع، قصير، سهل القراءة، يحفز على الردود والريتويت.
-لا تكن رسميًا أبدًا، كن صديق يحكي لأصحابه عن شيء خطير اكتشفه.
-
-في نهاية الرد أضف سطر واحد فقط يبدأ بـ "وصف_صورة:" ثم وصف مختصر وجذاب لصورة يمكن توليدها.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-تعليمة إلزامية لا يمكن تجاهلها تحت أي ظرف:
-ممنوع تماماً استخدام كلمة "قسم" أو أي صيغة منها (قسم، أقسم، تقسيم، قسّم، قسمها، قسموا، اقسم، قسم بالله، والله أقسم، ...) في أي جزء من الرد أو التغريدات أو الthread أو أي نص تنتجه.
-بدلاً من أي عبارة تحتوي على "قسم" استخدم: "والله"، "جد والله"، "صدقني"، "بجد"، "أحلف لك"، "والله العظيم".
-لا تستخدم "قسم" بمعنى جزء أو تقسيم أو أي معنى آخر أبداً.
-هذه التعليمة مطلقة ولا استثناء لها مهما كان السياق.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1.5, min=5, max=45),
+        retry=retry_if_exception_type(Exception),
+        reraise=True
+    )
+    def generate_text(self, prompt: str, system_msg: str) -> str:
         sequence = [
-            ("xAI Grok 4.1 Fast Reasoning", "xAI", "grok-4-1-fast-reasoning"),
-            ("Groq Llama 3.3 70B", "Groq", "llama-3.3-70b-versatile"),
-            ("Gemini 2.5 Flash", "Gemini", "gemini-2.5-flash"),
-            ("OpenRouter Gemini 2.5 Flash", "OpenRouter", "google/gemini-2.5-flash"),
+            ("xAI Grok", "xAI", "grok-4-1-fast-reasoning"),
+            ("Groq Llama", "Groq", "llama-3.3-70b-versatile"),
+            ("Gemini Flash", "Gemini", "gemini-2.5-flash"),
             ("OpenAI 4o-mini", "OpenAI", "gpt-4o-mini"),
-            ("OpenAI 4o", "OpenAI", "gpt-4o")
         ]
 
-        for name, provider_key, model_id in sequence:
-            for attempt in range(1, 4):
-                try:
-                    logging.info(f"🧠 محاولة {attempt}/3 عبر {name} ({model_id})...")
-                    client = self.brains[provider_key]
+        for name, key, model in sequence:
+            try:
+                client = self.llm_clients.get(key) if key != "Gemini" else self.gemini_client
+                if not client:
+                    continue
 
-                    if provider_key == "Gemini":
-                        if client is None:
-                            continue
-                        model = client.GenerativeModel(model_id)
-                        res = model.generate_content(f"{system_msg}\n{prompt}")
-                        text = res.text.strip()
-                    else:
-                        res = client.chat.completions.create(
-                            model=model_id,
-                            messages=[
-                                {"role": "system", "content": system_msg},
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0.82,
-                            max_tokens=420,
-                            timeout=35
-                        )
-                        text = res.choices[0].message.content.strip()
+                if key == "Gemini":
+                    m = client.GenerativeModel(model)
+                    res = m.generate_content(f"{system_msg}\n{prompt}")
+                    text = res.text.strip()
+                else:
+                    res = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.82,
+                        max_tokens=420,
+                        timeout=40
+                    )
+                    text = res.choices[0].message.content.strip()
 
-                    if text and len(text) > 80:
-                        return text
+                if text and len(text) > 80:
+                    return text
 
-                except Exception as e:
-                    err_str = str(e).lower()
-                    logging.warning(f"⚠️ {name} فشل (محاولة {attempt}): {err_str[:80]}...")
-                    if any(x in err_str for x in ["429", "limit", "rate", "quota"]):
-                        sleep_time = 6 * attempt
-                        logging.info(f"   → rate limit → ننتظر {sleep_time} ثواني...")
-                        time.sleep(sleep_time)
-                        continue
-                    elif any(x in err_str for x in ["502", "bad gateway", "timeout"]):
-                        time.sleep(8)
-                        continue
-                    else:
-                        break
+            except Exception as e:
+                logging.warning(f"{name} فشل: {str(e)[:100]}")
+                continue
 
-        logging.error("❌ كل العقول فشلت.")
-        return None
+        raise RuntimeError("فشل كل النماذج")
 
-    def run(self):
-        task = "أعطني خبر أو أداة ذكاء اصطناعي جديدة كلياً ومفيدة للأفراد اليوم."
+    def already_posted(self, content: str) -> bool:
+        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        with sqlite3.connect(self.db_path) as conn:
+            return bool(conn.execute("SELECT 1 FROM history WHERE hash = ?", (h,)).fetchone())
 
-        raw_output = self.execute_brain_sequence(task)
-        if not raw_output:
-            logging.warning("لم يتم توليد محتوى صالح.")
-            return
+    def mark_posted(self, content: str):
+        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT OR IGNORE INTO history (hash, ts) VALUES (?, datetime('now'))", (h,))
 
-        # فصل الوصف الصورة إذا وُجد
-        image_desc = ""
-        content = raw_output
+    def fetch_fresh_rss(self, max_per_feed: int = 3, max_age_hours: int = 48) -> List[Dict]:
+        articles = []
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        ua = "SovereignBot/1.0 (Arabic Tech News Bot)"
 
-        if "وصف_صورة:" in raw_output:
-            parts = raw_output.rsplit("وصف_صورة:", 1)
-            content = parts[0].strip()
-            image_desc = parts[1].strip()
-
-        if self.already_posted(content):
-            logging.info("المحتوى مكرر → تجاوز النشر")
-            return
-
-        # تقسيم إلى thread إذا وُجد الفاصل ---
-        tweets = [t.strip() for t in content.split("---") if t.strip()]
-
-        try:
-            previous_tweet_id = None
-            for i, tweet_text in enumerate(tweets):
-                tweet_kwargs = {"text": tweet_text.strip()}
-
-                # صورة فقط في التغريدة الأولى إذا وُجد وصف
-                if i == 0 and image_desc:
-                    logging.info(f"وصف صورة مقترح للتوليد: {image_desc}")
-                    # هنا يمكن إضافة كود رفع/توليد صورة مستقبلاً
-
-                if previous_tweet_id:
-                    tweet_kwargs["in_reply_to_tweet_id"] = previous_tweet_id
-                    tweet_kwargs["reply_settings"] = "following"
-
-                response = self.x_client.create_tweet(**tweet_kwargs)
-                previous_tweet_id = response.data["id"]
-                logging.info(f"تم نشر التغريدة {i+1}/{len(tweets)}")
-
-            logging.info("✅ تم النشر بنجاح")
-        except Exception as e:
-            logging.error(f"خطأ في النشر: {e}")
-
-
-if __name__ == "__main__":
-    SovereignUltimateBot().run()
+        for url in self.rss_feeds:
+            try:
+                feed = feedparser.parse(url
