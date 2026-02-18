@@ -10,6 +10,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # ارفعها هنا عشان الـ Action ما يقفل وهو ينتظر
     steps:
       - uses: actions/checkout@v4
       
