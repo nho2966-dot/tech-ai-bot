@@ -1,30 +1,27 @@
-name: Sovereign AI Bot Cycle
+name: Nasser AI Sovereign Cycle
 on:
   schedule:
-    - cron: '0 * * * *' # تشغيل كل ساعة
+    - cron: '0 */3 * * *' # تشغيل كل 3 ساعات (للالتزام بصمام الأمان)
   workflow_dispatch:
 
 permissions:
-  contents: write # ضروري للسماح للبوت بحفظ الذاكرة
+  contents: write
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
+          
+      - name: Install Dependencies
         run: pip install -r requirements.txt
-
-      - name: Run Sovereign Bot
+        
+      - name: Run Nasser Bot
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
@@ -34,11 +31,11 @@ jobs:
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
-
-      - name: Commit and Push Memory Update
+        
+      - name: Commit Memory Changes
         run: |
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "Nasser-AI-Bot"
           git add data/sovereign_2026.db
-          git commit -m "🧠 تحديث ذاكرة البوت: تم حفظ التفاعلات الجديدة" || echo "لا يوجد تغييرات لحفظها"
+          git commit -m "🧠 حفظ الذاكرة التقنية الجديدة" || echo "لا تغييرات"
           git push
