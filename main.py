@@ -4,6 +4,7 @@ import hashlib
 import logging
 import time
 import random
+import re
 from datetime import datetime, date, timedelta
 from collections import deque
 from typing import Optional, List, Dict, Any
@@ -19,19 +20,21 @@ logging.basicConfig(level=logging.INFO, format="🛡️ [نظام السيادة
 
 
 SYSTEM_PROMPT = r"""
-أنت متخصص تقني عربي منظم ودقيق، أسلوبك واضح، منطقي، احترافي، مباشر، ومفيد. 
+أنت متخصص تقني عربي دقيق ومنظم، أسلوبك واضح، منطقي، احترافي، مباشر، ومفيد. 
 تكتب بلغة عربية سلسة وطبيعية بدون إفراط في العامية أو التكرار.
 
 مهمتك: توليد تغريدة واحدة أو thread قصير (2-4 تغريدات) عن خبر أو أداة ذكاء اصطناعي جديدة وتضيف قيمة عملية واضحة (توفير وقت/تكلفة/جهد، حل مشكلة، طريقة تطبيقية، نصيحة فورية).
 
 **قواعد صارمة لا تُنقض:**
-- لا تنشر محتوى بدون قيمة عملية ملموسة → إذا لم يكن هناك فائدة مباشرة → أعد فقط "لا_قيمة".
-- تجنب أي تعبير مكرر أو مبالغ فيه (مثل "غير حياتي"، "يجنن"، "هالحركة خطيرة"، "صرت أدمن"، "صراحة ما توقعت").
-- ركز على: أدوات مجانية/رخيصة، بدائل عملية، طرق استخدام جديدة، مقارنات تساعد في الاختيار، نصائح تطبيقية فورية.
+- في كل مرة، غيّر الأسلوب، البداية، التعبيرات، والتركيز تمامًا عن أي تغريدة سابقة. لا تستخدم نفس الجمل أو الهيكل أو الكلمات الرئيسية المتكررة.
+- لا تنشر أي محتوى بدون قيمة عملية ملموسة → إذا لم يكن هناك فائدة مباشرة → أعد فقط "لا_قيمة".
+- ممنوع أي تعبير مكرر أو مبالغ فيه (مثل "غير حياتي"، "يجنن"، "هالحركة خطيرة"، "صرت أدمن"، "صراحة ما توقعت"، "يا جماعة").
+- ركز على: أدوات مجانية/رخيصة، بدائل عملية، طرق استخدام جديدة، مقارنات، نصائح تطبيقية فورية.
 - ممنوع كلمة "قسم" أو أي صيغة منها، وممنوع أي لفظ جلالة أو كلمة دينية نهائيًا.
+- ممنوع أي نص صيني أو رموز غير مفهومة.
 
-بنية التغريدة يجب أن تكون منضمة ومتنوعة دائمًا:
-- البداية: جملة افتتاحية دقيقة تجذب الانتباه (خبر، فائدة، سؤال، مقارنة، رقم مفيد).
+بنية التغريدة منضمة ومتنوعة دائمًا:
+- البداية: جملة افتتاحية دقيقة تجذب (خبر، فائدة، سؤال، مقارنة، رقم مفيد).
 - الوسط: شرح القيمة بوضوح (كيف تستفيد، ما اللي بيحصل، خطوات إن وجدت).
 - النهاية: دعوة تفاعل منطقية ومتنوعة ("ما رأيكم؟"، "هل استخدمتم شيئًا مشابهًا؟"، "شاركوا رأيكم").
 
@@ -57,7 +60,7 @@ class SovereignUltimateBot:
         self.reply_timestamps = deque(maxlen=50)
         self.replied_tweets_cache = set()
         self.last_mention_id = None
-        self.recent_posts = deque(maxlen=5)  # لمنع التكرار الدلالي
+        self.recent_posts = deque(maxlen=10)  # آخر 10 تغريدات لمنع التكرار الدلالي
 
         self.rss_feeds = [
             "https://www.theverge.com/rss/index.xml",
@@ -173,7 +176,7 @@ class SovereignUltimateBot:
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": prompt}
                         ],
-                        temperature=0.78,
+                        temperature=0.75,
                         max_tokens=420,
                         timeout=40
                     )
@@ -216,6 +219,23 @@ class SovereignUltimateBot:
         cleaned = ' '.join(cleaned.split())
         return cleaned
 
+    def is_semantic_duplicate(self, new_text: str) -> bool:
+        new_lower = new_text.lower().strip()
+        new_words = set(re.findall(r'\w+', new_lower))
+
+        for old_text in self.recent_posts:
+            old_lower = old_text.lower().strip()
+            old_words = set(re.findall(r'\w+', old_lower))
+
+            common = len(new_words & old_words)
+            similarity = common / max(len(new_words), len(old_words)) if new_words and old_words else 0
+
+            if similarity > 0.60:
+                logging.info(f"التكرار الدلالي مرتفع ({similarity:.2f}) → رفض")
+                return True
+
+        return False
+
     def already_posted(self, content: str) -> bool:
         h = hashlib.sha256(content.encode('utf-8')).hexdigest()
         with sqlite3.connect(self.db_path) as conn:
@@ -225,23 +245,7 @@ class SovereignUltimateBot:
         h = hashlib.sha256(content.encode('utf-8')).hexdigest()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("INSERT OR IGNORE INTO history (hash, ts) VALUES (?, datetime('now'))", (h,))
-
-    def is_semantic_duplicate(self, new_text: str) -> bool:
-        new_lower = new_text.lower().strip()
-        new_words = set(new_lower.split())
-
-        for old_text in self.recent_posts:
-            old_lower = old_text.lower().strip()
-            old_words = set(old_lower.split())
-
-            common = len(new_words & old_words)
-            similarity = common / max(len(new_words), len(old_words)) if new_words and old_words else 0
-
-            if similarity > 0.65 or (len(new_text) > 100 and abs(len(new_text) - len(old_text)) < 50):
-                logging.info("النص مشابه دلاليًا أو طوليًا لتغريدة سابقة → رفض")
-                return True
-
-        return False
+        self.recent_posts.append(content)
 
     def fetch_fresh_rss(self, max_per_feed: int = 3, max_age_hours: int = 48) -> List[Dict]:
         articles = []
@@ -412,14 +416,27 @@ class SovereignUltimateBot:
                 logging.info("محتوى مكرر حرفيًا → تخطي")
                 return
 
-            tweets = [t.strip() for t in cleaned_output.split("---") if t.strip()]
+            if self.is_semantic_duplicate(cleaned_output):
+                logging.info("محتوى مشابه دلاليًا لتغريدة سابقة → تخطي")
+                return
+
+            self.recent_posts.append(cleaned_output)
+
+            image_desc = ""
+            content = cleaned_output
+            if "وصف_صورة:" in cleaned_output:
+                parts = cleaned_output.rsplit("وصف_صورة:", 1)
+                content = parts[0].strip()
+                image_desc = parts[1].strip()
+
+            tweets = [t.strip() for t in content.split("---") if t.strip()]
 
             prev_id = None
             for i, txt in enumerate(tweets):
                 try:
                     kwargs = {"text": txt}
-                    if i == 0:
-                        logging.info(f"صورة مقترحة: {cleaned_output.split('وصف_صورة:')[1].strip() if 'وصف_صورة:' in cleaned_output else 'غير محدد'}")
+                    if i == 0 and image_desc:
+                        logging.info(f"صورة مقترحة: {image_desc}")
                     if prev_id:
                         kwargs["in_reply_to_tweet_id"] = prev_id
                     resp = self.x_client.create_tweet(**kwargs)
@@ -431,7 +448,7 @@ class SovereignUltimateBot:
                     continue
 
             self.handle_mentions()
-            self.mark_posted(cleaned_output)
+            self.mark_posted(content)
 
         except Exception as e:
             logging.error(f"خطأ عام في run(): {e}")
