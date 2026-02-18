@@ -23,17 +23,16 @@ SYSTEM_PROMPT = r"""
 أنت متخصص تقني عربي دقيق ومنظم، أسلوبك واضح، منطقي، احترافي، مباشر، ومفيد. 
 تكتب بلغة عربية سلسة وطبيعية بدون إفراط في العامية أو التكرار.
 
-مهمتك: توليد تغريدة واحدة أو thread قصير (2-4 تغريدات) عن خبر أو أداة ذكاء اصطناعي جديدة وتضيف قيمة عملية واضحة (توفير وقت/تكلفة/جهد، حل مشكلة، طريقة تطبيقية، نصيحة فورية).
+مهمتك: توليد تغريدة واحدة أو thread قصير (2-4 تغريدات) عن خبر، أداة، خفية، أو مميزة في الذكاء الاصطناعي أو الأجهزة الذكية، مع التركيز على قيمة عملية واضحة (توفير وقت/تكلفة/جهد، حل مشكلة، طريقة تطبيقية، نصيحة فورية).
 
 **قواعد صارمة لا تُنقض:**
-- في كل مرة، غيّر الأسلوب، البداية، التعبيرات، والتركيز تمامًا عن أي تغريدة سابقة. لا تستخدم نفس الجمل أو الهيكل أو الكلمات الرئيسية المتكررة.
 - لا تنشر أي محتوى بدون قيمة عملية ملموسة → إذا لم يكن هناك فائدة مباشرة → أعد فقط "لا_قيمة".
-- ممنوع أي تعبير مكرر أو مبالغ فيه (مثل "غير حياتي"، "يجنن"، "هالحركة خطيرة"، "صرت أدمن"، "صراحة ما توقعت"، "يا جماعة").
-- ركز على: أدوات مجانية/رخيصة، بدائل عملية، طرق استخدام جديدة، مقارنات، نصائح تطبيقية فورية.
+- غيّر الأسلوب، البداية، التعبيرات، والتركيز تمامًا في كل مرة. لا تكرر جمل أو هيكل سابق.
+- ممنوع أي تعبير مكرر أو مبالغ فيه (مثل "غير حياتي"، "يجنن"، "هالحركة خطيرة"، "صرت أدمن"، "صراحة ما توقعت").
 - ممنوع كلمة "قسم" أو أي صيغة منها، وممنوع أي لفظ جلالة أو كلمة دينية نهائيًا.
 - ممنوع أي نص صيني أو رموز غير مفهومة.
 
-بنية التغريدة منضمة ومتنوعة دائمًا:
+بنية التغريدة منضمة ومتنوعة:
 - البداية: جملة افتتاحية دقيقة تجذب (خبر، فائدة، سؤال، مقارنة، رقم مفيد).
 - الوسط: شرح القيمة بوضوح (كيف تستفيد، ما اللي بيحصل، خطوات إن وجدت).
 - النهاية: دعوة تفاعل منطقية ومتنوعة ("ما رأيكم؟"، "هل استخدمتم شيئًا مشابهًا؟"، "شاركوا رأيكم").
@@ -60,7 +59,7 @@ class SovereignUltimateBot:
         self.reply_timestamps = deque(maxlen=50)
         self.replied_tweets_cache = set()
         self.last_mention_id = None
-        self.recent_posts = deque(maxlen=10)  # آخر 10 تغريدات لمنع التكرار الدلالي
+        self.recent_posts = deque(maxlen=10)  # آخر 10 لمنع التكرار الدلالي
 
         self.rss_feeds = [
             "https://www.theverge.com/rss/index.xml",
@@ -192,32 +191,19 @@ class SovereignUltimateBot:
         raise RuntimeError("فشل كل النماذج")
 
     def clean_forbidden_words(self, text: str) -> str:
-        forbidden_replacements = {
-            "قسم": "جد",
-            "أقسم": "بجد",
-            "اقسم": "بجد",
-            "قسّم": "جد",
-            "تقسيم": "فصل",
-            "قسمها": "جد",
-            "قسموا": "جد",
-            "قسم بالله": "بجد",
-            "الله": "",
-            "والله": "بجد",
-            "بالله": "صدقني",
-            "إن شاء الله": "إن أمكن",
-            "الحمد لله": "الحمد للجهود",
-            "سبحان الله": "مذهل",
-            "بسم الله": "",
-            "يا رب": "يا جماعة",
-            "يا الله": "يا جماعة",
-        }
+        forbidden_patterns = [
+            r"قسم|أقسم|اقسم|قسّم|تقسيم|قسمها|قسموا|قسم بالله",
+            r"الله|والله|بالله|إن شاء الله|الحمد لله|سبحان الله|بسم الله|يا رب|يا الله",
+            r"[\u4e00-\u9fff]+",  # صيني
+            r"[^\u0600-\u06FF\s0-9a-zA-Z!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]",  # رموز غير عربي/لاتيني/أرقام/ترقيم
+        ]
 
         cleaned = text
-        for forbidden, replacement in forbidden_replacements.items():
-            cleaned = cleaned.replace(forbidden, replacement)
+        for pattern in forbidden_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.UNICODE)
 
         cleaned = ' '.join(cleaned.split())
-        return cleaned
+        return cleaned.strip()
 
     def is_semantic_duplicate(self, new_text: str) -> bool:
         new_lower = new_text.lower().strip()
@@ -236,175 +222,54 @@ class SovereignUltimateBot:
 
         return False
 
-    def already_posted(self, content: str) -> bool:
-        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        with sqlite3.connect(self.db_path) as conn:
-            return bool(conn.execute("SELECT 1 FROM history WHERE hash = ?", (h,)).fetchone())
-
-    def mark_posted(self, content: str):
-        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT OR IGNORE INTO history (hash, ts) VALUES (?, datetime('now'))", (h,))
-        self.recent_posts.append(content)
-
-    def fetch_fresh_rss(self, max_per_feed: int = 3, max_age_hours: int = 48) -> List[Dict]:
-        articles = []
-        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
-        ua = "SovereignBot/1.0 (Arabic Tech News Bot)"
-
-        for url in self.rss_feeds:
-            try:
-                feed = feedparser.parse(url, agent=ua)
-                if feed.bozo:
-                    continue
-
-                source = feed.feed.get('title', url.split('//')[1].split('/')[0].replace('www.', ''))
-
-                for entry in feed.entries[:max_per_feed]:
-                    pub = entry.get('published_parsed') or entry.get('updated_parsed')
-                    if not pub:
-                        continue
-
-                    pub_date = date_parser.parse(time.strftime("%Y-%m-%d %H:%M:%S", pub))
-                    if pub_date < cutoff:
-                        continue
-
-                    title = (entry.get('title') or "").strip()
-                    link = (entry.get('link') or "").strip()
-                    summary = (entry.get('summary') or entry.get('description') or "")[:280].strip()
-
-                    if not title or not link:
-                        continue
-
-                    content_for_hash = f"{title} {link}"
-                    if self.already_posted(content_for_hash):
-                        continue
-
-                    text_lower = (title + summary).lower()
-                    if not any(kw in text_lower for kw in ["أداة", "تطبيق", "توفير", "مجاني", "بديل", "كيف", "طريقة", "استخدم", "جرّب", "أفضل", "نصيحة", "تحسين"]):
-                        continue
-
-                    articles.append({
-                        "source": source,
-                        "title": title,
-                        "link": link,
-                        "summary": summary,
-                        "pub_date": pub_date,
-                        "hash": content_for_hash
-                    })
-
-            except Exception as e:
-                logging.warning(f"فشل {url}: {str(e)[:120]}")
-
-        articles.sort(key=lambda x: x["pub_date"], reverse=True)
-        logging.info(f"جلب {len(articles)} خبر جديد ذو قيمة عملية")
-        return articles[:8]
-
-    def handle_mentions(self):
-        if not self.my_user_id:
-            return
-
-        MAX_REPLIES = 2
-        count = 0
-
+    def fetch_current_trends(self):
+        """
+        جلب أحدث الترندات في المنطقة العربية/الخليجية
+        """
         try:
-            mentions = self.x_client.get_users_mentions(
-                id=self.my_user_id,
-                since_id=self.last_mention_id,
-                max_results=5,
-                tweet_fields=['conversation_id', 'author_id', 'created_at']
-            )
-        except tweepy.TooManyRequests:
-            logging.warning("429 Too Many Requests في جلب المنشنات → تخطي")
-            return
+            trends = self.x_client.get_place_trends(woeid=23424938)  # السعودية - يمكن تغيير الـ WOEID
+            top_trends = [trend['name'] for trend in trends[0]['trends'][:5] if trend['tweet_volume'] is not None]
+            logging.info(f"أحدث الترندات: {top_trends}")
+            return top_trends
         except Exception as e:
-            logging.error(f"فشل جلب منشنات: {e}")
-            return
+            logging.error(f"فشل جلب الترندات: {e}")
+            return []
 
-        if not mentions.data:
-            return
+    def is_trend_relevant(self, trend: str) -> bool:
+        ai_keywords = ["AI", "ذكاء اصطناعي", "ChatGPT", "Grok", "Gemini", "Claude", "تقنية", "تكنولوجيا", "أداة", "رمضان", "صيام", "هاتف", "ساعة", "جهاز"]
+        return any(kw.lower() in trend.lower() for kw in ai_keywords)
 
-        for mention in mentions.data:
-            if count >= MAX_REPLIES:
-                break
-
-            tid = mention.id
-            aid = mention.author_id
-
-            if aid == self.my_user_id:
-                continue
-            if tid in self.replied_tweets_cache or self.has_replied_to(tid):
-                continue
-            if not self.can_reply_now():
-                continue
-
-            try:
-                u = self.x_client.get_user(id=aid, user_fields=['public_metrics'])
-                if u.data.public_metrics['followers_count'] < 20:
-                    continue
-            except:
-                continue
-
-            reply_text = self.generate_text(
-                f"رد ذكي قصير ومفيد على: '{mention.text}'",
-                "رد بأسلوب خليجي عفوي، ذكي، قصير، يضيف قيمة."
-            )
-
-            reply_text = self.clean_forbidden_words(reply_text)
-
-            if not reply_text or len(reply_text) > 279:
-                continue
-
-            try:
-                self.x_client.create_tweet(text=reply_text, in_reply_to_tweet_id=tid)
-                self.mark_as_replied(tid)
-                self.replied_tweets_cache.add(tid)
-                count += 1
-                time.sleep(180 + random.randint(0, 120))
-            except tweepy.TooManyRequests:
-                logging.warning("429 أثناء النشر → توقف مؤقت")
-                break
-            except Exception as e:
-                logging.error(f"فشل رد على {tid}: {e}")
-
-        if mentions.data:
-            self.last_mention_id = mentions.data[0].id
-
-    def has_replied_to(self, tweet_id: str) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
-            return bool(conn.execute("SELECT 1 FROM replied_tweets WHERE tweet_id = ?", (tweet_id,)).fetchone())
-
-    def mark_as_replied(self, tweet_id: str):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT OR IGNORE INTO replied_tweets (tweet_id, ts) VALUES (?, datetime('now'))", (tweet_id,))
-
-    def can_reply_now(self) -> bool:
-        now = datetime.utcnow()
-        recent = sum(1 for t in self.reply_timestamps if now - t < timedelta(minutes=5))
-        if recent >= 5:
-            return False
-        self.reply_timestamps.append(now)
-        return True
+    def generate_trend_content(self, trend: str):
+        task = f"الترند الحالي: {trend}. أنشئ محتوى يربط هذا الترند بأداة ذكاء اصطناعي أو نصيحة تقنية مفيدة عمليًا للأفراد في الحياة اليومية أو رمضان. ركز على القيمة المباشرة (توفير وقت/جهد/مال). استخدم أسلوبًا منضمًا واحترافيًا."
+        return self.generate_text(task, SYSTEM_PROMPT)
 
     def run(self):
         try:
-            fresh_news = self.fetch_fresh_rss(max_per_feed=4, max_age_hours=36)
+            # 1. جلب الترندات أولاً
+            trends = self.fetch_current_trends()
+            selected_trend = None
+            for trend in trends:
+                if self.is_trend_relevant(trend):
+                    selected_trend = trend
+                    break
 
             context = ""
+            if selected_trend:
+                context += f"\n\nاستغل الترند الحالي: {selected_trend}\nأنشئ محتوى يربطه بأداة AI مفيدة أو نصيحة عملية."
+
+            # 2. جلب أخبار RSS
+            fresh_news = self.fetch_fresh_rss(max_per_feed=4, max_age_hours=36)
             if fresh_news:
-                local_first = [a for a in fresh_news if any(x in a['source'].lower() for x in ['مصر', 'youm7', 'masrawy', 'اليوم', 'البوابة', 'الوطن', 'سعود', 'إمارات', 'قطر', 'كويت'])]
-                top = local_first[0] if local_first else fresh_news[0]
+                top = fresh_news[0]
+                context += f"\nخبر حديث: {top['title']} من {top['source']} – {top['summary'][:100]}... {top['link']}"
 
-                context = (
-                    f"\n\nخبر حديث مهم من {top['source']}:\n"
-                    f"{top['title']}\n"
-                    f"{top['summary'][:160]}...\nرابط: {top['link']}\n"
-                    "استخدمه كإلهام إذا كان يضيف قيمة عملية مباشرة."
-                )
-
-            task = f"أعطني خبر أو أداة ذكاء اصطناعي جديدة كلياً ومفيدة للأفراد اليوم.{context}"
-
-            raw_output = self.generate_text(task, SYSTEM_PROMPT)
+            # 3. إذا لم يكن هناك ترند أو خبر جديد → ابحث عن خفايا ومميزات
+            if not selected_trend and not fresh_news:
+                hidden_prompt = "ابحث عن خفايا ومميزات مخفية في الأجهزة الذكية أو أدوات الذكاء الاصطناعي التي يجهلها معظم الناس، وركز على ما يقدم قيمة عملية فورية (توفير وقت/مال/جهد)."
+                raw_output = self.generate_text(hidden_prompt, SYSTEM_PROMPT)
+            else:
+                task = f"أعطني محتوى تقني جديد ومفيد للأفراد اليوم.{context}"
+                raw_output = self.generate_text(task, SYSTEM_PROMPT)
 
             cleaned_output = self.clean_forbidden_words(raw_output)
 
@@ -417,7 +282,7 @@ class SovereignUltimateBot:
                 return
 
             if self.is_semantic_duplicate(cleaned_output):
-                logging.info("محتوى مشابه دلاليًا لتغريدة سابقة → تخطي")
+                logging.info("محتوى مشابه دلاليًا → تخطي")
                 return
 
             self.recent_posts.append(cleaned_output)
