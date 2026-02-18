@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 from collections import deque
 from typing import Optional, List, Dict, Any
 from functools import lru_cache
+import difflib  # لـ Levenshtein-like similarity
 
 import tweepy
 from openai import OpenAI
@@ -50,7 +51,8 @@ class SovereignUltimateBot:
         self.reply_timestamps = deque(maxlen=50)
         self.replied_tweets_cache = set()
         self.last_mention_id = None
-        self.recent_posts = deque(maxlen=10)  # آخر 10 لمنع التكرار الدلالي
+        self.recent_posts = deque(maxlen=10)
+        self.topic_blacklist = deque(maxlen=5)  # مواضيع متكررة محظورة مؤقتًا
 
         self.rss_feeds = [
             "https://www.theverge.com/rss/index.xml",
@@ -121,7 +123,6 @@ class SovereignUltimateBot:
         )
 
         try:
-            time.sleep(30 + random.randint(0, 30))  # تأخير لتجنب 429
             me = self.x_client.get_me(user_auth=True)
             self.my_user_id = me.data.id
             logging.info(f"Bot user ID: {self.my_user_id}")
@@ -186,7 +187,7 @@ class SovereignUltimateBot:
         forbidden_patterns = [
             r"قسم|أقسم|اقسم|قسّم|تقسيم|قسمها|قسموا|قسم بالله",
             r"الله|والله|بالله|إن شاء الله|الحمد لله|سبحان الله|بسم الله|يا رب|يا الله",
-            r"[\u4e00-\u9fff]+",  # حروف صينية
+            r"[\u4e00-\u9fff]+",  # صيني
             r"[^\u0600-\u06FF\s0-9a-zA-Z!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]",  # رموز غير عربي/لاتيني/أرقام/ترقيم
         ]
 
@@ -199,14 +200,13 @@ class SovereignUltimateBot:
 
     def detect_hallucination(self, text: str) -> bool:
         hallucination_indicators = [
-            r"ربما|من المحتمل|يُعتقد|قد يكون|يُقال|حسب ما أعرف|في اعتقادي",
-            r"في 202[7-9]|في المستقبل|قريبًا|سيصدر",  # تواريخ مستقبلية غير مؤكدة
-            r"أداة جديدة لم تُطلق بعد|ميزة غير موجودة",  # إشارات لشيء غير حقيقي
+            r"ربما|من المحتمل|يُعتقد|قد يكون|يُقال|حسب ما أعرف|في اعتقادي|ربما|يبدو|من الممكن",
+            r"في 202[7-9]|في المستقبل|قريبًا|سيصدر|سيكون متاح|قيد التطوير",
+            r"أداة جديدة لم تُطلق بعد|ميزة غير موجودة|غير رسمي",
         ]
 
         for pattern in hallucination_indicators:
             if re.search(pattern, text, re.IGNORECASE):
-                logging.warning("كشف هلوسة محتملة → إعادة التوليد أو تخطي")
                 return True
 
         if "لا_معلومات_موثوقة" in text or "لا_قيمة" in text:
@@ -214,13 +214,13 @@ class SovereignUltimateBot:
 
         return False
 
-    def verify_tool_existence(self, tool_name: str) -> bool:
-        known_tools = ["Gemini", "Grok", "ChatGPT", "Claude", "Perplexity", "DeepSeek", "Qwen", "Flux", "Ideogram", "Descript", "Krisp", "ElevenLabs"]
-        return tool_name in known_tools or tool_name.lower() in [t.lower() for t in known_tools]
-
     def is_semantic_duplicate(self, new_text: str) -> bool:
         new_lower = new_text.lower().strip()
         new_words = set(re.findall(r'\w+', new_lower))
+
+        # كلمات رئيسية متكررة محظورة (موضوعي)
+        forbidden_repeated = ["تخصيص", "ردود", "شات جي بي تي", "شات", "تخصيص ردود", "تجربة المستخدم", "تخصيص الردود"]
+        new_has_forbidden = any(kw in new_lower for kw in forbidden_repeated)
 
         for old_text in self.recent_posts:
             old_lower = old_text.lower().strip()
@@ -229,7 +229,15 @@ class SovereignUltimateBot:
             common = len(new_words & old_words)
             similarity = common / max(len(new_words), len(old_words)) if new_words and old_words else 0
 
-            if similarity > 0.60:
+            old_has_forbidden = any(kw in old_lower for kw in forbidden_repeated)
+
+            # إذا كان الموضوع نفسه (forbidden keywords) + تشابه > 50%
+            if new_has_forbidden and old_has_forbidden and similarity > 0.50:
+                logging.info("تكرار موضوعي في نفس الفكرة → رفض")
+                return True
+
+            # تشابه عام
+            if similarity > 0.65:
                 logging.info(f"التكرار الدلالي مرتفع ({similarity:.2f}) → رفض")
                 return True
 
@@ -307,7 +315,6 @@ class SovereignUltimateBot:
         count = 0
 
         try:
-            time.sleep(30 + random.randint(0, 30))
             mentions = self.x_client.get_users_mentions(
                 id=self.my_user_id,
                 since_id=self.last_mention_id,
@@ -356,7 +363,6 @@ class SovereignUltimateBot:
                 continue
 
             try:
-                time.sleep(30 + random.randint(0, 30))
                 self.x_client.create_tweet(text=reply_text, in_reply_to_tweet_id=tid)
                 self.mark_as_replied(tid)
                 self.replied_tweets_cache.add(tid)
@@ -435,7 +441,6 @@ class SovereignUltimateBot:
             prev_id = None
             for i, txt in enumerate(tweets):
                 try:
-                    time.sleep(30 + random.randint(0, 30))
                     kwargs = {"text": txt}
                     if i == 0 and image_desc:
                         logging.info(f"صورة مقترحة: {image_desc}")
@@ -445,11 +450,6 @@ class SovereignUltimateBot:
                     prev_id = resp.data["id"]
                     logging.info(f"نشر تغريدة {i+1}/{len(tweets)} بنجاح")
                     time.sleep(5 + random.random() * 10)
-                except tweepy.TooManyRequests:
-                    logging.warning("429 أثناء النشر → حفظ في log وتخطي")
-                    with open("failed_posts.log", "a", encoding="utf-8") as f:
-                        f.write(f"{datetime.now()}: {txt}\n")
-                    break
                 except Exception as e:
                     logging.error(f"خطأ في نشر تغريدة {i+1}: {e}")
                     continue
