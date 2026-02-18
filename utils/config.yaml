@@ -1,45 +1,47 @@
-# config.yaml
 bot:
   database_path: "data/sovereign.db"
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-  daily_tweet_limit: 3    # التغريدات اليومية
-  daily_reply_limit: 10   # الردود اليومية
-  sleep_start: 2          # توقيت النوم (2 فجراً)
-  sleep_end: 8            # توقيت الاستيقاظ (8 صباحاً)
+  daily_tweet_limit: 5    # زدنا العدد شوي لتعظيم الفائدة
+  daily_reply_limit: 15   # ردود أكثر لزيادة التفاعل
+  sleep_start: 2          # توقيت الهدوء (2 فجراً)
+  sleep_end: 8            # توقيت النشاط (8 صباحاً)
+  wa_notify: true         # تفعيل تنبيهات الواتساب
 
 logging:
   level: "INFO"
-  name: "SovereignBot"
+  name: "NasserApexBot"
 
 sources:
   rss_feeds:
-    - url: "https://www.theverge.com/rss/index.xml"
+    - url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
+    - url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    - url: "https://www.wired.com/feed/category/gear/latest/rss"
 
 monitored_accounts:
-  - "44196397"   # Elon Musk
-  - "1605"       # Sam Altman
-  - "82914103"   # Satya Nadella
-  - "154030638"  # Demis Hassabis
-  - "48008938"   # Yann LeCun
-  - "21789463"   # Balaji Srinivasan
-  - "41768233"   # Min. Alswaha
-  - "14169727"   # Faisal Al-Khamisi
+  - "44196397"    # Elon Musk
+  - "1605"        # Sam Altman
+  - "41768233"    # Alswaha (وزير الاتصالات)
+  - "14169727"    # Faisal Al-Khamisi (الاتحاد السعودي للأمن السيبراني)
 
+# مصفوفة العقول الستة (The Council of Six)
 models:
   priority:
-    - name: "GPT-4o"
-      type: "openai"
-      model: "gpt-4o"
-      env_key: "OPENAI_API_KEY"
+    - {name: "Gemini 2.0", type: "google", model: "gemini-2.0-flash", env_key: "GEMINI_KEY"}
+    - {name: "GPT-4o", type: "openai", model: "gpt-4o", env_key: "OPENAI_API_KEY"}
+    - {name: "Grok", type: "xai", model: "grok-beta", env_key: "XAI_API_KEY"}
+    - {name: "Claude 3.5", type: "anthropic", model: "claude-3-5-sonnet-20240620", env_key: "CLAUDE_KEY"}
+    - {name: "Groq Llama", type: "groq", model: "llama-3.3-70b-versatile", env_key: "GROQ_API_KEY"}
+    - {name: "Qwen", type: "openrouter", model: "qwen/qwen-2.5-72b", env_key: "OPENROUTER_API_KEY"}
 
 prompts:
   system_core: |
-    أنت محلل استراتيجي رفيع المستوى في الثورة الصناعية الرابعة. 
-    هويتك: مستقل، رصين، لا تجامل، تركز على الفرد والسيادة الرقمية.
-    القواعد: جمل قصيرة، أسلوب حاد وذكي، تجنب الحشو، استخدم مصطلحات تقنية بين قوسين عند الحاجة.
-  
+    أنت محلل استراتيجي وخبير في الذكاء الاصطناعي وأدواته الحديثة للأفراد.
+    هويتك: مستقل، رصين، لا تجامل، تركز على تمكين الفرد والسيادة الرقمية.
+    اللغة: خليجية بيضاء (وسطى)، جمل قصيرة وحادة، أسلوب ذكي جداً، استخدم (مصطلحات إنجليزية) عند الضرورة القصوى.
+    القاعدة الذهبية: لا تهلوس، إذا لم تجد معلومة عميقة لا تنشر كلاماً سطحياً.
+
   modes:
-    POST_DEEP: "حلل هذا التحول التقني بعمق استراتيجي (300-400 حرف): {content}"
-    THREAD_START: "اكتب افتتاحية ثريد تحليلي مثير للاهتمام حول: {content}. يجب أن توضح أن هناك تفكيكاً قادماً."
-    POST_FAST: "بصيرة تقنية مركزة وسريعة (150-220 حرف) حول: {content}"
-    REPLY: "اكتب رداً ذكياً عالي القيمة يضيف منظوراً لم يُذكر ولا يجامل: {content}"
+    POST_DEEP: "غص في عمق هذا الخبر وحلله استراتيجياً للفرد الخليجي (بدون هلوسة): {content}"
+    POST_FAST: "بصيرة تقنية عاجلة (سكوب) عن أداة ذكاء اصطناعي بلهجة خليجية: {content}"
+    REPLY: "رد بذكاء ومنظور مختلف (بدون مجاملة) على هذا المتابع: {content}"
+    CONTEST: "اطرح لغزاً تقنياً ذكياً حول الذكاء الاصطناعي وأدواته الحديثة لتحفيز المتابعين."
