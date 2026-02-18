@@ -201,4 +201,246 @@ class SovereignUltimateBot:
 
         cleaned = text
         for pattern in forbidden_patterns:
-            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE | re.UNICODE)
+
+        cleaned = ' '.join(cleaned.split())
+        return cleaned.strip()
+
+    def is_semantic_duplicate(self, new_text: str) -> bool:
+        new_lower = new_text.lower().strip()
+        new_words = set(re.findall(r'\w+', new_lower))
+
+        for old_text in self.recent_posts:
+            old_lower = old_text.lower().strip()
+            old_words = set(re.findall(r'\w+', old_lower))
+
+            common = len(new_words & old_words)
+            similarity = common / max(len(new_words), len(old_words)) if new_words and old_words else 0
+
+            if similarity > 0.60:
+                logging.info(f"التكرار الدلالي مرتفع ({similarity:.2f}) → رفض")
+                return True
+
+        return False
+
+    def already_posted(self, content: str) -> bool:
+        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        with sqlite3.connect(self.db_path) as conn:
+            return bool(conn.execute("SELECT 1 FROM history WHERE hash = ?", (h,)).fetchone())
+
+    def mark_posted(self, content: str):
+        h = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT OR IGNORE INTO history (hash, ts) VALUES (?, datetime('now'))", (h,))
+        self.recent_posts.append(content)
+
+    def fetch_fresh_rss(self, max_per_feed: int = 3, max_age_hours: int = 48) -> List[Dict]:
+        articles = []
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        ua = "SovereignBot/1.0 (Arabic Tech News Bot)"
+
+        for url in self.rss_feeds:
+            try:
+                feed = feedparser.parse(url, agent=ua)
+                if feed.bozo:
+                    continue
+
+                source = feed.feed.get('title', url.split('//')[1].split('/')[0].replace('www.', ''))
+
+                for entry in feed.entries[:max_per_feed]:
+                    pub = entry.get('published_parsed') or entry.get('updated_parsed')
+                    if not pub:
+                        continue
+
+                    pub_date = date_parser.parse(time.strftime("%Y-%m-%d %H:%M:%S", pub))
+                    if pub_date < cutoff:
+                        continue
+
+                    title = (entry.get('title') or "").strip()
+                    link = (entry.get('link') or "").strip()
+                    summary = (entry.get('summary') or entry.get('description') or "")[:280].strip()
+
+                    if not title or not link:
+                        continue
+
+                    content_for_hash = f"{title} {link}"
+                    if self.already_posted(content_for_hash):
+                        continue
+
+                    text_lower = (title + summary).lower()
+                    if not any(kw in text_lower for kw in ["أداة", "تطبيق", "توفير", "مجاني", "بديل", "كيف", "طريقة", "استخدم", "جرّب", "أفضل", "نصيحة", "تحسين"]):
+                        continue
+
+                    articles.append({
+                        "source": source,
+                        "title": title,
+                        "link": link,
+                        "summary": summary,
+                        "pub_date": pub_date,
+                        "hash": content_for_hash
+                    })
+
+            except Exception as e:
+                logging.warning(f"فشل {url}: {str(e)[:120]}")
+
+        articles.sort(key=lambda x: x["pub_date"], reverse=True)
+        logging.info(f"جلب {len(articles)} خبر جديد ذو قيمة عملية")
+        return articles[:8]
+
+    def handle_mentions(self):
+        if not self.my_user_id:
+            return
+
+        MAX_REPLIES = 2
+        count = 0
+
+        try:
+            mentions = self.x_client.get_users_mentions(
+                id=self.my_user_id,
+                since_id=self.last_mention_id,
+                max_results=5,
+                tweet_fields=['conversation_id', 'author_id', 'created_at']
+            )
+        except tweepy.TooManyRequests:
+            logging.warning("429 Too Many Requests في جلب المنشنات → تخطي")
+            return
+        except Exception as e:
+            logging.error(f"فشل جلب منشنات: {e}")
+            return
+
+        if not mentions.data:
+            return
+
+        for mention in mentions.data:
+            if count >= MAX_REPLIES:
+                break
+
+            tid = mention.id
+            aid = mention.author_id
+
+            if aid == self.my_user_id:
+                continue
+            if tid in self.replied_tweets_cache or self.has_replied_to(tid):
+                continue
+            if not self.can_reply_now():
+                continue
+
+            try:
+                u = self.x_client.get_user(id=aid, user_fields=['public_metrics'])
+                if u.data.public_metrics['followers_count'] < 20:
+                    continue
+            except:
+                continue
+
+            reply_text = self.generate_text(
+                f"رد ذكي قصير ومفيد على: '{mention.text}'",
+                "رد بأسلوب خليجي عفوي، ذكي، قصير، يضيف قيمة."
+            )
+
+            reply_text = self.clean_forbidden_words(reply_text)
+
+            if not reply_text or len(reply_text) > 279:
+                continue
+
+            try:
+                self.x_client.create_tweet(text=reply_text, in_reply_to_tweet_id=tid)
+                self.mark_as_replied(tid)
+                self.replied_tweets_cache.add(tid)
+                count += 1
+                time.sleep(180 + random.randint(0, 120))
+            except tweepy.TooManyRequests:
+                logging.warning("429 أثناء النشر → توقف مؤقت")
+                break
+            except Exception as e:
+                logging.error(f"فشل رد على {tid}: {e}")
+
+        if mentions.data:
+            self.last_mention_id = mentions.data[0].id
+
+    def has_replied_to(self, tweet_id: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            return bool(conn.execute("SELECT 1 FROM replied_tweets WHERE tweet_id = ?", (tweet_id,)).fetchone())
+
+    def mark_as_replied(self, tweet_id: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT OR IGNORE INTO replied_tweets (tweet_id, ts) VALUES (?, datetime('now'))", (tweet_id,))
+
+    def can_reply_now(self) -> bool:
+        now = datetime.utcnow()
+        recent = sum(1 for t in self.reply_timestamps if now - t < timedelta(minutes=5))
+        if recent >= 5:
+            return False
+        self.reply_timestamps.append(now)
+        return True
+
+    def run(self):
+        try:
+            fresh_news = self.fetch_fresh_rss(max_per_feed=4, max_age_hours=36)
+
+            context = ""
+            if fresh_news:
+                local_first = [a for a in fresh_news if any(x in a['source'].lower() for x in ['مصر', 'youm7', 'masrawy', 'اليوم', 'البوابة', 'الوطن', 'سعود', 'إمارات', 'قطر', 'كويت'])]
+                top = local_first[0] if local_first else fresh_news[0]
+
+                context = (
+                    f"\n\nخبر حديث مهم من {top['source']}:\n"
+                    f"{top['title']}\n"
+                    f"{top['summary'][:160]}...\nرابط: {top['link']}\n"
+                    "استخدمه كإلهام إذا كان يضيف قيمة عملية مباشرة."
+                )
+
+            task = f"أعطني خبر أو أداة ذكاء اصطناعي جديدة كلياً ومفيدة للأفراد اليوم.{context}"
+
+            raw_output = self.generate_text(task, SYSTEM_PROMPT)
+
+            cleaned_output = self.clean_forbidden_words(raw_output)
+
+            if "لا_قيمة" in cleaned_output.strip():
+                logging.info("المحتوى لا يضيف قيمة عملية → تخطي")
+                return
+
+            if self.already_posted(cleaned_output):
+                logging.info("محتوى مكرر حرفيًا → تخطي")
+                return
+
+            if self.is_semantic_duplicate(cleaned_output):
+                logging.info("محتوى مشابه دلاليًا → تخطي")
+                return
+
+            self.recent_posts.append(cleaned_output)
+
+            image_desc = ""
+            content = cleaned_output
+            if "وصف_صورة:" in cleaned_output:
+                parts = cleaned_output.rsplit("وصف_صورة:", 1)
+                content = parts[0].strip()
+                image_desc = parts[1].strip()
+
+            tweets = [t.strip() for t in content.split("---") if t.strip()]
+
+            prev_id = None
+            for i, txt in enumerate(tweets):
+                try:
+                    kwargs = {"text": txt}
+                    if i == 0 and image_desc:
+                        logging.info(f"صورة مقترحة: {image_desc}")
+                    if prev_id:
+                        kwargs["in_reply_to_tweet_id"] = prev_id
+                    resp = self.x_client.create_tweet(**kwargs)
+                    prev_id = resp.data["id"]
+                    logging.info(f"نشر تغريدة {i+1}/{len(tweets)} بنجاح")
+                    time.sleep(5 + random.random() * 10)
+                except Exception as e:
+                    logging.error(f"خطأ في نشر تغريدة {i+1}: {e}")
+                    continue
+
+            self.handle_mentions()
+            self.mark_posted(content)
+
+        except Exception as e:
+            logging.error(f"خطأ عام في run(): {e}")
+
+
+if __name__ == "__main__":
+    bot = SovereignUltimateBot()
+    bot.run()
