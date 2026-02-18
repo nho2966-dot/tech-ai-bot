@@ -56,7 +56,7 @@ class SovereignUltimateBot:
     def __init__(self):
         self.db_path = "data/sovereign_final.db"
         self._init_db()
-        self._setup_clients()  # ← تم تصحيح الاسم هنا
+        self._setup_clients()
         self.reply_timestamps = deque(maxlen=50)
         self.replied_tweets_cache = set()
         self.last_mention_id = None
@@ -155,4 +155,50 @@ class SovereignUltimateBot:
         sequence = [
             ("Groq Llama 3.3", "Groq", "llama-3.3-70b-versatile"),
             ("Gemini Flash", "Gemini", "gemini-2.5-flash"),
-            ("OpenAI 4o-mini", "OpenAI", "gpt-4
+            ("OpenAI 4o-mini", "OpenAI", "gpt-4o-mini"),
+            ("OpenRouter Gemini", "OpenRouter", "google/gemini-2.5-flash"),
+        ]
+
+        for name, key, model in sequence:
+            try:
+                client = self.brains.get(key)
+                if not client:
+                    continue
+
+                if key == "Gemini":
+                    m = client.GenerativeModel(model)
+                    res = m.generate_content(f"{system_msg}\n{prompt}")
+                    text = res.text.strip()
+                else:
+                    res = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.75,
+                        max_tokens=420,
+                        timeout=40
+                    )
+                    text = res.choices[0].message.content.strip()
+
+                if text and len(text) > 80:
+                    return text
+
+            except Exception as e:
+                logging.warning(f"{name} فشل: {str(e)[:100]}")
+                continue
+
+        raise RuntimeError("فشل كل النماذج")
+
+    def clean_forbidden_words(self, text: str) -> str:
+        forbidden_patterns = [
+            r"قسم|أقسم|اقسم|قسّم|تقسيم|قسمها|قسموا|قسم بالله",
+            r"الله|والله|بالله|إن شاء الله|الحمد لله|سبحان الله|بسم الله|يا رب|يا الله",
+            r"[\u4e00-\u9fff]+",  # صيني
+            r"[^\u0600-\u06FF\s0-9a-zA-Z!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]",  # رموز غير عربي/لاتيني/أرقام/ترقيم
+        ]
+
+        cleaned = text
+        for pattern in forbidden_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE
