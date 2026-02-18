@@ -1,35 +1,41 @@
 import os
+import sys
 import time
+import yaml
 import random
+import sqlite3
+import pathlib
 import requests
 import feedparser
-import sqlite3
+import tweepy
 from bs4 import BeautifulSoup
 from google import genai
 from openai import OpenAI
-from twilio.rest import Client
 
 class NasserApexBot:
     def __init__(self):
-        # 1. ربط المفاتيح (Secrets)
-        self.keys = {
-            "gemini": os.getenv("GEMINI_KEY"),
-            "openai": os.getenv("OPENAI_API_KEY"),
-            "xai": os.getenv("XAI_API_KEY"),
-            "groq": os.getenv("GROQ_API_KEY"),
-            "twilio_sid": os.getenv("TWILIO_SID"),
-            "twilio_token": os.getenv("TWILIO_TOKEN"),
-            "my_phone": os.getenv("MY_PHONE_NUMBER")
-        }
+        self.config = self._find_and_load_config()
         self._init_db()
-        self._init_x_client()
+        self._init_clients()
+        print(f"✅ تم تحميل الإعدادات وبدء تشغيل: {self.config['logging']['name']}")
+
+    # --- 1. رادار البحث عن ملف الإعدادات ---
+    def _find_and_load_config(self):
+        root_dir = pathlib.Path(__file__).parent.parent if "__file__" in locals() else pathlib.Path.cwd()
+        config_path = next(root_dir.glob("**/config.yaml"), None)
+        if not config_path:
+            raise FileNotFoundError("❌ يا ناصر، ملف config.yaml غير موجود في أي مكان بالمشروع!")
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
 
     def _init_db(self):
-        with sqlite3.connect("data/nasser_apex.db") as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS processed_news (link TEXT PRIMARY KEY)")
+        db_path = self.config['bot']['database_path']
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, type TEXT)")
+            conn.execute("CREATE TABLE IF NOT EXISTS replied_mentions (tweet_id TEXT PRIMARY KEY)")
 
-    def _init_x_client(self):
-        import tweepy
+    def _init_clients(self):
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -37,96 +43,114 @@ class NasserApexBot:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-
-    # --- محرك الغوص والتحليل البصري ---
-    def deep_dive_and_analyze(self, url):
-        """الدخول للرابط، قراءة النص، وتحليل الصور إن وجدت"""
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            res = requests.get(url, headers=headers, timeout=15)
-            soup = BeautifulSoup(res.content, 'html.parser')
-            
-            # استخراج النص العميق
-            text = " ".join([p.get_text() for p in soup.find_all('p')[:7]])
-            
-            # استخراج رابط أول صورة رئيسية للتحليل
-            img_tag = soup.find('meta', property='og:image')
-            img_url = img_tag['content'] if img_tag else None
-            
-            return text, img_url
-        except: return None, None
-
-    # --- محرك التبديل بين العقول الستة ---
-    def generate_with_fallback(self, prompt, image_url=None):
-        """التبديل بين Gemini, GPT-4o, Grok, Groq لضمان جودة السكوب"""
-        # إذا فيه صورة، نفضل Gemini 2.0 Vision أو GPT-4o
-        methods = [
-            ("Gemini 2.0", self._call_gemini),
-            ("GPT-4o", self._call_openai),
-            ("Grok-Beta", self._call_xai),
-            ("Groq-Llama", self._call_groq)
-        ]
-        
-        for name, func in methods:
+        self.has_wa = False
+        if self.config['bot'].get('wa_notify'):
             try:
-                content = func(prompt, image_url)
-                if content: return content
+                from twilio.rest import Client
+                self.wa_client = Client(os.getenv("TWILIO_SID"), os.getenv("TWILIO_TOKEN"))
+                self.has_wa = True
+            except: print("⚠️ فشل تحميل مكتبة الواتساب")
+
+    # --- 2. محرك العقول الستة البديلة ---
+    def generate_content(self, mode_key, content_input=""):
+        system_prompt = self.config['prompts']['system_core']
+        user_prompt = self.config['prompts']['modes'][mode_key].format(content=content_input)
+        full_prompt = f"{system_prompt}\n\nالمهمة: {user_prompt}"
+
+        for model_cfg in self.config['models']['priority']:
+            try:
+                api_key = os.getenv(model_cfg['env_key'])
+                if not api_key: continue
+                
+                if model_cfg['type'] == "google":
+                    client = genai.Client(api_key=api_key)
+                    res = client.models.generate_content(model=model_cfg['model'], contents=full_prompt)
+                    return res.text
+                elif model_cfg['type'] in ["openai", "xai", "groq", "openrouter"]:
+                    base_urls = {"xai": "https://api.x.ai/v1", "groq": "https://api.groq.com/openai/v1", "openrouter": "https://openrouter.ai/api/v1"}
+                    client = OpenAI(api_key=api_key, base_url=base_urls.get(model_cfg['type']))
+                    res = client.chat.completions.create(model=model_cfg['model'], messages=[{"role": "user", "content": full_prompt}])
+                    return res.choices[0].message.content
             except: continue
         return None
 
-    def _call_gemini(self, p, img=None):
-        client = genai.Client(api_key=self.keys["gemini"])
-        # هنا Gemini يحلل النص والصورة مع بعض
-        return client.models.generate_content(model="gemini-2.0-flash", contents=p).text
-
-    def _call_openai(self, p, img=None):
-        client = OpenAI(api_key=self.keys["openai"])
-        res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": p}])
-        return res.choices[0].message.content
-
-    # --- الوظيفة الرئيسية: صناعة السكوب ---
-    def create_journalistic_scoop(self):
-        feed = feedparser.parse("https://techcrunch.com/category/artificial-intelligence/feed/")
-        if not feed.entries: return
-        
-        entry = feed.entries[0]
-        link = entry.link
-        
-        # التأكد إن الخبر لم ينشر سابقاً
-        with sqlite3.connect("data/nasser_apex.db") as conn:
-            if conn.execute("SELECT 1 FROM processed_news WHERE link=?", (link,)).fetchone():
+    # --- 3. نظام الردود الذكية (Smart Replies) ---
+    def handle_mentions(self):
+        print("🔍 فحص المنشن للرد الذكي...")
+        try:
+            # جلب معرف البوت تلقائياً
+            me = self.x_client.get_me()
+            mentions = self.x_client.get_users_mentions(id=me.data.id, max_results=5)
+            
+            if not mentions or not mentions.data:
+                print("ℹ️ لا يوجد منشن جديد.")
                 return
 
-        # الغوص في التفاصيل
-        detail_text, img_url = self.deep_dive_and_analyze(link)
-        
-        prompt = f"""
-        أنت أقوى صحفي تقني في الخليج. حلل هذا الخبر العميق وصغ منه 'سكوب' احترافي:
-        المحتوى: {detail_text}
-        رابط الصورة المرفقة: {img_url}
-        
-        الشروط: 
-        1. لهجة خليجية بيضاء ذكية. 
-        2. ركز على 'الزبدة' اللي تهم الفرد الخليجي. 
-        3. لا تزيد عن 280 حرف. 
-        4. ابدأ بأسلوب مشوق (مثلاً: تخيلوا يا جماعة.. أو: سكوب تقني عاجل..).
-        """
-        
-        tweet = self.generate_with_fallback(prompt, img_url)
-        if tweet:
-            self.x_client.create_tweet(text=tweet)
-            with sqlite3.connect("data/nasser_apex.db") as conn:
-                conn.execute("INSERT INTO processed_news VALUES (?)", (link,))
-            self.notify_whatsapp(f"✅ تم نشر سكوب جديد: {link}")
+            for tweet in mentions.data:
+                with sqlite3.connect(self.config['bot']['database_path']) as conn:
+                    if conn.execute("SELECT 1 FROM replied_mentions WHERE tweet_id=?", (str(tweet.id),)).fetchone():
+                        continue
+                
+                print(f"💬 جاري الرد على: {tweet.text[:50]}...")
+                reply_text = self.generate_content("REPLY", tweet.text)
+                
+                if reply_text:
+                    self.x_client.create_tweet(text=reply_text[:280], in_reply_to_tweet_id=tweet.id)
+                    with sqlite3.connect(self.config['bot']['database_path']) as conn:
+                        conn.execute("INSERT INTO replied_mentions VALUES (?)", (str(tweet.id),))
+                    
+                    # فاصل زمني صغير بين الردود (سلوك بشري)
+                    time.sleep(random.randint(30, 60))
+        except Exception as e:
+            print(f"⚠️ خطأ في نظام الردود: {e}")
 
-    def notify_whatsapp(self, msg):
-        if self.keys["twilio_sid"]:
-            client = Client(self.keys["twilio_sid"], self.keys["twilio_token"])
-            client.messages.create(from_='whatsapp:+14155238886', body=msg, to=f"whatsapp:{self.keys['my_phone']}")
+    # --- 4. نظام النشر والسكوبات العميقة ---
+    def run_scoop_mission(self):
+        print("📰 جاري البحث عن سكوب عميق...")
+        for feed_cfg in self.config['sources']['rss_feeds']:
+            feed = feedparser.parse(feed_cfg['url'])
+            if not feed.entries: continue
+            
+            entry = feed.entries[0]
+            with sqlite3.connect(self.config['bot']['database_path']) as conn:
+                if conn.execute("SELECT 1 FROM processed WHERE id=?", (entry.link,)).fetchone():
+                    continue
 
-# --- التشغيل الإمبراطوري ---
+            # الغوص العميق (Scraping)
+            res = requests.get(entry.link, headers={"User-Agent": self.config['bot']['user_agent']})
+            soup = BeautifulSoup(res.content, "html.parser")
+            article_text = " ".join([p.get_text() for p in soup.find_all('p')[:5]])
+
+            tweet = self.generate_content("POST_DEEP", article_text)
+            if tweet:
+                self.x_client.create_tweet(text=tweet[:280])
+                with sqlite3.connect(self.config['bot']['database_path']) as conn:
+                    conn.execute("INSERT INTO processed VALUES (?, 'news')", (entry.link,))
+                self.notify_nasser(f"✅ تم نشر سكوب عميق عن: {entry.title}")
+                break
+
+    def notify_nasser(self, msg):
+        print(f"📢 {msg}")
+        if self.has_wa:
+            try:
+                self.wa_client.messages.create(
+                    from_='whatsapp:+14155238886',
+                    body=f"🤖 *أيبكس:* {msg}",
+                    to=f"whatsapp:{os.getenv('MY_PHONE_NUMBER')}"
+                )
+            except: pass
+
+# --- الدورة التشغيلية المنسقة ---
 if __name__ == "__main__":
     bot = NasserApexBot()
-    # فاصل زمني عشوائي قبل كل عملية للنشر (بشري 100%)
-    time.sleep(random.randint(300, 600))
-    bot.create_journalistic_scoop()
+    
+    # 1. أولاً: الرد على الناس (الأولوية للتفاعل)
+    bot.handle_mentions()
+    
+    # 2. فاصل زمني "بشري" (5-10 دقائق) قبل النشر
+    delay = random.randint(300, 600)
+    print(f"⏳ سكون لمدة {delay//60} دقيقة لضمان السيادة الرقمية...")
+    time.sleep(delay)
+    
+    # 3. ثانياً: نشر السكوب العميق
+    bot.run_scoop_mission()
