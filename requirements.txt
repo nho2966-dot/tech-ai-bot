@@ -10,3 +10,6 @@ python-dateutil>=2.8.0
 Pillow==10.2.0
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
+twilio==9.4.1
+groq>=0.4.2
+anthropic>=0.45.0
