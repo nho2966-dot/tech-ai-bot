@@ -1,56 +1,25 @@
-import sys
 import os
-import sqlite3
+import time
 import random
 import logging
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
+import sqlite3
+from datetime import datetime
 
-# --- 1. رادار المسارات الديناميكي (منع فشل الـ Build) ---
-def resolve_paths():
-    base = Path(__file__).resolve().parent
-    # إضافة المجلد الرئيسي ومجلد src لمسار بايثون
-    sys.path.extend([str(base), str(base / "src"), str(base / "src" / "core")])
-    # إنشاء مجلدات البيانات واللوقز إذا كانت غير موجودة
-    os.makedirs("data", exist_ok=True)
-    os.makedirs("logs", exist_ok=True)
-
-resolve_paths()
-
-# --- 2. الاستيراد الآمن (Safe Import) ---
-try:
-    import tweepy
-    from google import genai
-    from PIL import Image, ImageDraw, ImageFont
-    import arabic_reshaper
-    from bidi.algorithm import get_display
-    # محاولة استيراد أدواتك من مجلد src
-    from src.core.ai_writer import AIWriter
-    from src.utils.logger import setup_logger
-except ImportError as e:
-    print(f"⚠️ تنبيه: تم تجاوز بعض الاستيرادات، تأكد من ملف requirements.txt: {e}")
-
-# --- 3. محرك ناصر للذكاء الاصطناعي ---
+# استيراد المكتبات (تأكد من وجودها في requirements.txt)
+import tweepy
+from google import genai
+from openai import OpenAI
+from twilio.rest import Client
 
 class NasserApexBot:
     def __init__(self):
-        self.db_path = "sovereign_apex_v311.db"
-        self.font_path = "font.ttf"
-        self.logger = logging.getLogger("NasserBot")
-        self._init_db()
-        self._init_clients()
-
-    def _init_db(self):
-        """تجهيز قاعدة البيانات لمنع التكرار والهلوسة"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS history 
-                (hash TEXT PRIMARY KEY, content_type TEXT, ts DATETIME)
-            """)
-
-    def _init_clients(self):
-        """الربط مع منصة X و Gemini"""
+        # إعداد العملاء (Clients) باستخدام مفاتيحك من الصورة
+        self.gemini_key = os.getenv("GEMINI_KEY")
+        self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.xai_key = os.getenv("XAI_API_KEY")
+        self.groq_key = os.getenv("GROQ_API_KEY")
+        
+        # ربط X (تويتر)
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -58,111 +27,71 @@ class NasserApexBot:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        auth = tweepy.OAuth1UserHandler(
-            os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
-            os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
-        )
-        self.api_v1 = tweepy.API(auth)
-        self.gemini = genai.Client(api_key=os.getenv("GEMINI_KEY"))
 
-    # --- 4. المحرك البصري العربي (صفر أخطاء لغوية) ---
+    def _generate_content_logic(self, prompt):
+        """منطق التبديل الآلي بين العقول الستة"""
+        # قائمة المحاولات بناءً على Keys المتوفرة عندك
+        methods = [
+            ("Gemini", self._call_gemini),
+            ("OpenAI", self._call_openai),
+            ("XAI (Grok)", self._call_xai),
+            ("Groq", self._call_groq)
+        ]
+        
+        for name, func in methods:
+            try:
+                print(f"🤖 محاولة استخدام عقل: {name}...")
+                content = func(prompt)
+                if content: return content
+            except Exception as e:
+                print(f"⚠️ {name} مضغوط.. ننتقل للعقل التالي.")
+                continue
+        return None
 
-    def generate_visual_content(self, text, output_name="out.png"):
-        """إنتاج إنفوجرافيك عربي سليم"""
+    # --- دوال استدعاء العقول ---
+    def _call_gemini(self, p):
+        client = genai.Client(api_key=self.gemini_key)
+        return client.models.generate_content(model="gemini-2.0-flash", contents=p).text
+
+    def _call_openai(self, p):
+        client = OpenAI(api_key=self.openai_key)
+        res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": p}])
+        return res.choices[0].message.content
+
+    def _call_xai(self, p):
+        client = OpenAI(api_key=self.xai_key, base_url="https://api.x.ai/v1")
+        res = client.chat.completions.create(model="grok-beta", messages=[{"role": "user", "content": p}])
+        return res.choices[0].message.content
+
+    # --- منطق الواتساب ---
+    def notify_nasser(self, msg):
         try:
-            # تصحيح النص العربي (Reshaping & Bidi)
-            reshaped = arabic_reshaper.reshape(text)
-            bidi_text = get_display(reshaped)
+            client = Client(os.getenv("TWILIO_SID"), os.getenv("TWILIO_TOKEN"))
+            client.messages.create(
+                from_='whatsapp:+14155238886',
+                body=f"📢 *تنبيه بوت ناصر:*\n{msg}",
+                to=f"whatsapp:{os.getenv('MY_PHONE_NUMBER')}"
+            )
+        except: print("📱 فشل إرسال الواتساب")
 
-            # إنشاء خلفية تقنية (Deep Navy Blue)
-            img = Image.new('RGB', (1200, 675), color=(5, 15, 35))
-            draw = ImageDraw.Draw(img)
-
-            # تحميل الخط العربي المرفق
-            font_size = 45
-            if os.path.exists(self.font_path):
-                font = ImageFont.truetype(self.font_path, font_size)
-            else:
-                font = ImageFont.load_default()
-
-            # رسم النص في المنتصف بدقة
-            draw.text((100, 300), bidi_text, font=font, fill=(0, 255, 180)) # لون فسفوري تقني
-            
-            path = f"data/{output_name}"
-            img.save(path)
-            return path
-        except Exception as e:
-            print(f"❌ خطأ بصري: {e}")
-            return None
-
-    # --- 5. المنطق العملياتي (الردود + النشر) ---
-
-    def handle_mentions(self):
-        """الرد الذكي مع مراعاة الـ Rate Limit"""
-        print("🔍 جاري فحص المنشن يا ناصر...")
-        try:
-            mentions = self.x_client.get_users_mentions(id=os.getenv("X_USER_ID"), max_results=5)
-            if not mentions.data: return
-
-            for tweet in mentions.data:
-                if self._already_processed(tweet.id): continue
-                
-                # توليد رد خليجي تقني
-                prompt = f"رد على الاستفسار بلهجة خليجية بيضاء حول أدوات الذكاء الاصطناعي: {tweet.text}"
-                response = self.gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-                
-                # الرد على X
-                self.x_client.create_tweet(text=f"@{tweet.id} {response.text[:250]}", in_reply_to_tweet_id=tweet.id)
-                self._save_to_history(tweet.id, "REPLY")
-                print(f"✅ تم الرد على: {tweet.id}")
-                time.sleep(10) # فاصل بسيط بين الردود
-
-        except tweepy.errors.TooManyRequests:
-            print("⚠️ تجاوزت الحد المسموح (429).. بنهدي اللعب شوي.")
-
-    def post_daily_insight(self):
-        """نشر محتوى جديد للأفراد"""
-        print("📝 جاري تجهيز تغريدة اليوم...")
-        try:
-            prompt = "اكتب تغريدة عن أحدث أداة ذكاء اصطناعي تفيد الأفراد، بلهجة خليجية قوية ومختصرة."
-            res = self.gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            tweet_text = res.text[:280]
-
-            # توليد صورة داعمة للمحتوى
-            img_path = self.generate_visual_content(tweet_text[:60]) 
-            
-            if img_path:
-                media = self.api_v1.media_upload(img_path)
-                self.x_client.create_tweet(text=tweet_text, media_ids=[media.media_id])
-            else:
-                self.x_client.create_tweet(text=tweet_text)
-            
-            print("🚀 تم النشر بنجاح!")
-        except Exception as e:
-            print(f"❌ فشل النشر: {e}")
-
-    # --- 6. صمامات الأمان ---
-
-    def _already_processed(self, tid):
-        with sqlite3.connect(self.db_path) as conn:
-            return conn.execute("SELECT 1 FROM history WHERE hash=?", (str(tid),)).fetchone() is not None
-
-    def _save_to_history(self, tid, c_type):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO history VALUES (?, ?, ?)", (str(tid), c_type, datetime.now()))
-
-# --- 7. التشغيل المتسلسل بالفواصل الزمنية ---
-
+# --- التشغيل النهائي المتسلسل ---
 if __name__ == "__main__":
     bot = NasserApexBot()
     
-    # أولاً: الردود (الأولوية للمتابعين)
-    bot.handle_mentions()
+    # 1. فحص الردود
+    bot.handle_mentions() # أضف منطق المنشن هنا
     
-    # فاصل زمني عشوائي (بين 5 إلى 15 دقيقة) لمنع كشف البوت
-    delay = random.randint(300, 900)
-    print(f"⏳ انتظار {delay//60} دقيقة قبل النشر لضمان السلوك البشري...")
-    time.sleep(delay)
+    # 2. الفاصل الزمني العشوائي (بين 5-10 دقائق) كما طلبت
+    wait_time = random.randint(300, 600)
+    print(f"⏳ انتظار {wait_time//60} دقيقة قبل النشر...")
+    time.sleep(wait_time)
     
-    # ثانياً: النشر العام
-    bot.post_daily_insight()
+    # 3. النشر باستخدام العقول الستة
+    prompt = "اكتب تغريدة عن أحدث أدوات الذكاء الاصطناعي المفيدة للأفراد بلهجة خليجية."
+    final_text = bot._generate_content_logic(prompt)
+    
+    if final_text:
+        bot.x_client.create_tweet(text=final_text[:280])
+        bot.notify_nasser("✅ تم النشر بنجاح باستخدام العقول البديلة!")
+    else:
+        bot.notify_nasser("❌ فشل النشر.. جميع العقول الستة تعتذر عن الخدمة!")
