@@ -6,15 +6,12 @@ import random
 import sqlite3
 import pathlib
 import requests
-import feedparser
 import tweepy
 import logging
 import hashlib
 import re
 from datetime import datetime
 from google import genai
-from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 # إعدادات التسجيل - إمبراطورية ناصر التقنية
 logging.basicConfig(level=logging.INFO, format="🛡️ [أيبكس]: %(message)s")
@@ -24,22 +21,26 @@ class NasserApexBot:
         self.config = self._load_config()
         self._init_db()
         self._init_clients()
-        logging.info("🚀 أيبكس انطلق مع ميزة البحث الذكي (Tavily)")
+        
+        # قائمة العمالقة (العرب + العالميين)
+        self.tech_titans = [
+            # عمالقة العرب
+            '7alsabe', 'faisalkuwait', 'OsamaDawi', 'al_khilaifi', 
+            'o_alshubrumi', 'salman_it', 'omardizer', 'i_t_news',
+            # عمالقة العالم
+            'elonmusk', 'tim_cook', 'sundarpichai', 'MKBHD', 'verge', 'OpenAI'
+        ]
+        logging.info("🚀 أيبكس انطلق.. استهداف المشاهير + صيد الخبايا")
 
     def _load_config(self):
         return {
             'bot': {'database_path': 'data/sovereign.db'},
-            'models': {
-                'priority': [
-                    {'name': 'Gemini', 'type': 'google', 'model': 'gemini-2.0-flash', 'env_key': 'GEMINI_KEY'},
-                    {'name': 'Grok', 'type': 'xai', 'model': 'grok-beta', 'env_key': 'XAI_API_KEY'}
-                ]
-            },
             'prompts': {
-                'system_core': "أنت (أيبكس)، خبير تقني خليجي. ركز على الذكاء الاصطناعي للأفراد. استخدم لهجة خليجية بيضاء. ممنوع النجوم والرموز. ممنوع لغات آسيوية أو ذكر الهند.",
+                'system_core': "أنت (أيبكس)، خبير تقني خليجي متمكن. ركز على خبايا وأسرار الأجهزة والذكاء الاصطناعي للأفراد. اللهجة: خليجية بيضاء. ممنوع النجوم والرموز تماماً. ممنوع ذكر الهند أو لغات آسيوية.",
                 'modes': {
-                    'SCOOP': "حلل نتائج البحث هذه واكتب خبر حصري للأفراد بلهجة خليجية: {content}",
-                    'REPLY': "رد بذكاء واختصار خليجي بدون رموز: {content}"
+                    'HIDDEN_GEM': "اشرح هذا السر التقني بأسلوب 'تدري؟' بلهجة خليجية وبدون رموز: {content}",
+                    'TITAN_REPLY': "رد بذكاء خليجي (اختصار وبدون رموز) على تغريدة هذا العملاق، أضف قيمة أو معلومة مخفية: {content}",
+                    'IMAGE_PROMPT': "Professional high-tech minimalist 3D illustration of: {content}. No text."
                 }
             }
         }
@@ -52,7 +53,14 @@ class NasserApexBot:
 
     def _init_clients(self):
         try:
-            self.x_client = tweepy.Client(
+            # توثيق V1.1 للصور
+            auth = tweepy.OAuth1UserHandler(
+                os.getenv("X_API_KEY"), os.getenv("X_API_SECRET"),
+                os.getenv("X_ACCESS_TOKEN"), os.getenv("X_ACCESS_SECRET")
+            )
+            self.x_api_v1 = tweepy.API(auth)
+            # توثيق V2 للنصوص والمنشنات
+            self.x_client_v2 = tweepy.Client(
                 bearer_token=os.getenv("X_BEARER_TOKEN"),
                 consumer_key=os.getenv("X_API_KEY"),
                 consumer_secret=os.getenv("X_API_SECRET"),
@@ -62,76 +70,106 @@ class NasserApexBot:
         except Exception as e:
             logging.error(f"❌ خطأ توثيق X: {e}")
 
+    def _clean_text(self, text):
+        # حذف النجوم وكل رموز Markdown لضمان نص خليجي صافي
+        text = re.sub(r'[\*\#\_\[\]\(\)\~\`]', '', text)
+        return " ".join(text.split())
+
     def _search_tavily(self, query):
-        """ميزة البحث الذكي باستخدام المفتاح الموجود في صورتك"""
         try:
             url = "https://api.tavily.com/search"
             payload = {
                 "api_key": os.getenv("TAVILY_KEY"),
                 "query": query,
                 "search_depth": "smart",
-                "max_results": 3
+                "max_results": 2
             }
             res = requests.post(url, json=payload).json()
-            results = [obj['content'] for obj in res.get('results', [])]
-            return "\n".join(results)
-        except:
-            return ""
+            return "\n".join([obj['content'] for obj in res.get('results', [])])
+        except: return ""
 
-    def _clean_text(self, text):
-        text = re.sub(r'[\*\#\_\[\]\(\)\~]', '', text)
-        return " ".join(text.split())
+    def _generate_image(self, prompt_text):
+        try:
+            client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
+            img_prompt = self.config['prompts']['IMAGE_PROMPT'].format(content=prompt_text)
+            response = client.models.generate_image(model='imagen-3', prompt=img_prompt)
+            img_path = "tech_secret.png"
+            response.save(img_path)
+            return img_path
+        except: return None
 
     def generate(self, mode, inp=""):
         sys_p = self.config['prompts']['system_core']
         task_p = self.config['prompts']['modes'][mode].format(content=inp)
-        
-        for m_cfg in self.config['models']['priority']:
-            try:
-                key = os.getenv(m_cfg['env_key'])
-                if not key: continue
-                if m_cfg['type'] == "google":
-                    client = genai.Client(api_key=key)
-                    res = client.models.generate_content(model=m_cfg['model'], contents=f"{sys_p}\n{task_p}")
-                    return self._clean_text(res.text)
-                else:
-                    client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
-                    res = client.chat.completions.create(model=m_cfg['model'], messages=[{"role":"user","content":f"{sys_p}\n{task_p}"}])
-                    return self._clean_text(res.choices[0].message.content)
-            except: continue
-        return None
-
-    def handle_mentions(self):
         try:
-            me = self.x_client.get_me()
-            mentions = self.x_client.get_users_mentions(id=me.data.id, max_results=5)
-            if not mentions.data: return
-            for tweet in mentions.data:
+            client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
+            res = client.models.generate_content(model='gemini-2.0-flash', contents=f"{sys_p}\n{task_p}")
+            return self._clean_text(res.text)
+        except: return None
+
+    def interact_with_titans(self):
+        """الرد على عمالقة التقنية العرب والعالميين"""
+        logging.info("🕵️ جاري مراقبة عمالقة التقنية...")
+        random.shuffle(self.tech_titans)
+        
+        for username in self.tech_titans:
+            try:
+                user = self.x_client_v2.get_user(username=username)
+                if not user or not user.data: continue
+                
+                tweets = self.x_client_v2.get_users_tweets(id=user.data.id, max_results=5, exclude=['retweets', 'replies'])
+                if not tweets or not tweets.data: continue
+                
+                target = tweets.data[0]
                 with sqlite3.connect(self.config['bot']['database_path']) as conn:
-                    if conn.execute("SELECT 1 FROM replied WHERE id=?", (str(tweet.id),)).fetchone(): continue
-                reply = self.generate("REPLY", tweet.text)
+                    if conn.execute("SELECT 1 FROM replied WHERE id=?", (str(target.id),)).fetchone(): continue
+                
+                reply = self.generate("TITAN_REPLY", target.text)
                 if reply:
-                    self.x_client.create_tweet(text=reply, in_reply_to_tweet_id=tweet.id)
+                    wait = random.randint(30, 90)
+                    logging.info(f"⏳ فاصل زمني {wait} ثانية قبل الرد على {username}...")
+                    time.sleep(wait)
+                    
+                    self.x_client_v2.create_tweet(text=reply, in_reply_to_tweet_id=target.id)
                     with sqlite3.connect(self.config['bot']['database_path']) as conn:
-                        conn.execute("INSERT INTO replied VALUES (?)", (str(tweet.id),))
-        except: pass
+                        conn.execute("INSERT INTO replied VALUES (?)", (str(target.id),))
+                    logging.info(f"✅ تم الرد على {username}")
+                    return # نكتفي برد واحد قوي في كل دورة
+            except: continue
 
     def run_mission(self):
-        # البحث عن أحدث أدوات الذكاء الاصطناعي الشخصية اليوم
-        search_results = self._search_tavily("latest AI tools for individuals 2026")
+        """مهمة صيد الخبايا والنشر مع صورة"""
+        logging.info("🔎 البحث عن أسرار تقنية جديدة...")
+        queries = [
+            "hidden iPhone settings 2026 tricks",
+            "secret Android customization hacks 2026",
+            "latest personal AI tools for daily productivity shortcuts"
+        ]
+        
+        search_results = self._search_tavily(random.choice(queries))
         if search_results:
-            content = self.generate("SCOOP", search_results)
-            if content: self.publish(content)
+            tweet_text = self.generate("HIDDEN_GEM", search_results)
+            if tweet_text:
+                img_path = self._generate_image(tweet_text)
+                self.publish(tweet_text, img_path)
 
-    def publish(self, text):
+    def publish(self, text, img_path=None):
         try:
+            if len(text) > 280: text = text[:277] + "..."
             h = hashlib.sha256(text.encode()).hexdigest()
+            
             with sqlite3.connect(self.config['bot']['database_path']) as conn:
                 if conn.execute("SELECT 1 FROM history WHERE hash=?", (h,)).fetchone(): return False
-            self.x_client.create_tweet(text=text)
+
+            media_id = None
+            if img_path and os.path.exists(img_path):
+                media = self.x_api_v1.media_upload(img_path)
+                media_id = media.media_id
+
+            self.x_client_v2.create_tweet(text=text, media_ids=[media_id] if media_id else None)
             with sqlite3.connect(self.config['bot']['database_path']) as conn:
                 conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now()))
-            logging.info("🚀 تم نشر السكوب بنجاح!")
+            logging.info("🚀 تم نشر الخبايا بنجاح!")
             return True
         except Exception as e:
             logging.error(f"❌ فشل النشر: {e}")
@@ -139,5 +177,9 @@ class NasserApexBot:
 
 if __name__ == "__main__":
     bot = NasserApexBot()
-    bot.handle_mentions()
+    # 1. التفاعل مع العمالقة (العرب والعالميين)
+    bot.interact_with_titans()
+    # 2. فاصل بين التفاعل والنشر الأساسي
+    time.sleep(random.randint(60, 120))
+    # 3. صيد الخبايا ونشر السكوب الجديد
     bot.run_mission()
