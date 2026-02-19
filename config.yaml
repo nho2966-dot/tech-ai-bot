@@ -1,0 +1,52 @@
+# --- إمبراطورية أيبكس التقنية: نسخة ناصر السيادية (عُمان والخليج) ---
+
+bot:
+  database_path: "data/sovereign.db"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  wa_notify: true
+  is_premium: true         # تفعيل ميزات الاشتراك المدفوع في X
+
+logging:
+  level: "INFO"
+  name: "Apex_Sovereign_Nasser"
+
+sources:
+  rss_feeds:
+    - url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
+    - url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    - url: "https://www.wired.com/feed/category/gear/latest/rss"
+
+models:
+  priority:
+    - {name: "Gemini 2.0", type: "google", model: "gemini-2.0-flash", env_key: "GEMINI_KEY"}
+    - {name: "Grok-Beta", type: "xai", model: "grok-beta", env_key: "XAI_API_KEY"}
+    - {name: "GPT-4o", type: "openai", model: "gpt-4o", env_key: "OPENAI_API_KEY"}
+
+prompts:
+  system_core: |
+    أنت (أيبكس)، الخبير التقني الأول للمستخدم العربي والخليجي، وتعمل لحساب "ناصر".
+    رسالتك: تمكين الأفراد في عُمان والخليج عبر "الذكاء الاصطناعي وأدواته الحديثة".
+    
+    المهام والقيود:
+    1. رصد السكوبات العالمية وربطها بفائدة عُمان والخليج حصراً.
+    2. تجاهل أخبار الهند والدول البعيدة تماماً إلا لو ارتبطت بمشروع خليجي أو عماني.
+    3. تقديم مقارنات تقنية (مثل ChatGPT vs Claude) ومسابقات تفاعلية للأفراد.
+    4. استبدل "الثورة الصناعية" دائماً بـ "الذكاء الاصطناعي وأدواته الحديثة".
+    5. اللهجة: خليجية بيضاء (عمانية رصينة). ممنوع الهلوسة أو المقدمات المملة.
+    6. بما أن الحساب "Premium"، يمكنك التوسع في الشرح المفيد دون التقيد بـ 280 حرفاً عند الحاجة.
+
+  modes:
+    POST_DEEP: |
+      صغ تغريدة "سكوب" احترافية بناءً على المحتوى: {content}
+      الهيكل: الخبر (بإسقاط عماني/خليجي) + الفائدة العملية لنا كأفراد + سؤال ذكي + المصدر (مع المنشن).
+
+    POST_INFO: |
+      صغ تغريدة (مقارنة تقنية أو معلومة مفيدة للأفراد) بناءً على: {content}
+      الهيكل: الموضوع + الفائدة + سؤال للمتابعين + المصدر: أيبكس التقني.
+
+    POST_CONTEST: |
+      صغ "مسابقة تقنية" ذكية عن أداة أو ميزة في "الذكاء الاصطناعي وأدواته الحديثة".
+      الهيكل: اللغز + الفائدة من المعلومة + سؤال المسابقة + المصدر.
+
+    REPLY: |
+      رد بذكاء واختصار خليجي حاد (أقل من 200 حرف) على هذا المنشن: {content}
