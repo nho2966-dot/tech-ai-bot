@@ -1,101 +1,103 @@
-import os, sqlite3, random, time, threading
+import os
+import sqlite3
+import random
+import time
 from datetime import datetime
-import google.generativeai as genai
-import openai
-import tweepy
+from google import genai  # المكتبة الجديدة كما ظهرت في السجلات
 import requests
-from flask import Flask, render_template_string
 
-# -------------------- إعداد المفاتيح (بالمسميات الجديدة) --------------------
-genai.configure(api_key=os.getenv("GEMINI_KEY"))
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# مسميات ناصر المعتمدة
+# -------------------- إعدادات أيبكس (ناصر) --------------------
+GEMINI_KEY = os.getenv("GEMINI_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
-
-# دستور أيبكس (المكتسبات)
+# دستور أيبكس الصارم
 APEX_RULES = """
-- اللهجة: خليجية بيضاء واضحة.
+- الهوية: أيبكس، خبير تقني خليجي مطلع.
 - التخصص: Artificial Intelligence and its latest tools والأجهزة الذكية للأفراد.
-- التركيز: الأسرار، الخبايا، والمقارنات الجوهرية (Tech Secrets).
-- الممنوعات: ذكر 'Industrial Revolution'، اللغة الصينية، الرموز البرمجية، الهلوسة التقنية.
-- الشخصية: زميل تقني خبير (Peer) وليس ملقن.
+- المهمة: كشف "الأسرار والخبايا" (Tech Secrets) والمقارنات الدقيقة التي تهم المستخدم العادي.
+- اللهجة: خليجية بيضاء (عفوية ومهنية).
+- الممنوعات: لا تذكر 'Industrial Revolution'، لا تستخدم الصينية، لا تضع أكواد برمجية، تجنب الهلوسة.
 """
 
-# -------------------- قاعدة البيانات --------------------
+# -------------------- تهيئة المحركات --------------------
+client = genai.Client(api_key=GEMINI_KEY)
+
 def init_db():
     if not os.path.exists('data'): os.makedirs('data')
-    conn = sqlite3.connect('data/apex_bot.db', check_same_thread=False)
+    conn = sqlite3.connect('data/apex_bot.db')
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS history (content TEXT, style TEXT, type TEXT, date TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS stats (date TEXT PRIMARY KEY, reply_count INTEGER, posts_count INTEGER)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS replies (platform TEXT, original TEXT, reply TEXT, date TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS history (content TEXT, type TEXT, date TEXT)''')
     conn.commit()
     return conn
 
-# -------------------- توليد المحتوى الاحترافي --------------------
-def generate_content(prompt_type):
-    # تنويع البرومبت بناءً على "الأسرار والخبايا"
-    prompts = {
-        "secret": "اعطني سر تقني مخفي في أداة AI أو جهاز ذكي يفيد الفرد.",
-        "compare": "قارن بين أداتين AI أو جهازين من حيث الخبايا الجوهرية التي لا يعرفها الكثير.",
-        "bomb": "Technical Bomb: معلومة تقنية دقيقة وصادمة عن الذكاء الاصطناعي للأفراد."
-    }
+# -------------------- توليد محتوى الخبايا --------------------
+def generate_apex_content():
+    scenarios = [
+        "سر مخفي في أداة ذكاء اصطناعي (مثل برومبت سري أو ميزة غير مفعلة)",
+        "خفية في أجهزة الأيفون أو الأندرويد تتعلق بالذكاء الاصطناعي",
+        "مقارنة سريعة بين أداتين AI من حيث أسرار الأداء وليس المواصفات العامة",
+        "طريقة مبتكرة للأفراد لاستخدام الـ AI في حياتهم اليومية (خبايا)"
+    ]
     
-    selected_prompt = prompts.get(prompt_type, prompts["secret"])
-    full_prompt = f"{selected_prompt}\n\nالقواعد الصارمة:\n{APEX_RULES}"
-
+    topic = random.choice(scenarios)
+    prompt = f"اكتب تغريدة/رسالة عن: {topic}. \nالشروط: {APEX_RULES} \nابدأ بأسلوب حماسي (مثل: تدري إن.. أو خذ ه السر..)"
+    
     try:
-        # الاعتماد الأساسي على Gemini (الأكثر استقراراً حالياً)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(full_prompt)
+        # استخدام الطريقة الصحيحة للمكتبة الجديدة google-genai
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         return response.text.strip()
     except Exception as e:
-        print(f"⚠️ فشل التوليد: {e}")
-        return "الذكاء الاصطناعي يغير حياتنا كل يوم، خلك مطلع! 🚀"
+        print(f"❌ خطأ في التوليد: {e}")
+        return None
 
-# -------------------- النشر والردود --------------------
-def publish_telegram(content):
+# -------------------- إرسال الإشعارات --------------------
+def send_telegram(message):
+    if not TG_TOKEN or not TG_CHAT_ID:
+        print("⚠️ تنبيه: مفاتيح تليجرام ناقصة.")
+        return
+    
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
     try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TG_CHAT_ID, "text": content, "parse_mode": "Markdown"})
+        res = requests.post(url, json=payload)
+        if res.status_code == 200:
+            print("✅ تم الإرسال لتليجرام بنجاح.")
+        else:
+            print(f"❌ فشل إرسال تليجرام: {res.text}")
     except Exception as e:
-        print(f"⚠️ خطأ تيليجرام: {e}")
+        print(f"❌ خطأ اتصال تليجرام: {e}")
 
-# (تم اختصار وظائف تويتر للتركيز على المنطق الحيوي)
-def run_bot():
+# -------------------- حلقة التشغيل --------------------
+def main():
+    print(f"🚀 تشغيل أيبكس - {datetime.now()}")
     conn = init_db()
-    while True:
-        try:
-            print(f"\n🚀 دورة جديدة - {datetime.now()}")
-            
-            # 1. توليد محتوى (خبايا وأسرار)
-            p_type = random.choice(["secret", "compare", "bomb"])
-            content = generate_content(p_type)
+    
+    # 1. توليد المحتوى
+    content = generate_apex_content()
+    
+    if content:
+        # 2. حفظ في قاعدة البيانات
+        conn.execute("INSERT INTO history VALUES (?, ?, ?)", 
+                     (content, "Secret", datetime.now().strftime('%Y-%m-%d')))
+        conn.commit()
+        
+        # 3. النشر (حالياً تليجرام، ويمكنك إضافة تويتر هنا)
+        formatted_message = f"<b>🌟 سر تقني جديد من أيبكس</b>\n\n{content}"
+        send_telegram(formatted_message)
+        print(f"📝 المحتوى المولد:\n{content}")
+    else:
+        print("⚠️ لم يتم توليد محتوى.")
+        exit(1) # لإخطار GitHub Actions بالفشل
 
-            # 2. الفاصل الزمني البشري (قبل النشر)
-            time.sleep(random.randint(300, 600)) 
+    conn.close()
 
-            # 3. النشر في المنصات
-            publish_telegram(content)
-            # هنا تضاف وظيفة publish_twitter(content)
-            
-            # 4. تحديث الإحصائيات
-            update_stats(conn)
-
-            # 5. انتظار الدورة القادمة (من ساعة إلى ساعتين لضمان عدم الحظر)
-            cycle_wait = random.randint(3600, 7200)
-            print(f"⏳ الدورة القادمة بعد {cycle_wait//60} دقيقة...")
-            time.sleep(cycle_wait)
-
-        except Exception as e:
-            print(f"⚠️ خطأ عام: {e}")
-            time.sleep(60)
-
-# (نفس الـ Dashboard البسيط اللي وضعته)
+if __name__ == "__main__":
+    main()
