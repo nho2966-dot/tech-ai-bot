@@ -2,12 +2,12 @@ name: Nasser Apex Bot Workflow
 
 on:
   schedule:
-    # الأوقات محسوبة بتوقيت UTC (الخليج UTC+3)
-    - cron: '2 2 * * *'  # 05:00 صباحاً بتوقيت الخليج - أخبار حصرية
-    - cron: '0 6 * * *'  # 09:00 صباحاً بتوقيت الخليج - أدوات تقنية
-    - cron: '0 15 * * *' # 18:00 مساءً بتوقيت الخليج - مسابقات
-    - cron: '0 19 * * *' # 22:00 مساءً بتوقيت الخليج - تفاعل وردود
-  workflow_dispatch: # زر التشغيل اليدوي
+    # الأوقات محسوبة بتوقيت UTC (توقيت الخليج +4)
+    - cron: '1 1 * * *'   # 05:00 صباحًا بتوقيت الخليج - أخبار حصرية
+    - cron: '1 9 * * *'   # 13:00 ظهرًا بتوقيت الخليج - أدوات تقنية
+    - cron: '1 14 * * *'  # 18:00 مساءً بتوقيت الخليج - مسابقات
+    - cron: '1 18 * * *'  # 22:00 مساءً بتوقيت الخليج - تفاعل وردود
+  workflow_dispatch:       # زر التشغيل اليدوي
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # لسحب كامل التاريخ لضمان نجاح الـ Rebase
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,11 +29,11 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install google-genai openai tweepy requests python-dotenv; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install google-genai openai tweepy requests python-dotenv beautifulsoup4 feedparser; fi
 
       - name: Run Nasser Apex Bot
         env:
-          # مفاتيح العقول والمنصات
+          # العقول المتناوبة
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -48,39 +48,31 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
 
-      - name: Publish to X (Scheduled)
-        if: github.event_name == 'schedule'  # تنفذ فقط في النشر المجدول
-        env:
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-        run: |
-          echo "🛡️ بدء نشر المحتوى على X وفق أوقات الذروة"
-          python post_to_x.py
-
-      - name: Sync Database Changes
+      - name: Sync Database Changes Safely
         run: |
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "NasserApexBot"
 
           mkdir -p data
-          git add data/*.db || echo "No database found"
+          git add data/*.db
 
-          # التحقق من وجود تغييرات
           if ! git diff --cached --quiet; then
-            # حفظ التغييرات مؤقتًا لتفادي مشاكل Rebase
-            git stash push -m "autosave before rebase"
-
-            # سحب التغييرات الأخيرة من Main
-            git pull origin main --rebase
-
-            # استرجاع التغييرات المؤقتة
-            git stash pop || echo "No stashed changes"
-
-            git commit -m "🛡️ تحديث سجلات أيبكس التقنية [skip ci]"
-            git push origin main
+            echo "🛡️ تم اكتشاف تغييرات في قاعدة البيانات، بدء التزام الدفع..."
+            
+            MAX_RETRIES=5
+            RETRY_COUNT=0
+            until git diff --cached --quiet; do
+              git pull origin main --rebase
+              git commit -m "🛡️ تحديث سجلات أيبكس التقنية [skip ci]" || echo "لا توجد تغييرات جديدة للالتزام"
+              git push origin main && break
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+                echo "⚠️ فشل دفع التغييرات بعد $MAX_RETRIES محاولات"
+                exit 1
+              fi
+              echo "⚠️ محاولة دفع التغييرات مرة أخرى بعد انتظار قصير..."
+              sleep 5
+            done
+            echo "✅ تم تحديث قاعدة البيانات بنجاح."
           else
             echo "لا توجد بيانات جديدة لحفظها."
-          fi
