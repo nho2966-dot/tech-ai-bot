@@ -24,11 +24,20 @@ class NasserApexBot:
         self.config = self._load_config()
         self._init_db()
         self._init_clients()
-        logging.info(f"🚀 أيبكس جاهز للعمل. التوثيق: {'نشط' if self.config['bot']['is_premium'] else 'غير نشط'}")
+        logging.info(f"🚀 أيبكس جاهز للعمل. التوثيق: {'نشط' if self.config['bot'].get('is_premium') else 'غير نشط'}")
 
     def _load_config(self):
-        with open("config.yaml", "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+        # بحث ذكي عن ملف الإعدادات لتجنب خطأ FileNotFoundError
+        possible_paths = [
+            pathlib.Path("config.yaml"),
+            pathlib.Path(__file__).parent / "config.yaml",
+            pathlib.Path("data/config.yaml")
+        ]
+        for path in possible_paths:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f)
+        raise FileNotFoundError("❌ ملف config.yaml مفقود! تأكد من رفعه للمستودع.")
 
     def _init_db(self):
         os.makedirs("data", exist_ok=True)
@@ -38,6 +47,7 @@ class NasserApexBot:
             conn.execute("CREATE TABLE IF NOT EXISTS replied (id TEXT PRIMARY KEY)")
 
     def _init_clients(self):
+        # إعداد عميل X
         self.x_client = tweepy.Client(
             bearer_token=os.getenv("X_BEARER_TOKEN"),
             consumer_key=os.getenv("X_API_KEY"),
@@ -45,11 +55,8 @@ class NasserApexBot:
             access_token=os.getenv("X_ACCESS_TOKEN"),
             access_token_secret=os.getenv("X_ACCESS_SECRET")
         )
-        try:
-            from twilio.rest import Client
-            self.wa_client = Client(os.getenv("TWILIO_SID"), os.getenv("TWILIO_TOKEN"))
-            self.has_wa = True
-        except: self.has_wa = False
+        # تم تعطيل الواتساب بناءً على طلبك يا ناصر
+        self.has_wa = False 
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def generate(self, mode, inp=""):
@@ -68,9 +75,7 @@ class NasserApexBot:
                     client = OpenAI(api_key=key, base_url=base)
                     res = client.chat.completions.create(model=m_cfg['model'], messages=[{"role":"user","content":f"{sys_p}\n{task_p}"}])
                     return res.choices[0].message.content.strip()
-            except Exception as e:
-                logging.warning(f"⚠️ تعثر عقل {m_cfg['name']}: {e}")
-                continue
+            except: continue
         return None
 
     def handle_mentions(self):
@@ -91,7 +96,7 @@ class NasserApexBot:
 
     def run_mission(self):
         m_type = random.choices(["SCOOP", "INFO", "CONTEST"], weights=[50, 25, 25])[0]
-        logging.info(f"🎯 المهمة: {m_type}")
+        logging.info(f"🎯 المهمة المجدولة: {m_type}")
 
         if m_type == "SCOOP":
             for feed_cfg in self.config['sources']['rss_feeds']:
@@ -102,7 +107,7 @@ class NasserApexBot:
                     if conn.execute("SELECT 1 FROM processed WHERE id=?", (entry.link,)).fetchone(): continue
                 
                 source_tag = "@verge" if "theverge" in entry.link else "@TechCrunch"
-                tweet = self.generate("POST_DEEP", f"المصدر: {source_tag} | الخبر: {entry.title} {entry.description}")
+                tweet = self.generate("POST_DEEP", f"المصدر: {source_tag} | المحتوى: {entry.title} {entry.description}")
                 if tweet:
                     self.publish(tweet)
                     with sqlite3.connect(self.config['bot']['database_path']) as conn:
@@ -122,10 +127,9 @@ class NasserApexBot:
             self.x_client.create_tweet(text=text)
             with sqlite3.connect(self.config['bot']['database_path']) as conn:
                 conn.execute("INSERT INTO history VALUES (?, ?)", (h, datetime.now()))
-            logging.info("🚀 تم النشر بنجاح!")
-            if self.has_wa:
-                self.wa_client.messages.create(from_='whatsapp:+14155238886', body=f"🤖 أيبكس: نُشر موضوع جديد بنجاح!", to=f"whatsapp:{os.getenv('MY_PHONE_NUMBER')}")
-        except Exception as e: logging.error(f"❌ خطأ نشر: {e}")
+            logging.info("🚀 تم النشر على X بنجاح!")
+            # تخطي إشعار الواتساب بصمت
+        except Exception as e: logging.error(f"❌ خطأ في النشر: {e}")
 
 if __name__ == "__main__":
     bot = NasserApexBot()
