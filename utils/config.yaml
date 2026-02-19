@@ -1,47 +1,66 @@
+# --- إعدادات إمبراطورية أيبكس التقنية ---
+
 bot:
   database_path: "data/sovereign.db"
-  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-  daily_tweet_limit: 5    # زدنا العدد شوي لتعظيم الفائدة
-  daily_reply_limit: 15   # ردود أكثر لزيادة التفاعل
-  sleep_start: 2          # توقيت الهدوء (2 فجراً)
-  sleep_end: 8            # توقيت النشاط (8 صباحاً)
-  wa_notify: true         # تفعيل تنبيهات الواتساب
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  daily_tweet_limit: 5
+  daily_reply_limit: 15
+  sleep_start: 2          # توقيت النوم (2 فجراً)
+  sleep_end: 8            # توقيت الاستيقاظ (8 صباحاً)
+  wa_notify: true         # تفعيل إشعارات الواتساب
 
 logging:
   level: "INFO"
   name: "NasserApexBot"
 
+# --- مصادر الأخبار للغوص العميق ---
 sources:
   rss_feeds:
     - url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
     - url: "https://techcrunch.com/category/artificial-intelligence/feed/"
     - url: "https://www.wired.com/feed/category/gear/latest/rss"
 
-monitored_accounts:
-  - "44196397"    # Elon Musk
-  - "1605"        # Sam Altman
-  - "41768233"    # Alswaha (وزير الاتصالات)
-  - "14169727"    # Faisal Al-Khamisi (الاتحاد السعودي للأمن السيبراني)
-
-# مصفوفة العقول الستة (The Council of Six)
+# --- مصفوفة العقول الستة (The Council of Six) ---
 models:
   priority:
     - {name: "Gemini 2.0", type: "google", model: "gemini-2.0-flash", env_key: "GEMINI_KEY"}
     - {name: "GPT-4o", type: "openai", model: "gpt-4o", env_key: "OPENAI_API_KEY"}
     - {name: "Grok", type: "xai", model: "grok-beta", env_key: "XAI_API_KEY"}
-    - {name: "Claude 3.5", type: "anthropic", model: "claude-3-5-sonnet-20240620", env_key: "CLAUDE_KEY"}
+    - {name: "Claude 3.5", type: "anthropic", model: "claude-3-5-sonnet-latest", env_key: "CLAUDE_KEY"}
     - {name: "Groq Llama", type: "groq", model: "llama-3.3-70b-versatile", env_key: "GROQ_API_KEY"}
-    - {name: "Qwen", type: "openrouter", model: "qwen/qwen-2.5-72b", env_key: "OPENROUTER_API_KEY"}
+    - {name: "Qwen", type: "openrouter", model: "qwen/qwen-2.5-72b-instruct", env_key: "OPENROUTER_API_KEY"}
 
+# --- محرك الصياغة والذكاء ---
 prompts:
   system_core: |
     أنت محلل استراتيجي وخبير في الذكاء الاصطناعي وأدواته الحديثة للأفراد.
-    هويتك: مستقل، رصين، لا تجامل، تركز على تمكين الفرد والسيادة الرقمية.
-    اللغة: خليجية بيضاء (وسطى)، جمل قصيرة وحادة، أسلوب ذكي جداً، استخدم (مصطلحات إنجليزية) عند الضرورة القصوى.
-    القاعدة الذهبية: لا تهلوس، إذا لم تجد معلومة عميقة لا تنشر كلاماً سطحياً.
+    اسمك: أيبكس (Apex).
+    هويتك: مستقل، رصين، تعطي "الزبدة" للفرد الخليجي لتمكينه رقمياً.
+    اللغة: خليجية بيضاء (وسطى)، جمل حادة وذكية، تجنب الحشو والمجاملات.
+    القواعد الصارمة: 
+    1. لا تستخدم لغات غير العربية (إلا المصطلحات التقنية بين قوسين بالإنجليزية).
+    2. ممنوع المقدمات مثل "حسناً" أو "إليك التحليل" أو "خلاصة القول".
+    3. لا تهلوس؛ إذا لم تجد فائدة حقيقية، لا تخترع من رأسك.
 
   modes:
-    POST_DEEP: "غص في عمق هذا الخبر وحلله استراتيجياً للفرد الخليجي (بدون هلوسة): {content}"
-    POST_FAST: "بصيرة تقنية عاجلة (سكوب) عن أداة ذكاء اصطناعي بلهجة خليجية: {content}"
-    REPLY: "رد بذكاء ومنظور مختلف (بدون مجاملة) على هذا المتابع: {content}"
-    CONTEST: "اطرح لغزاً تقنياً ذكياً حول الذكاء الاصطناعي وأدواته الحديثة لتحفيز المتابعين."
+    # القالب الرباعي المعتمد (خبر + فائدة + سؤال + مصدر)
+    POST_DEEP: |
+      صغ تغريدة احترافية عن الخبر التالي بأسلوب السكوب (Scoop).
+      الهيكل المطلوب:
+      - الخبر: (وصف الخبر بلهجة خليجية ذكية).
+      - الفائدة: (كيف يستفيد الفرد من هذا في حياته أو عمله؟).
+      - سؤال: (سؤال ذكي يفتح نقاشاً مع المتابعين).
+      - المصدر: (اذكر اسم المصدر مع المنشن المكتوب في النص المرفق).
+      
+      شروط إضافية:
+      - الحد الأقصى 270 حرفاً.
+      - اجعل النص ينتهي بنقطة أو علامة استفهام.
+      المحتوى: {content}
+
+    REPLY: |
+      رد بذكاء خليجي حاد وقيمة مضافة على هذا المنشن. 
+      اجعل الرد مختصراً جداً (أقل من 150 حرف) ولا يجامل.
+      المحتوى: {content}
+
+    CONTEST: |
+      اطرح لغزاً تقنياً ذكياً حول الذكاء الاصطناعي وأدواته الحديثة لتحفيز المتابعين.
