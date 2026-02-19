@@ -2,11 +2,11 @@ name: Nasser Apex Bot Workflow
 
 on:
   schedule:
-    # الأوقات محسوبة بتوقيت UTC (نطرح 4 ساعات من توقيت مسقط والرياض)
-    - cron: '0 1 * * *'  # 05:00 صباحاً بتوقيت الخليج - أخبار حصرية
-    - cron: '0 9 * * *'  # 01:00 ظهراً بتوقيت الخليج - أدوات تقنية
-    - cron: '0 14 * * *' # 06:00 مساءً بتوقيت الخليج - مسابقات
-    - cron: '0 18 * * *' # 10:00 مساءً بتوقيت الخليج - تفاعل وردود
+    # الأوقات محسوبة بتوقيت UTC (الخليج UTC+3)
+    - cron: '2 2 * * *'  # 05:00 صباحاً بتوقيت الخليج - أخبار حصرية
+    - cron: '0 6 * * *'  # 09:00 صباحاً بتوقيت الخليج - أدوات تقنية
+    - cron: '0 15 * * *' # 18:00 مساءً بتوقيت الخليج - مسابقات
+    - cron: '0 19 * * *' # 22:00 مساءً بتوقيت الخليج - تفاعل وردود
   workflow_dispatch: # زر التشغيل اليدوي
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
 
       - name: Run Nasser Apex Bot
         env:
-          # العقول المتناوبة (تأكد من إضافتها في Secrets)
+          # مفاتيح العقول والمنصات
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -48,18 +48,37 @@ jobs:
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
 
+      - name: Publish to X (Scheduled)
+        if: github.event_name == 'schedule'  # تنفذ فقط في النشر المجدول
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+        run: |
+          echo "🛡️ بدء نشر المحتوى على X وفق أوقات الذروة"
+          python post_to_x.py
+
       - name: Sync Database Changes
         run: |
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "NasserApexBot"
-          
+
           mkdir -p data
           git add data/*.db || echo "No database found"
-          
+
           # التحقق من وجود تغييرات
           if ! git diff --cached --quiet; then
-            # جلب التغييرات الأخيرة لتفادي التعارض (Rebase)
+            # حفظ التغييرات مؤقتًا لتفادي مشاكل Rebase
+            git stash push -m "autosave before rebase"
+
+            # سحب التغييرات الأخيرة من Main
             git pull origin main --rebase
+
+            # استرجاع التغييرات المؤقتة
+            git stash pop || echo "No stashed changes"
+
             git commit -m "🛡️ تحديث سجلات أيبكس التقنية [skip ci]"
             git push origin main
           else
