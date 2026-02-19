@@ -1,42 +1,63 @@
-name: Nasser AI Sovereign Cycle
+name: Nasser Apex Bot Workflow
+
 on:
   schedule:
-    - cron: '0 */3 * * *' # تشغيل كل 3 ساعات (للالتزام بصمام الأمان)
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    # الأوقات محسوبة بتوقيت UTC (نطرح 4 ساعات من توقيت مسقط/الرياض)
+    - cron: '0 1 * * *'  # 05:00 صباحاً بتوقيت الخليج (وقت السحور والفجر) - أخبار حصرية
+    - cron: '0 9 * * *'  # 01:00 ظهراً بتوقيت الخليج (وقت الراحة) - أدوات تقنية
+    - cron: '0 14 * * *' # 06:00 مساءً بتوقيت الخليج (وقت الذروة قبل الفطور) - مسابقات
+    - cron: '0 18 * * *' # 10:00 مساءً بتوقيت الخليج (بعد التراويح) - تفاعل وردود
+  workflow_dispatch: # زر التشغيل اليدوي
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # ارفعها هنا عشان الـ Action ما يقفل وهو ينتظر
+    permissions:
+      contents: write # ضروري جداً عشان البوت يقدر يحفظ السجلات في الـ Database
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
+
       - name: Install Dependencies
-        run: pip install -r requirements.txt
-        
-      - name: Run Nasser Bot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Nasser Apex Bot
         env:
+          # تأكد من إضافة هذه المفاتيح في GitHub Secrets
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
-        
-      - name: Commit Memory Changes
+
+      - name: Sync Database Changes
         run: |
           git config --local user.email "bot@nasser-ai.com"
-          git config --local user.name "Nasser-AI-Bot"
-          git add data/sovereign_2026.db
-          git commit -m "🧠 حفظ الذاكرة التقنية الجديدة" || echo "لا تغييرات"
-          git push
+          git config --local user.name "NasserApexBot"
+          
+          # إنشاء مجلد data إذا لم يكن موجوداً
+          mkdir -p data
+          
+          # إضافة أي ملف قاعدة بيانات يتم إنشاؤه
+          git add data/*.db || echo "No database found"
+          
+          # تنفيذ التغييرات فقط إذا وجد تحديث جديد في السجلات
+          if ! git diff --cached --quiet; then
+            git commit -m "🛡️ تحديث سجلات أيبكس التقنية [skip ci]"
+            git push
+          else
+            echo "لا توجد بيانات جديدة لحفظها."
+          fi
