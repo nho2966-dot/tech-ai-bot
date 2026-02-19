@@ -9,3 +9,5 @@ feedparser>=6.0.10
 python-dateutil>=2.8.2
 twilio>=8.10.0
 tenacity>=8.2.3
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.21.0
