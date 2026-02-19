@@ -2,24 +2,24 @@ name: Nasser Apex Bot Workflow
 
 on:
   schedule:
-    # الأوقات محسوبة بتوقيت UTC (نطرح 4 ساعات من توقيت مسقط/الرياض)
-    - cron: '0 1 * * *'  # 05:00 صباحاً بتوقيت الخليج (وقت السحور والفجر) - أخبار حصرية
-    - cron: '0 9 * * *'  # 01:00 ظهراً بتوقيت الخليج (وقت الراحة) - أدوات تقنية
-    - cron: '0 14 * * *' # 06:00 مساءً بتوقيت الخليج (وقت الذروة قبل الفطور) - مسابقات
-    - cron: '0 18 * * *' # 10:00 مساءً بتوقيت الخليج (بعد التراويح) - تفاعل وردود
+    # الأوقات محسوبة بتوقيت UTC (نطرح 4 ساعات من توقيت مسقط والرياض)
+    - cron: '0 1 * * *'  # 05:00 صباحاً بتوقيت الخليج - أخبار حصرية
+    - cron: '0 9 * * *'  # 01:00 ظهراً بتوقيت الخليج - أدوات تقنية
+    - cron: '0 14 * * *' # 06:00 مساءً بتوقيت الخليج - مسابقات
+    - cron: '0 18 * * *' # 10:00 مساءً بتوقيت الخليج - تفاعل وردود
   workflow_dispatch: # زر التشغيل اليدوي
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # ضروري جداً عشان البوت يقدر يحفظ السجلات في الـ Database
+      contents: write # للسماح للبوت بتحديث قاعدة البيانات
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          fetch-depth: 0 # لسحب كامل التاريخ لضمان نجاح الـ Rebase
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,13 +29,18 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install google-genai openai tweepy requests python-dotenv; fi
 
       - name: Run Nasser Apex Bot
         env:
-          # تأكد من إضافة هذه المفاتيح في GitHub Secrets
+          # العقول المتناوبة (تأكد من إضافتها في Secrets)
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          
+          # مفاتيح منصة X
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
@@ -48,16 +53,15 @@ jobs:
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "NasserApexBot"
           
-          # إنشاء مجلد data إذا لم يكن موجوداً
           mkdir -p data
-          
-          # إضافة أي ملف قاعدة بيانات يتم إنشاؤه
           git add data/*.db || echo "No database found"
           
-          # تنفيذ التغييرات فقط إذا وجد تحديث جديد في السجلات
+          # التحقق من وجود تغييرات
           if ! git diff --cached --quiet; then
+            # جلب التغييرات الأخيرة لتفادي التعارض (Rebase)
+            git pull origin main --rebase
             git commit -m "🛡️ تحديث سجلات أيبكس التقنية [skip ci]"
-            git push
+            git push origin main
           else
             echo "لا توجد بيانات جديدة لحفظها."
           fi
