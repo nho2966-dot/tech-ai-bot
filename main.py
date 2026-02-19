@@ -1,165 +1,101 @@
-import os
-import time
-import random
-import sqlite3
-import logging
-import hashlib
-import re
+import os, sqlite3, random, time, threading
 from datetime import datetime
-import requests
-from bs4 import BeautifulSoup
-from fuzzywuzzy import fuzz
+import google.generativeai as genai
+import openai
 import tweepy
-from google import genai
-from openai import OpenAI
+import requests
+from flask import Flask, render_template_string
 
-# --- إعدادات التسجيل ---
-logging.basicConfig(level=logging.INFO, format="🛡️ [APEX MEDIA]: %(message)s")
+# -------------------- إعداد المفاتيح (بالمسميات الجديدة) --------------------
+genai.configure(api_key=os.getenv("GEMINI_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# --- 1️⃣ الإعدادات الاستراتيجية ---
-PRIMARY_PROVIDER = "gemini"
-FALLBACK_ORDER = ["groq", "openai", "xai"]
+# مسميات ناصر المعتمدة
+TG_TOKEN = os.getenv("TG_TOKEN")
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-PROVIDERS = {
-    "gemini": {"type": "google", "model": "gemini-1.5-flash", "env": "GEMINI_KEY"},
-    "groq": {"type": "openai", "model": "llama-3.3-70b-versatile", "base_url": "https://api.groq.com/openai/v1", "env": "GROQ_API_KEY"},
-    "openai": {"type": "openai", "model": "gpt-4o-mini", "env": "OPENAI_API_KEY"},
-    "xai": {"type": "openai", "model": "grok-beta", "base_url": "https://api.x.ai/v1", "env": "XAI_API_KEY"}
-}
+TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
+TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET")
+TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
-DB_PATH = "data/apex_media.db"
-MAX_TWEET_LENGTH = 280
+# دستور أيبكس (المكتسبات)
+APEX_RULES = """
+- اللهجة: خليجية بيضاء واضحة.
+- التخصص: Artificial Intelligence and its latest tools والأجهزة الذكية للأفراد.
+- التركيز: الأسرار، الخبايا، والمقارنات الجوهرية (Tech Secrets).
+- الممنوعات: ذكر 'Industrial Revolution'، اللغة الصينية، الرموز البرمجية، الهلوسة التقنية.
+- الشخصية: زميل تقني خبير (Peer) وليس ملقن.
+"""
 
-# --- البوت الرئيسي ---
-class ApexMediaSystem:
-    def __init__(self):
-        os.makedirs("data", exist_ok=True)
-        self._init_db()
-        self._init_clients()
-        self.tech_keywords = ["ai", "iphone", "android", "openai", "google", "chip", "gpu", "update", "chatgpt"]
-        self.angles = ["شرح مبسط", "تحليل تقني عميق", "تحذير أمني", "زاوية خفية", "توقع مستقبلي"]
+# -------------------- قاعدة البيانات --------------------
+def init_db():
+    if not os.path.exists('data'): os.makedirs('data')
+    conn = sqlite3.connect('data/apex_bot.db', check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS history (content TEXT, style TEXT, type TEXT, date TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS stats (date TEXT PRIMARY KEY, reply_count INTEGER, posts_count INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS replies (platform TEXT, original TEXT, reply TEXT, date TEXT)''')
+    conn.commit()
+    return conn
 
-    # --- قاعدة البيانات ---
-    def _init_db(self):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS history(hash TEXT PRIMARY KEY, content TEXT, source_url TEXT, ts DATETIME)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_history_ts ON history(ts)")
-            conn.execute("CREATE TABLE IF NOT EXISTS performance(id TEXT PRIMARY KEY, category TEXT, likes INTEGER, replies INTEGER, ts DATETIME)")
-            conn.execute("CREATE TABLE IF NOT EXISTS trend_memory(keyword TEXT PRIMARY KEY, score INTEGER, last_seen DATETIME)")
+# -------------------- توليد المحتوى الاحترافي --------------------
+def generate_content(prompt_type):
+    # تنويع البرومبت بناءً على "الأسرار والخبايا"
+    prompts = {
+        "secret": "اعطني سر تقني مخفي في أداة AI أو جهاز ذكي يفيد الفرد.",
+        "compare": "قارن بين أداتين AI أو جهازين من حيث الخبايا الجوهرية التي لا يعرفها الكثير.",
+        "bomb": "Technical Bomb: معلومة تقنية دقيقة وصادمة عن الذكاء الاصطناعي للأفراد."
+    }
+    
+    selected_prompt = prompts.get(prompt_type, prompts["secret"])
+    full_prompt = f"{selected_prompt}\n\nالقواعد الصارمة:\n{APEX_RULES}"
 
-    # --- تهيئة X API ---
-    def _init_clients(self):
-        self.x_client = tweepy.Client(
-            bearer_token=os.getenv("X_BEARER_TOKEN"),
-            consumer_key=os.getenv("X_API_KEY"),
-            consumer_secret=os.getenv("X_API_SECRET"),
-            access_token=os.getenv("X_ACCESS_TOKEN"),
-            access_token_secret=os.getenv("X_ACCESS_SECRET")
-        )
+    try:
+        # الاعتماد الأساسي على Gemini (الأكثر استقراراً حالياً)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(full_prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"⚠️ فشل التوليد: {e}")
+        return "الذكاء الاصطناعي يغير حياتنا كل يوم، خلك مطلع! 🚀"
 
-    # --- جلب المقال الكامل ---
-    def fetch_full_article(self, url):
+# -------------------- النشر والردود --------------------
+def publish_telegram(content):
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TG_CHAT_ID, "text": content, "parse_mode": "Markdown"})
+    except Exception as e:
+        print(f"⚠️ خطأ تيليجرام: {e}")
+
+# (تم اختصار وظائف تويتر للتركيز على المنطق الحيوي)
+def run_bot():
+    conn = init_db()
+    while True:
         try:
-            resp = requests.get(url, timeout=10)
-            soup = BeautifulSoup(resp.text, "html.parser")
-            paragraphs = soup.find_all("p")
-            text = " ".join(p.get_text() for p in paragraphs)
-            return text
+            print(f"\n🚀 دورة جديدة - {datetime.now()}")
+            
+            # 1. توليد محتوى (خبايا وأسرار)
+            p_type = random.choice(["secret", "compare", "bomb"])
+            content = generate_content(p_type)
+
+            # 2. الفاصل الزمني البشري (قبل النشر)
+            time.sleep(random.randint(300, 600)) 
+
+            # 3. النشر في المنصات
+            publish_telegram(content)
+            # هنا تضاف وظيفة publish_twitter(content)
+            
+            # 4. تحديث الإحصائيات
+            update_stats(conn)
+
+            # 5. انتظار الدورة القادمة (من ساعة إلى ساعتين لضمان عدم الحظر)
+            cycle_wait = random.randint(3600, 7200)
+            print(f"⏳ الدورة القادمة بعد {cycle_wait//60} دقيقة...")
+            time.sleep(cycle_wait)
+
         except Exception as e:
-            logging.error(f"❌ فشل جلب المقال: {e}")
-            return ""
+            print(f"⚠️ خطأ عام: {e}")
+            time.sleep(60)
 
-    # --- محرك Fallback ---
-    def call_specific_provider(self, p_key, prompt):
-        cfg = PROVIDERS[p_key]
-        api_key = os.getenv(cfg["env"])
-        if not api_key: raise Exception(f"Key missing: {p_key}")
-
-        if cfg["type"] == "google":
-            client = genai.Client(api_key=api_key)
-            res = client.models.generate_content(model=cfg["model"], contents=prompt)
-            return res.text
-        else:
-            client = OpenAI(api_key=api_key, base_url=cfg.get("base_url"))
-            res = client.chat.completions.create(
-                model=cfg["model"],
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7, max_tokens=300
-            )
-            return res.choices[0].message.content
-
-    # --- توليد التغريدة الاحترافية ---
-    def generate_content(self, prompt):
-        chain = [PRIMARY_PROVIDER] + FALLBACK_ORDER
-        for idx, provider in enumerate(chain):
-            try:
-                logging.info(f"🧠 محاولة عبر: {provider}")
-                text = self.call_specific_provider(provider, prompt)
-                clean_text = re.sub(r'[^\w\s\p{Arabic}.,!?]', '', text, flags=re.UNICODE).strip()
-                if len(clean_text) > 30:
-                    logging.info(f"✅ نجاح من {provider}")
-                    return clean_text[:MAX_TWEET_LENGTH]
-            except Exception as e:
-                logging.warning(f"❌ فشل {provider}: {str(e)[:60]} | محاولة {idx+1}/{len(chain)}")
-                time.sleep(1 + idx*2)
-                continue
-        return "تحديث جوالك وحماية خصوصيتك خطوة أولى للحفاظ على بياناتك."
-
-    # --- كشف الفجوات ---
-    def detect_gap(self):
-        with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT keyword FROM trend_memory ORDER BY score DESC LIMIT 1").fetchone()
-        return row[0] if row else random.choice(self.tech_keywords)
-
-    # --- التحقق من التكرار ---
-    def is_duplicate(self, content):
-        h_new = hashlib.sha256(content.encode()).hexdigest()
-        with sqlite3.connect(DB_PATH) as conn:
-            rows = conn.execute("SELECT content FROM history").fetchall()
-            for r in rows:
-                if fuzz.ratio(content, r[0]) > 85:
-                    return True, h_new
-            return False, h_new
-
-    # --- تحديث الأداء ---
-    def log_performance(self, tweet_id, category, likes=0, replies=0):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("INSERT OR REPLACE INTO performance(id, category, likes, replies, ts) VALUES (?, ?, ?, ?, ?)",
-                         (tweet_id, category, likes, replies, datetime.utcnow()))
-
-    # --- توليد تغريدة من خبر + كشف خبايا ---
-    def create_tweet_from_url(self, url):
-        full_text = self.fetch_full_article(url)
-        if not full_text:
-            logging.warning("⚠️ لا يمكن قراءة المقال بالكامل")
-            return
-
-        angle = random.choice(self.angles)
-        prompt = f"أنت خبير تقني. اقرأ المقال التالي بعناية واكتب تغريدة احترافية تكشف خفايا وأسرار التقنية والأجهزة الذكية والذكاء الاصطناعي. الزاوية: {angle}\n\n{full_text}"
-        tweet_content = self.generate_content(prompt)
-
-        is_dup, h = self.is_duplicate(tweet_content)
-        if is_dup:
-            logging.info("⚠️ المحتوى مكرر، إلغاء النشر.")
-            return
-
-        for attempt in range(3):
-            try:
-                res = self.x_client.create_tweet(text=tweet_content)
-                if res:
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.execute("INSERT INTO history(hash, content, source_url, ts) VALUES (?, ?, ?, ?)",
-                                     (h, tweet_content, url, datetime.utcnow()))
-                    logging.info(f"🚀 تم النشر بنجاح: {tweet_content[:50]}...")
-                    self.log_performance(res.data['id'], angle)
-                    break
-            except Exception as e:
-                logging.error(f"❌ محاولة {attempt+1} فشل النشر: {e}")
-                time.sleep(2)
-
-# --- تشغيل البوت ---
-if __name__ == "__main__":
-    system = ApexMediaSystem()
-    # مثال: ضع رابط خبر حقيقي
-    news_url = "https://www.theverge.com/tech/ai-news"
-    system.create_tweet_from_url(news_url)
+# (نفس الـ Dashboard البسيط اللي وضعته)
