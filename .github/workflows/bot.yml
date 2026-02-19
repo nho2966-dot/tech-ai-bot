@@ -5,21 +5,20 @@ on:
     branches:
       - main
   schedule:
-    # الجدول الزمني اللي وضعته (7 صباحاً)
-    - cron: '0 7 * * *'
-  workflow_dispatch: # إضافة زر التشغيل اليدوي (مهم جداً للفحص)
+    - cron: '0 7 * * *'  # تشغيل يوميًا الساعة 7 صباحًا
+  workflow_dispatch: # زر التشغيل اليدوي
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # ضروري جداً لحفظ السجلات (Database)
+      contents: write
 
     env:
       MAX_ATTEMPTS: 3
       LOG_DIR: logs
       BACKUP_DIR: backup
-      # المفاتيح الأساسية للبوت (تأكد أنها بنفس الأسماء في Secrets)
+      # تمرير المفاتيح من الـ Secrets للبيئة
       GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       X_API_KEY: ${{ secrets.X_API_KEY }}
@@ -27,9 +26,6 @@ jobs:
       X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
       X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
       X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-      # مفاتيح تليجرام للإشعارات
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Checkout repository
@@ -55,18 +51,21 @@ jobs:
         run: |
           ATTEMPT=1
           SUCCESS=0
-          # تصحيح: استخدام متناغم للوقت في الاسم
           RUN_TS=$(date '+%Y%m%d_%H%M%S')
+          echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
+          
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             echo "🛡️ Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-            python main.py > "$LOG_DIR/main_$RUN_TS.log" 2>&1 && SUCCESS=1 && break
-            echo "⚠️ Attempt $ATTEMPT failed. Retrying in 30 seconds..."
+            if python main.py > "$LOG_DIR/main_$RUN_TS.log" 2>&1; then
+              SUCCESS=1
+              break
+            fi
+            echo "⚠️ Attempt $ATTEMPT failed. Waiting 30s..."
             ATTEMPT=$((ATTEMPT+1))
-            sleep 30 # زدنا وقت الانتظار لتفادي الـ Rate Limit (429)
+            sleep 30
           done
           
           echo "SUCCESS=$SUCCESS" >> $GITHUB_ENV
-          echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
           if [ $SUCCESS -ne 1 ]; then exit 1; fi
 
       - name: Sync Database and Logs
@@ -74,19 +73,20 @@ jobs:
         run: |
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "NasserApexBot"
-          git add data/*.db logs/*.log
-          git pull origin main --rebase
+          git add data/*.db logs/*.log || echo "No files"
           git commit -m "📝 [LOGS]: تحديث سجلات أيبكس [skip ci]" || echo "No changes"
+          # التعديل هنا: سحب التغييرات مع الحفاظ على التعديلات المحلية
+          git pull --rebase origin main
           git push origin main
 
       - name: Send Telegram Notification
         if: always()
         run: |
+          # تأكد أن المسميات في Secrets مطابقة تماماً لما يلي:
           STATUS=$(if [ "${{ env.SUCCESS }}" == "1" ]; then echo "✅ Success"; else echo "❌ Failure"; fi)
-          LOG_INFO="Log: main_${{ env.RUN_TS }}.log"
-          MESSAGE="🤖 *Tech AI Bot Status Update* %0A------------------%0AStatus: $STATUS %0A$LOG_INFO"
+          MESSAGE="🤖 *Tech AI Bot Update*%0A------------------%0AStatus: $STATUS%0AFile: main_${{ env.RUN_TS }}.log"
           
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d parse_mode="Markdown" \
             -d text="$MESSAGE"
