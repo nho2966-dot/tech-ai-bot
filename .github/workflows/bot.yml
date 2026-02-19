@@ -5,78 +5,70 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 7 * * *'  # تشغيل يومي الساعة 7 صباحاً
-  workflow_dispatch:
+    - cron: '0 7 * * *'  # تشغيل يومي 7 صباحاً بتوقيت جرينتش
+  workflow_dispatch:     # للسماح بالتشغيل اليدوي
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    env:
-      MAX_ATTEMPTS: 3
-      LOG_DIR: logs
-      # استدعاء السيكرتس بالمسميات اللي اعتمدناها
-      TG_TOKEN: ${{ secrets.TG_TOKEN }}
-      TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
+    
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run script
+      - name: Run Apex Bot
         id: run_script
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # أضف بقية المفاتيح هنا (تويتر، إلخ)
         run: |
-          RUN_TS=$(date '+%Y%m%d_%H%M%S')
+          RUN_TS=$(date '+%Y-%m-%d %H:%M:%S')
           echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
-          mkdir -p $LOG_DIR data
+          mkdir -p logs data
           
-          if python main.py > "$LOG_DIR/main_$RUN_TS.log" 2>&1; then
+          # تشغيل البوت وحفظ الحالة
+          if python main.py; then
             echo "SUCCESS=1" >> $GITHUB_ENV
           else
             echo "SUCCESS=0" >> $GITHUB_ENV
             exit 1
           fi
 
-      - name: Sync Changes
+      - name: Sync Database and Logs
         if: always()
         run: |
           git config --local user.email "bot@nasser-ai.com"
           git config --local user.name "NasserApexBot"
-          git add data/*.db logs/*.log || echo "No files"
-          git commit -m "📝 [LOGS]: تحديث سجلات أيبكس [skip ci]" || echo "No changes"
-          git pull --rebase origin main
-          git push origin main
+          git add data/*.db logs/*.log || echo "No changes"
+          git commit -m "📝 تحديث آلي للسجلات [skip ci]" || echo "No changes"
+          git push origin main || echo "Push failed"
 
-     - name: Send Telegram Notification
+      - name: Telegram Notification
         if: always()
         run: |
-          # تحديد الحالة
+          # تحديد أيقونة الحالة
           if [ "${{ env.SUCCESS }}" == "1" ]; then
-            STATUS="✅ Success"
+            STATUS="✅ <b>نجاح التشغيل</b>"
           else
-            STATUS="❌ Failure"
+            STATUS="❌ <b>فشل التشغيل</b>"
           fi
           
-          # صياغة الرسالة بصيغة HTML لتجنب أخطاء الرموز
-          MESSAGE="<b>🤖 تحديث بوت التقنية (أيبكس)</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}"
+          # صياغة الرسالة بصيغة HTML (آمنة من رموز النظام)
+          MESSAGE="<b>🤖 تنبيه بوت أيبكس</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}%0A------------------%0A<i>تفقد سجلات GitHub لمزيد من التفاصيل.</i>"
           
-          # إرسال الطلب مع استخدام parse_mode=HTML
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d parse_mode="HTML" \
-            -d text="$MESSAGE"
             -d text="$MESSAGE"
