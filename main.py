@@ -17,7 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 logging.basicConfig(level=logging.INFO, format="🛡️ [إمبراطورية ناصر]: %(message)s")
 
 # --- Constants ---
-MAX_TWEET_LENGTH = 280
+MAX_TWEET_LENGTH = 600
 MAX_DAILY_POSTS = 5
 MAX_RETRIES = 3
 DELAY_MIN = 40
