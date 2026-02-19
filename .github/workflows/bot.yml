@@ -5,80 +5,88 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 7 * * *'  # تشغيل يوميًا الساعة 7 صباحًا
+    # الجدول الزمني اللي وضعته (7 صباحاً)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # إضافة زر التشغيل اليدوي (مهم جداً للفحص)
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ضروري جداً لحفظ السجلات (Database)
 
     env:
       MAX_ATTEMPTS: 3
       LOG_DIR: logs
       BACKUP_DIR: backup
+      # المفاتيح الأساسية للبوت (تأكد أنها بنفس الأسماء في Secrets)
+      GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+      X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+      # مفاتيح تليجرام للإشعارات
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip
-
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Prepare directories
-        run: |
-          mkdir -p $LOG_DIR $BACKUP_DIR
+        run: mkdir -p $LOG_DIR $BACKUP_DIR data
 
       - name: Run script with retries
         id: run_script
         run: |
           ATTEMPT=1
           SUCCESS=0
-          TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
+          # تصحيح: استخدام متناغم للوقت في الاسم
+          RUN_TS=$(date '+%Y%m%d_%H%M%S')
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             echo "🛡️ Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-            python main.py > "$LOG_DIR/main_$TIMESTAMP.log" 2>&1 && SUCCESS=1 && break
+            python main.py > "$LOG_DIR/main_$RUN_TS.log" 2>&1 && SUCCESS=1 && break
+            echo "⚠️ Attempt $ATTEMPT failed. Retrying in 30 seconds..."
             ATTEMPT=$((ATTEMPT+1))
-            sleep 5
+            sleep 30 # زدنا وقت الانتظار لتفادي الـ Rate Limit (429)
           done
+          
+          echo "SUCCESS=$SUCCESS" >> $GITHUB_ENV
+          echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
+          if [ $SUCCESS -ne 1 ]; then exit 1; fi
 
-          if [ $SUCCESS -eq 1 ]; then
-            echo "✅ Script ran successfully. Log: $LOG_DIR/main_$TIMESTAMP.log"
-          else
-            echo "❌ Script failed after $MAX_ATTEMPTS attempts. Check log: $LOG_DIR/main_$TIMESTAMP.log"
-            exit 1
-          fi
-
-      - name: Backup DB files
+      - name: Sync Database and Logs
+        if: always()
         run: |
-          TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
-          DB_FOUND=0
-          for db_file in data/*.db; do
-            if [ -f "$db_file" ]; then
-              cp "$db_file" "$BACKUP_DIR/$(basename "$db_file" .db)_$TIMESTAMP.db"
-              DB_FOUND=1
-              echo "💾 Backed up: $db_file"
-            fi
-          done
-          if [ $DB_FOUND -eq 0 ]; then
-            echo "⚠️ No DB files found to backup"
-          fi
+          git config --local user.email "bot@nasser-ai.com"
+          git config --local user.name "NasserApexBot"
+          git add data/*.db logs/*.log
+          git pull origin main --rebase
+          git commit -m "📝 [LOGS]: تحديث سجلات أيبكس [skip ci]" || echo "No changes"
+          git push origin main
 
       - name: Send Telegram Notification
-        if: success() || failure()
+        if: always()
         run: |
-          STATUS=$(if [ $SUCCESS -eq 1 ]; then echo "✅ Success"; else echo "❌ Failure"; fi)
-          LOG_FILE="$LOG_DIR/main_$TIMESTAMP.log"
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d text="Tech AI Bot Run: $STATUS
-Log: $LOG_FILE"
+          STATUS=$(if [ "${{ env.SUCCESS }}" == "1" ]; then echo "✅ Success"; else echo "❌ Failure"; fi)
+          LOG_INFO="Log: main_${{ env.RUN_TS }}.log"
+          MESSAGE="🤖 *Tech AI Bot Status Update* %0A------------------%0AStatus: $STATUS %0A$LOG_INFO"
+          
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="Markdown" \
+            -d text="$MESSAGE"
