@@ -61,13 +61,22 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      - name: Send Telegram Notification
+     - name: Send Telegram Notification
         if: always()
         run: |
-          STATUS=$(if [ "${{ env.SUCCESS }}" == "1" ]; then echo "✅ Success"; else echo "❌ Failure"; fi)
-          MESSAGE="🤖 *تحديث بوت التقنية (Nasser AI)*%0A------------------%0Aالحالة: $STATUS%0Aالتوقيت: ${{ env.RUN_TS }}"
+          # تحديد الحالة
+          if [ "${{ env.SUCCESS }}" == "1" ]; then
+            STATUS="✅ Success"
+          else
+            STATUS="❌ Failure"
+          fi
           
-          curl -s -X POST "https://api.telegram.org/bot${{ env.TG_TOKEN }}/sendMessage" \
-            -d chat_id="${{ env.TG_CHAT_ID }}" \
-            -d parse_mode="Markdown" \
+          # صياغة الرسالة بصيغة HTML لتجنب أخطاء الرموز
+          MESSAGE="<b>🤖 تحديث بوت التقنية (أيبكس)</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}"
+          
+          # إرسال الطلب مع استخدام parse_mode=HTML
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            -d text="$MESSAGE"
             -d text="$MESSAGE"
