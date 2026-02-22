@@ -1,18 +1,26 @@
-FROM python:3.10-slim
+# 1. استخدام نسخة بايثون مستقرة وخفيفة لعام 2026
+FROM python:3.11-slim
 
-# ضبط التوقيت (مهم جداً لتحليل الـ ROI)
-ENV TZ=Asia/Riyadh
-RUN apt-get update && apt-get install -y tzdata && \
-    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
+# 2. تحديد مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# تثبيت الاعتمادات
+# 3. تثبيت أدوات النظام الضرورية
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# 4. نسخ ملف المتطلبات وتثبيت المكتبات
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# نسخ الكود
+# 5. نسخ بقية ملفات المشروع (main.py, data, prompts, etc.)
 COPY . .
 
-# التشغيل
+# 6. إنشاء مجلد البيانات واللوجز إذا لم تكن موجودة لضمان عمل الذاكرة
+RUN mkdir -p data logs
+
+# 7. فتح المنفذ البرمجي (المتوافق مع كود Quart)
+EXPOSE 8443
+
+# 8. تشغيل المحرك الرئيسي باستخدام uvicorn للأداء العالي
 CMD ["python", "main.py"]
