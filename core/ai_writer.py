@@ -1,44 +1,30 @@
 import os
-# استخدام الاستيراد المباشر للمكتبة الجديدة
-try:
-    from google import genai
-except ImportError:
-    # في حال استمر الخطأ، سنستخدم المكتبة القديمة كخيار أمان أخير
-    import google.generativeai as genai_legacy
+from google import genai
+from utils.helpers import get_config # استخدام الهيلبر الموجود عندك
 
 class AIWriter:
     def __init__(self):
-        self.gemini_key = os.environ.get("GEMINI_API_KEY")
-        self.groq_key = os.environ.get("GROQ_API_KEY")
-        
-        if self.gemini_key:
-            try:
-                # المحاولة مع المكتبة الجديدة
-                self.gemini_client = genai.Client(api_key=self.gemini_key)
-                self.use_legacy = False
-            except:
-                # العودة للمكتبة المستقرة إذا فشلت الجديدة
-                genai_legacy.configure(api_key=self.gemini_key)
-                self.use_legacy = True
-        
-        if self.groq_key:
-            from groq import Groq
-            self.groq_client = Groq(api_key=self.groq_key)
+        self.config = get_config()
+        self.client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
+        self.model = "gemini-1.5-flash"
 
-    def verify_and_generate(self, news_item):
-        prompt = f"حلل وصغ كسبق صحفي أو تفنيد: {news_item['title']}"
+    async def generate_apex_secret(self, trend_context=""):
+        # قراءة البرومبت من الملف الموجود في مجلد prompts
+        with open('prompts/tweet.txt', 'r', encoding='utf-8') as f:
+            base_prompt = f.read()
+
+        full_prompt = f"""
+        {base_prompt}
+        الترند الحالي: {trend_context}
+        المهمة: اكتب سر تقني (Artificial Intelligence and its latest tools) بلهجة خليجية بيضاء.
+        التنسيق: 
+        - جمل قصيرة ومشوقة.
+        - تحدي تفاعلي في النهاية.
+        - الهاشتاجات: #أيبكس_تقني #AI_Secrets #2026
+        """
         
-        if self.gemini_key:
-            try:
-                if not self.use_legacy:
-                    response = self.gemini_client.models.generate_content(
-                        model="gemini-2.0-flash", contents=prompt)
-                    return response.text
-                else:
-                    model = genai_legacy.GenerativeModel("gemini-1.5-flash")
-                    response = model.generate_content(prompt)
-                    return response.text
-            except Exception as e:
-                print(f"⚠️ خطأ في Gemini: {e}")
-        
-        # ... باقي كود Groq كما هو ...
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=full_prompt
+        )
+        return response.text.strip()
