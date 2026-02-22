@@ -1,8 +1,8 @@
-import os, asyncio, httpx, random, datetime, tweepy
+import os, asyncio, httpx, random, logging, tweepy
 from loguru import logger
 
 # =========================
-# 🔐 الإعدادات
+# 🔐 إعدادات البيئة
 # =========================
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
@@ -17,7 +17,7 @@ X_KEYS = {
 }
 
 # =========================
-# 🧠 محرك المحتوى البريميوم
+# 🧠 محتوى البوت
 # =========================
 def get_ultra_premium_prompt():
     topics = [
@@ -30,86 +30,83 @@ def get_ultra_premium_prompt():
     المتطلبات: عنوان قوي، مقدمة، شرح تفصيلي لـ 3 أدوات على الأقل، خطوات عملية، وخاتمة.
     اللغة: خليجية احترافية. اذكر 'الذكاء الاصطناعي وأحدث أدواته'. الطول: استغل مساحة 4000 حرف."""
 
-async def generate_ultra_content():
-    if not GEMINI_KEY: return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
-        payload = {"contents": [{"parts": [{"text": get_ultra_premium_prompt()}]}]}
-        async with httpx.AsyncClient(timeout=45) as client:
-            r = await client.post(url, json=payload)
-            if r.status_code == 200:
-                return r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-            else:
-                logger.error(f"❌ Gemini Error: {r.status_code} - {r.text}")
-    except Exception as e: 
-        logger.error(f"⚠️ خطأ محرك الذكاء: {e}")
+# =========================
+# 🔄 إدارة النماذج والأخطاء
+# =========================
+async def get_available_models():
+    """إحضار النماذج المتاحة ودعمها لـ generateContent"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+    async with httpx.AsyncClient(timeout=20) as client:
+        try:
+            r = await client.get(url)
+            r.raise_for_status()
+            models = r.json().get("models", [])
+            # قائمة النماذج التي تدعم توليد المحتوى
+            return [m["name"] for m in models if "generateContent" in m.get("supportedMethods", [])]
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب النماذج: {e}")
+            return []
+
+async def generate_ultra_content(retries=3):
+    """توليد المحتوى مع ديناميكية التعامل مع الأخطاء"""
+    models = await get_available_models()
+    if not models:
+        logger.warning("⚠️ لم يتم العثور على أي نموذج صالح")
+        return None
+
+    for attempt in range(retries):
+        for model_name in models:
+            try:
+                logger.info(f"🔥 محاولة توليد محتوى باستخدام: {model_name} (Attempt {attempt+1})")
+                payload = {"contents": [{"parts": [{"text": get_ultra_premium_prompt()}]}]}
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
+                async with httpx.AsyncClient(timeout=45) as client:
+                    r = await client.post(url, json=payload)
+                    if r.status_code == 200:
+                        content = r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                        return content
+                    else:
+                        logger.warning(f"⚠️ نموذج {model_name} فشل: {r.status_code} - {r.text[:150]}")
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء استخدام النموذج {model_name}: {e}")
+        await asyncio.sleep(2)  # تأخير قصير قبل إعادة المحاولة
+    logger.error("❌ فشل كل النماذج بعد المحاولات المتعددة")
     return None
 
 # =========================
-# 📤 النشر السيادي في X
+# 📤 النشر
 # =========================
-def check_x_keys():
-    """تحقق من صلاحية مفاتيح X قبل النشر"""
-    if not all(X_KEYS.values()): 
-        logger.warning("⚠️ مفاتيح X غير مكتملة")
-        return None
+def post_to_x_premium(content):
+    if not X_KEYS["ck"]: return
     try:
         client = tweepy.Client(X_KEYS["ck"], X_KEYS["cs"], X_KEYS["at"], X_KEYS["ts"])
-        # اختبار وصول محدود
-        client.get_user(username="any")  
-        return client
-    except tweepy.errors.Forbidden:
-        logger.warning("⚠️ مفاتيح X غير صالحة أو صلاحيات محدودة")
-        return None
-    except Exception as e:
-        logger.error(f"⚠️ خطأ عند التحقق من مفاتيح X: {e}")
-        return None
-
-def post_to_x_premium(content):
-    client = check_x_keys()
-    if not client:
-        logger.info("⏩ تجاوز النشر في X بسبب مشاكل المفاتيح")
-        return
-    try:
-        # تقطيع المحتوى حسب الاشتراك: Free < 280، Pro < 5000، Enterprise < 24500
-        max_len = 24500  
-        res = client.create_tweet(text=content[:max_len])
+        res = client.create_tweet(text=content[:24500])
         logger.success(f"✅ تم نشر المقال في X بنجاح! ID: {res.data['id']}")
-    except tweepy.errors.Forbidden as e:
-        logger.error(f"❌ رفض X: {e}")
-    except Exception as e:
-        logger.error(f"❌ خطأ X: {e}")
+    except Exception as e: logger.error(f"❌ عطل في X: {e}")
 
-# =========================
-# 📤 النشر في Telegram
-# =========================
 async def post_to_tg_premium(content):
-    if not TG_TOKEN or not TG_CHAT_ID: 
-        logger.warning("⚠️ بيانات تليجرام غير مكتملة")
-        return
+    if not TG_TOKEN: return
     try:
         msg = f"<b>🚀 أيبكس | القيمة المضافة</b>\n\n{content}"
         async with httpx.AsyncClient() as client:
-            r = await client.post(
-                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                json={"chat_id": TG_CHAT_ID, "text": msg[:4090], "parse_mode": "HTML"}
-            )
+            r = await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                                  json={"chat_id": TG_CHAT_ID, "text": msg[:4090], "parse_mode": "HTML"})
             if r.status_code == 200: logger.success("✅ تم النشر في تليجرام")
-            else: logger.error(f"❌ تليجرام رفض: {r.text}")
+            else: logger.warning(f"⚠️ خطأ في تليجرام: {r.status_code}")
     except Exception as e: logger.error(f"❌ عطل تليجرام: {e}")
 
 # =========================
-# 🔄 المشغل الرئيسي
+# 🔝 المشغل الرئيسي
 # =========================
 async def main():
-    logger.info("🔥 تشغيل محرك أيبكس (أقصى قدرة بريميوم)...")
+    logger.info("🔥 تشغيل محرك أيبكس الديناميكي...")
     content = await generate_ultra_content()
     if content:
         post_to_x_premium(content)
         await post_to_tg_premium(content)
     else:
         logger.warning("⚠️ لم يتم توليد محتوى للنشر")
-    logger.info("🏁 تمت المهمة.")
+    logger.info("🏁 المهمة اكتملت.")
 
 if __name__ == "__main__":
     asyncio.run(main())
