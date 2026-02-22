@@ -6,7 +6,7 @@ from datetime import datetime
 from google import genai 
 import requests
 
-# -------------------- إعدادات ناصر --------------------
+# -------------------- إعدادات أيبكس --------------------
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -20,7 +20,6 @@ APEX_RULES = """
 """
 
 # -------------------- تهيئة المحرك --------------------
-# المكتبة الجديدة تستخدم العميل بهذا الشكل
 client = genai.Client(api_key=GEMINI_KEY)
 
 def init_db():
@@ -41,7 +40,7 @@ def generate_apex_content():
     prompt = f"{topic}. الشروط: {APEX_RULES}"
     
     try:
-        # التعديل الجوهري هنا: مسمى الموديل 'gemini-1.5-flash' مباشرة
+        # التعديل النهائي لاسم الموديل ليكون متوافق مع API v1
         response = client.models.generate_content(
             model='gemini-1.5-flash', 
             contents=prompt
@@ -53,8 +52,10 @@ def generate_apex_content():
 
 def send_telegram(message):
     if not TG_TOKEN or not TG_CHAT_ID: return
+    # تنظيف الـ ID من أي مسافات مخفية
+    clean_id = str(TG_CHAT_ID).strip()
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "HTML"}
+    payload = {"chat_id": clean_id, "text": message, "parse_mode": "HTML"}
     try:
         res = requests.post(url, json=payload)
         print(f"📡 رد تليجرام: {res.text}")
