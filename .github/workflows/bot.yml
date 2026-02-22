@@ -1,9 +1,13 @@
-name: Run Tech AI Bot (Final Fix)
+name: Run Tech AI Bot (Apex Automated)
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+  workflow_dispatch: # للتشغيل اليدوي
+  schedule:
+    # الجدولة: كل 6 ساعات (بتوقيت العالمي UTC)
+    # تقدر تغير الأرقام حسب رغبتك (دقائق ساعات أيام شهر يوم-أسبوع)
+    - cron: '0 */6 * * *'
 
 jobs:
   run-bot:
@@ -24,7 +28,6 @@ jobs:
 
       - name: Run Bot
         env:
-          # تأكد إن هذه الأسماء موجودة في الـ Secrets عندك بنفس الحروف
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
