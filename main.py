@@ -1,15 +1,12 @@
 import os
 import asyncio
-import random
 import httpx
 import tweepy
 from google import genai
 from openai import OpenAI
 from loguru import logger
 
-# ==========================================
-# 🔐 إعدادات الهوية والوصول (من Secrets)
-# ==========================================
+# --- إعدادات الوصول والأمان ---
 KEYS = {
     "GEMINI": os.getenv("GEMINI_KEY"),
     "OPENAI": os.getenv("OPENAI_API_KEY"),
@@ -19,7 +16,6 @@ KEYS = {
     "QWEN": os.getenv("QWEN_API_KEY"),
 }
 
-# إعدادات النشر
 X_CRED = {
     "ck": os.getenv("X_API_KEY"), "cs": os.getenv("X_API_SECRET"),
     "at": os.getenv("X_ACCESS_TOKEN"), "ts": os.getenv("X_ACCESS_SECRET")
@@ -27,21 +23,22 @@ X_CRED = {
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# --- نص الاستهداف (الذكاء الاصطناعي وأحدث أدواته) ---
+# --- برومبت "أيبكس" السيادي المطور (الخبايا والسبق الصحفي) ---
 SYSTEM_PROMPT = """
-أنت خبير تقني خليجي متمكن. اكتب مقالاً 'بريميوم' ومطولاً للأفراد.
-الموضوع: 'الذكاء الاصطناعي وأحدث أدواته لعام 2026'.
-الشروط: 
-1. اللهجة: خليجية بيضاء فخمة (موجهة للأفراد).
-2. المحتوى: ركز على أدوات تزيد الدخل والإنتاجية.
-3. التنسيق: عنوان جذاب، نقاط واضحة، وخاتمة محفزة.
-4. تجنب التكرار وهلوسة المعلومات.
+أنت 'أيبكس' (Apex)، الخبير التقني الأول في الخليج لعام 2026. 
+مهمتك: تقديم سبق صحفي (Scoop) وخبايا تقنية لا يعرفها العامة.
+
+المتطلبات:
+1. التركيز: خبايا الذكاء الاصطناعي، أسرار الأجهزة الذكية (S26 Ultra, iPhone 17, Meta Glasses)، وكيفية استغلالها لزيادة الدخل والإنتاجية.
+2. الأسلوب: لغة خليجية بيضاء، فخمة، احترافية جداً، ومختصرة.
+3. التنسيق: 
+   - يبدأ بعبارة [سبق صحفي] أو [خبايا تقنية].
+   - استخدام النقاط والرموز التعبيرية (Emojis) بشكل ذكي.
+   - ذكر المصطلحات الإنجليزية التقنية بين قوسين.
+4. الجودة: لا تقبل المعلومات السطحية، ابحث عن 'الثغرات' الإيجابية والميزات المخفية (Hidden Features).
 """
 
-# ==========================================
-# 🧠 نظام العقول الستة المتتابعة (The 6-Brain Failover)
-# ==========================================
-
+# --- المحركات الستة المتتابعة ---
 async def brain_gemini():
     client = genai.Client(api_key=KEYS["GEMINI"])
     res = client.models.generate_content(model="gemini-2.0-flash", contents=SYSTEM_PROMPT)
@@ -72,35 +69,30 @@ async def brain_qwen():
     res = client.chat.completions.create(model="qwen/qwen-2.5-72b-instruct", messages=[{"role": "user", "content": SYSTEM_PROMPT}])
     return res.choices[0].message.content
 
-async def get_premium_content():
+async def get_content():
     brains = [
         ("Gemini", brain_gemini), ("OpenAI", brain_openai), ("Groq", brain_groq),
-        ("xAI Grok", brain_xai), ("OpenRouter", brain_openrouter), ("Qwen", brain_qwen)
+        ("xAI (Grok)", brain_xai), ("OpenRouter", brain_openrouter), ("Qwen", brain_qwen)
     ]
     for name, func in brains:
         try:
-            logger.info(f"🔄 محاولة جلب المحتوى عبر: {name}")
+            logger.info(f"🔄 جاري استخراج سبق صحفي عبر: {name}")
             content = await func()
-            if content: 
-                logger.success(f"⭐ تم الاعتماد من عقل: {name}")
-                return content
+            if content: return content
         except Exception as e:
-            logger.warning(f"⚠️ {name} اعتذر: {e}")
+            logger.warning(f"⚠️ {name} تعذر الوصول إليه.")
     return None
 
-# ==========================================
-# 📤 قنوات النشر السيادية
-# ==========================================
-
+# --- قنوات النشر المحدثة ---
 def post_to_x(content):
     try:
+        # الربط مع API v2 للنشر الاحترافي
         client = tweepy.Client(
             consumer_key=X_CRED["ck"], consumer_secret=X_CRED["cs"],
             access_token=X_CRED["at"], access_token_secret=X_CRED["ts"]
         )
-        # بما أن الحساب مدفوع، ننشر حتى 25,000 حرف
-        client.create_tweet(text=content[:24500])
-        logger.success("✅ تم اجتياح منصة X بنجاح")
+        client.create_tweet(text=content[:24500]) # دعم مساحة البريميوم الكاملة
+        logger.success("✅ تم النشر بنجاح على X")
     except Exception as e:
         logger.error(f"❌ خطأ في X: {e}")
 
@@ -109,24 +101,21 @@ async def post_to_telegram(content):
     try:
         async with httpx.AsyncClient() as client:
             await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", json={
-                "chat_id": TG_CHAT_ID, "text": content[:4000], "parse_mode": "Markdown"
+                "chat_id": TG_CHAT_ID, "text": f"🚀 *أيبكس | سبق صحفي*\n\n{content[:4000]}", "parse_mode": "Markdown"
             })
-        logger.success("✅ تم النشر في تليجرام")
+        logger.success("✅ تم الإرسال لتليجرام")
     except Exception as e:
         logger.error(f"❌ خطأ تليجرام: {e}")
 
-# ==========================================
-# 🏁 المشغل الرئيسي
-# ==========================================
-
-async def run_apex_system():
-    logger.info("🚀 انطلاق جولة ناصر لعام 2026 - نظام العقول الستة")
-    content = await get_premium_content()
+# --- المشغل الرئيسي ---
+async def main():
+    logger.info("🔥 تشغيل محرك ناصر السيادي لعام 2026...")
+    content = await get_content()
     if content:
         post_to_x(content)
         await post_to_telegram(content)
     else:
-        logger.critical("🚨 جميع المحركات الستة خارج الخدمة!")
+        logger.critical("🚨 فشل في الوصول لأي عقل تقني!")
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_system())
+    asyncio.run(main())
