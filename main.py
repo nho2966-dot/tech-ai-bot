@@ -5,7 +5,6 @@ from loguru import logger
 # 🔐 إعدادات الهوية والأمان
 # =========================
 GEMINI_KEY = os.getenv("GEMINI_KEY")
-XAI_KEY = os.getenv("XAI_API_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
 RAW_TG_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
@@ -15,7 +14,7 @@ if RAW_TG_ID and not RAW_TG_ID.startswith("-100") and not RAW_TG_ID.startswith("
 else:
     TG_CHAT_ID = RAW_TG_ID
 
-# مفاتيح X (تأكد من صلاحية Read and Write)
+# مفاتيح X (OAuth1.0a كاملة للكتابة + دعم Super Follows)
 X_KEY = os.getenv("X_API_KEY")
 X_SECRET = os.getenv("X_API_SECRET")
 X_TOKEN = os.getenv("X_ACCESS_TOKEN")
@@ -79,24 +78,38 @@ async def generate_content():
 # 📤 قنوات النشر
 # =========================
 def post_to_x(content):
+    """نشر الثريد في X مع دعم Super Follows"""
     try:
-        auth = tweepy.Client(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
+        # استخدام OAuth1.0a لتفادي خطأ 401
+        auth = tweepy.OAuth1UserHandler(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
+        api = tweepy.API(auth, wait_on_rate_limit=True)
         last_id = None
-        for part in content:
-            # قص التغريدة إذا زادت عن حد X
-            res = auth.create_tweet(text=part[:275], in_reply_to_tweet_id=last_id)
-            last_id = res.data["id"]
-        logger.success("✅ تم نشر الثريد في X")
+
+        for idx, part in enumerate(content):
+            # التحقق من طول التغريدة
+            tweet = api.update_status(status=part[:280], in_reply_to_status_id=last_id,
+                                      auto_populate_reply_metadata=True)
+            last_id = tweet.id
+
+            # مثال على إضافة محتوى للـ Super Followers (اختياري)
+            if idx == 0:  # أول تغريدة يمكن تحديدها لمتابعي الاشتراك
+                try:
+                    api.create_super_follow_only_tweet(tweet.id)
+                    logger.info("💎 تم تفعيل النشر لمتابعي الاشتراك Super Follows")
+                except Exception as e:
+                    logger.warning(f"⚠️ لم يتم تفعيل Super Follows: {e}")
+
+        logger.success("✅ تم نشر الثريد في X بنجاح")
     except Exception as e:
         logger.error(f"❌ خطأ X: {e}")
 
 async def post_to_tg(content):
+    """نشر في Telegram بشكل جذاب"""
     try:
         url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        # تنسيق الرسالة لتليجرام بشكل جذاب
         formatted_text = "🧵 <b>ثريد أيبكس التقني</b>\n" + "—" * 15 + "\n\n"
         formatted_text += "\n\n🔹 ".join(content)
-        
+
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.post(url, json={
                 "chat_id": TG_CHAT_ID,
