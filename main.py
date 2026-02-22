@@ -1,97 +1,83 @@
+# main.py - نسخة مصححة للاستخدام مع GitHub Actions
+
 import os
-import asyncio
 import logging
 from datetime import datetime
-import openai
-import google.generativeai as genai
-from loguru import logger
-from dotenv import load_dotenv
+import random
+import sqlite3
 
-# ======== إعداد البيئة ========
+# ✅ استيراد الحزم الصحيحة
+import google.genai as genai  # بدل google.generativeai
+import openai
+import tweepy
+import requests
+from dotenv import load_dotenv
+from python_telegram_bot import Bot  # إذا كنت تستخدم بوت تيليجرام
+
+# إعداد البيئة والمتغيرات السرية
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_KEY = os.getenv("GEMINI_KEY")
+GOOGLE_GENAI_KEY = os.getenv("GEMINI_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+# تهيئة السجلات
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# --- تهيئة الـ APIs ---
 openai.api_key = OPENAI_API_KEY
-genai.configure(api_key=GEMINI_KEY)
+genai.configure(api_key=GOOGLE_GENAI_KEY)
+bot = Bot(token=TELEGRAM_TOKEN)
 
-# ======== إعداد Logger ========
-logger.add("bot_log.log", rotation="5 MB", level="INFO")
+# --- قاعدة بيانات SQLite بسيطة ---
+DB_FILE = "bot_data.db"
+conn = sqlite3.connect(DB_FILE)
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT,
+    created_at TEXT
+)
+""")
+conn.commit()
 
-# ======== دوال الاتصال بالنماذج ========
-async def call_gemini_model(model_name: str, prompt: str):
-    """توليد محتوى باستخدام Gemini"""
+# --- دوال مساعدة ---
+def log_post(content):
+    cursor.execute("INSERT INTO posts (content, created_at) VALUES (?, ?)", (content, datetime.utcnow()))
+    conn.commit()
+    logging.info(f"تم حفظ المنشور: {content[:50]}...")
+
+def generate_content(prompt: str) -> str:
+    """مثال على استخدام Google GenAI و OpenAI بالتتابع مع fallback"""
     try:
-        response = genai.generate_text(model=model_name, prompt=prompt)
-        return response.text
+        response = genai.chat.create(model="chat-bison-001", messages=[{"role": "user", "content": prompt}])
+        return response.last
     except Exception as e:
-        raise RuntimeError(f"Gemini Error: {e}")
+        logging.warning(f"GenAI failed, fallback to OpenAI: {e}")
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7
+            )
+            return response['choices'][0]['message']['content']
+        except Exception as e2:
+            logging.error(f"OpenAI also failed: {e2}")
+            return "حدث خطأ في توليد المحتوى."
 
-async def call_openai_model(model_name: str, prompt: str):
-    """توليد محتوى باستخدام OpenAI"""
-    try:
-        response = openai.ChatCompletion.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        raise RuntimeError(f"OpenAI Error: {e}")
-
-async def get_available_gemini_models():
-    """إرجاع قائمة نماذج Gemini المتاحة"""
-    try:
-        models = genai.list_models()
-        return [m.name for m in models if "gemini" in m.name.lower()]
-    except Exception as e:
-        logger.warning(f"⚠️ خطأ في جلب نماذج Gemini: {e}")
-        return []
-
-# ======== دالة التوليد الذكية ========
-async def generate_ultra_content(prompt: str, retries: int = 3):
-    """توليد المحتوى مع fallback ديناميكي"""
-    gemini_models = await get_available_gemini_models()
-    fallback_models = ["gpt-4.1", "gpt-3.5-turbo"]
-
-    for attempt in range(1, retries + 1):
-        logger.info(f"🛠️ محاولة توليد المحتوى رقم {attempt}")
-        # تجربة نماذج Gemini أولاً
-        for model_name in gemini_models:
-            try:
-                content = await call_gemini_model(model_name, prompt)
-                logger.info(f"✅ تم التوليد بنجاح بواسطة {model_name}")
-                return content
-            except Exception as e:
-                logger.error(f"❌ خطأ Gemini {model_name}: {e}")
-
-        # إذا فشل كل Gemini ننتقل إلى OpenAI
-        for model_name in fallback_models:
-            try:
-                content = await call_openai_model(model_name, prompt)
-                logger.info(f"✅ تم التوليد بنجاح بواسطة {model_name}")
-                return content
-            except Exception as e:
-                logger.error(f"❌ خطأ OpenAI {model_name}: {e}")
-
-        await asyncio.sleep(2)  # تأخير قبل المحاولة التالية
-
-    logger.error("❌ فشل كل النماذج بعد المحاولات المتعددة")
-    return None
-
-# ======== الوظيفة الرئيسية ========
-async def main():
-    logger.info("🔥 تشغيل محرك Apex الذكي")
-    prompt = "اكتب محتوى تقني متنوع جاهز للنشر على تويتر وTelegram"
-    content = await generate_ultra_content(prompt)
-
-    if content:
-        logger.info(f"📝 المحتوى النهائي:\n{content}")
-        # هنا يمكن إضافة نشر المحتوى على X أو Telegram
-    else:
-        logger.warning("⚠️ لم يتم توليد أي محتوى للنشر")
-
-    logger.info("🏁 تمت المهمة.")
-
-# ======== تشغيل البوت ========
+# --- مثال تشغيل البوت ---
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.info("بدء تشغيل البوت")
+    
+    prompt = "اكتب تغريدة تقنية قصيرة ومبتكرة عن الذكاء الاصطناعي"
+    content = generate_content(prompt)
+    log_post(content)
+    
+    # إرسال المنشور على تيليجرام كمثال
+    try:
+        bot.send_message(chat_id="@YourChannelUsername", text=content)
+        logging.info("تم إرسال المنشور على تيليجرام بنجاح")
+    except Exception as e:
+        logging.error(f"فشل إرسال المنشور على تيليجرام: {e}")
+
+    logging.info("انتهاء التشغيل")
