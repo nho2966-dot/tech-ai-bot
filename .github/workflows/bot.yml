@@ -11,27 +11,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ جلب الكود من المستودع
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ إعداد Python 3.11
-      - name: Setup Python
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
 
-      # 3️⃣ تحديث pip
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # 4️⃣ تثبيت الحزم المطلوبة
       - name: Install dependencies
         run: |
           pip install --force-reinstall -r requirements.txt
-          # تثبيت google-genai بشكل صريح لتجنب مشاكل ModuleNotFound
           pip install --force-reinstall google-genai==1.64.0
 
-      # 5️⃣ تشغيل البوت
       - name: Run Bot
         run: python main.py
