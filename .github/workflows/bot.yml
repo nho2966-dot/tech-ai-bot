@@ -1,22 +1,19 @@
-name: Tech AI Bot Workflow
+name: Run Apex AI Bot
 
 on:
-  push:
-    branches:
-      - main
   schedule:
-    - cron: '0 7 * * *'  # 10 صباحاً بتوقيت السعودية والخليج
-  workflow_dispatch:      # للتشغيل اليدوي
+    # يشتغل تلقائياً كل 6 ساعات (تقدر تغير التوقيت)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً من GitHub
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -26,54 +23,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Apex Bot
-        id: run_script
+      - name: Execute Apex Bot
         env:
-          # --- ربط المفاتيح من الـ Secrets بالكود ---
+          # ربط الأسرار (Secrets) اللي حطيتها في إعدادات GitHub
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # إضافة مفاتيح X (ضروري جداً للنشر في تويتر)
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: |
-          RUN_TS=$(date '+%Y-%m-%d %H:%M:%S')
-          echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
-          mkdir -p logs data
-          
-          # تشغيل البوت وحفظ الحالة
-          if python main.py; then
-            echo "SUCCESS=1" >> $GITHUB_ENV
-          else
-            echo "SUCCESS=0" >> $GITHUB_ENV
-            exit 1
-          fi
-
-      - name: Sync Database and Logs
-        if: always()
-        run: |
-          git config --local user.email "bot@nasser-ai.com"
-          git config --local user.name "NasserApexBot"
-          git add data/*.db logs/*.log || echo "No changes"
-          git commit -m "📝 تحديث آلي للسجلات [skip ci]" || echo "No changes"
-          git push origin main || echo "Push failed"
-
-      - name: Telegram Notification
-        if: always()
-        run: |
-          # تحديد أيقونة الحالة
-          if [ "${{ env.SUCCESS }}" == "1" ]; then
-            STATUS="✅ <b>نجاح التشغيل</b>"
-          else
-            STATUS="❌ <b>فشل التشغيل</b>"
-          fi
-          
-          MESSAGE="<b>🤖 تنبيه نظام أيبكس</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}%0A------------------%0A<i>تم تحديث X وتليجرام بنجاح.</i>"
-          
-          # إرسال التنبيه (تأكد أن المفاتيح صحيحة في السكرت)
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode="HTML" \
-            -d text="$MESSAGE"
+        run: python main.py
