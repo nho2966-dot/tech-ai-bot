@@ -1,4 +1,4 @@
-name: Run Tech AI Bot (Advanced)
+name: Run Tech AI Bot (Final Fix)
 
 on:
   push:
@@ -8,60 +8,28 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      LOG_FILE: logs/bot_error.log
-
     steps:
-      # 1️⃣ سحب الريبو
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ إعداد Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3️⃣ تحديث pip وتنظيف البيئة
-      - name: Clean and Install Dependencies
+      - name: Install Dependencies
         run: |
-          pip freeze | xargs pip uninstall -y || true
           python -m pip install --upgrade pip
-          pip install --no-cache-dir -r requirements.txt
+          pip install -r requirements.txt
 
-      # 4️⃣ التحقق من المفاتيح
-      - name: Check Environment Variables
-        run: |
-          echo "Checking API keys..."
-          if [ -z "$OPENAI_API_KEY" ] || [ -z "$GEMINI_KEY" ] || [ -z "$TELEGRAM_TOKEN" ]; then
-            echo "Error: Missing environment variables!"
-            exit 1
-          fi
-          echo "All keys found ✅"
-
-      # 5️⃣ تشغيل البوت مع retries وحفظ السجل
-      - name: Run Bot with Retry and Logging
-        run: |
-          mkdir -p logs
-          RETRIES=3
-          COUNT=0
-          until [ $COUNT -ge $RETRIES ]
-          do
-            echo "Attempt $((COUNT+1))..."
-            python -m run_bot --verbose 2>&1 | tee -a $LOG_FILE
-            STATUS=${PIPESTATUS[0]}
-            if [ $STATUS -eq 0 ]; then
-              echo "Bot ran successfully ✅"
-              break
-            fi
-            echo "Bot failed ❌ Retrying in 10s..."
-            COUNT=$((COUNT+1))
-            sleep 10
-          done
-          if [ $STATUS -ne 0 ]; then
-            echo "Bot failed after $RETRIES attempts. Check $LOG_FILE for details."
-            exit 1
-          fi
+      - name: Run Bot
+        env:
+          # تأكد إن هذه الأسماء موجودة في الـ Secrets عندك بنفس الحروف
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
