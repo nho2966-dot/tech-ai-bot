@@ -2,7 +2,7 @@ import os, asyncio, httpx, random, datetime, tweepy
 from loguru import logger
 
 # =========================
-# 🔐 إعدادات البريميوم
+# 🔐 الإعدادات
 # =========================
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
@@ -17,77 +17,86 @@ X_KEYS = {
 }
 
 # =========================
-# 🧠 محرك القيمة المضافة القصوى
+# 🧠 محرك المحتوى البريميوم
 # =========================
 def get_ultra_premium_prompt():
-    # قائمة مواضيع "ذهبية" للفرد في 2026
     topics = [
-        "خطوات بناء 'موظف رقمي' كامل يدير عملك الخاص باستخدام AI Agents",
-        "تحليل عميق لأحدث 10 أدوات AI ظهرت هذا الأسبوع وكيف تستخدمها فوراً",
-        "دليل الفرد للسيادة التقنية: كيف تحمي بياناتك وتضاعف إنتاجيتك في عصر الذكاء الاصطناعي",
-        "استراتيجية الأتمتة الكاملة (Hyper-Automation) للمهام اليومية والمالية"
+        "دليل عملي لربط AI Agents بمهامك اليومية لزيادة إنتاجيتك 10 أضعاف",
+        "تحليل لأقوى أدوات الذكاء الاصطناعي وأحدث أدواته التي أطلقت هذا الأسبوع",
+        "كيف تبني نظام أتمتة شخصي متكامل بدون كود (No-Code AI Suite)",
+        "مستقبل السيادة التقنية للأفراد في ظل تطور الذكاء الاصطناعي"
     ]
-    
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d")
-    return f"""
-أنت 'أيبكس' المحرك السيادي، اكتب مقالاً طويلاً (Premium Long-Form) لمنصة X.
-الموضوع: {random.choice(topics)}
-التوقيت: {current_time}
-
-المتطلبات لتعظيم القيمة:
-1. العناوين: استخدم عناوين رئيسية وفرعية واضحة.
-2. التفاصيل: ادخل في صلب 'كيفية التنفيذ' وليس فقط 'ما هو'.
-3. الأدوات: اذكر أسماء أدوات محددة (مثل Cursor, Replit, AutoGPT) وكيفية الربط بينها.
-4. اللغة: خليجية بيضاء، احترافية، ممتعة.
-5. المصطلح الثابت: استخدم 'الذكاء الاصطناعي وأحدث أدواته'.
-6. الطول: استهدف أكثر من 2000 كلمة (نحن في اشتراك بريميوم!).
-"""
+    return f"""اكتب مقالاً طويلاً (Premium Long-Form) لمنصة X عن: {random.choice(topics)}.
+    المتطلبات: عنوان قوي، مقدمة، شرح تفصيلي لـ 3 أدوات على الأقل، خطوات عملية، وخاتمة.
+    اللغة: خليجية احترافية. اذكر 'الذكاء الاصطناعي وأحدث أدواته'. الطول: استغل مساحة 4000 حرف."""
 
 async def generate_ultra_content():
     if not GEMINI_KEY: return None
     try:
-        # استخدام موديل 1.5 Pro إذا توفر لنتائج أعمق، أو Flash للسرعة
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={GEMINI_KEY}"
-        payload = {
-            "contents": [{"parts": [{"text": get_ultra_premium_prompt()}]}],
-            "generationConfig": {"maxOutputTokens": 8000, "temperature": 0.8}
-        }
-        async with httpx.AsyncClient(timeout=60) as client:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+        payload = {"contents": [{"parts": [{"text": get_ultra_premium_prompt()}]}]}
+        async with httpx.AsyncClient(timeout=45) as client:
             r = await client.post(url, json=payload)
             if r.status_code == 200:
                 return r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-    except Exception as e:
-        logger.error(f"⚠️ فشل توليد المحتوى العميق: {e}")
+            else:
+                logger.error(f"❌ Gemini Error: {r.status_code} - {r.text}")
+    except Exception as e: 
+        logger.error(f"⚠️ خطأ محرك الذكاء: {e}")
     return None
 
 # =========================
-# 📤 النشر السيادي
+# 📤 النشر السيادي في X
 # =========================
-def post_to_x_premium(content):
+def check_x_keys():
+    """تحقق من صلاحية مفاتيح X قبل النشر"""
+    if not all(X_KEYS.values()): 
+        logger.warning("⚠️ مفاتيح X غير مكتملة")
+        return None
     try:
-        # تويبي يدعم v2 تلقائياً وهو الأفضل للمقالات الطويلة
         client = tweepy.Client(X_KEYS["ck"], X_KEYS["cs"], X_KEYS["at"], X_KEYS["ts"])
-        
-        # نشر المحتوى كـ "تغريدة طويلة" (Long Tweet)
-        # خوارزمية X ترفع رانك المشتركين اللي ينشرون محتوى طويل ومنسق
-        res = client.create_tweet(text=content)
-        logger.success(f"✅ تم نشر مقال سيادي طويل! ID: {res.data['id']}")
+        # اختبار وصول محدود
+        client.get_user(username="any")  
+        return client
+    except tweepy.errors.Forbidden:
+        logger.warning("⚠️ مفاتيح X غير صالحة أو صلاحيات محدودة")
+        return None
     except Exception as e:
-        logger.error(f"❌ فشل استغلال البريميوم في X: {e}")
+        logger.error(f"⚠️ خطأ عند التحقق من مفاتيح X: {e}")
+        return None
 
-async def post_to_tg_premium(content):
+def post_to_x_premium(content):
+    client = check_x_keys()
+    if not client:
+        logger.info("⏩ تجاوز النشر في X بسبب مشاكل المفاتيح")
+        return
     try:
-        # تقطيع الرسالة لتليجرام لأن لديهم حد 4096 حرف
-        msg_header = "<b>🏛️ مركز أيبكس للدراسات والتقنية</b>\n" + "═"*15 + "\n\n"
-        full_msg = msg_header + content
-        
-        async with httpx.AsyncClient() as client:
-            # إذا كان النص طويلاً جداً، تليجرام قد يرفضه، لذا نرسل أول 4000 حرف
-            await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                             json={"chat_id": TG_CHAT_ID, "text": full_msg[:4090], "parse_mode": "HTML"})
-        logger.success("✅ تم النشر في تليجرام")
+        # تقطيع المحتوى حسب الاشتراك: Free < 280، Pro < 5000، Enterprise < 24500
+        max_len = 24500  
+        res = client.create_tweet(text=content[:max_len])
+        logger.success(f"✅ تم نشر المقال في X بنجاح! ID: {res.data['id']}")
+    except tweepy.errors.Forbidden as e:
+        logger.error(f"❌ رفض X: {e}")
     except Exception as e:
-        logger.error(f"❌ خطأ تليجرام: {e}")
+        logger.error(f"❌ خطأ X: {e}")
+
+# =========================
+# 📤 النشر في Telegram
+# =========================
+async def post_to_tg_premium(content):
+    if not TG_TOKEN or not TG_CHAT_ID: 
+        logger.warning("⚠️ بيانات تليجرام غير مكتملة")
+        return
+    try:
+        msg = f"<b>🚀 أيبكس | القيمة المضافة</b>\n\n{content}"
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                json={"chat_id": TG_CHAT_ID, "text": msg[:4090], "parse_mode": "HTML"}
+            )
+            if r.status_code == 200: logger.success("✅ تم النشر في تليجرام")
+            else: logger.error(f"❌ تليجرام رفض: {r.text}")
+    except Exception as e: logger.error(f"❌ عطل تليجرام: {e}")
 
 # =========================
 # 🔄 المشغل الرئيسي
@@ -98,6 +107,8 @@ async def main():
     if content:
         post_to_x_premium(content)
         await post_to_tg_premium(content)
+    else:
+        logger.warning("⚠️ لم يتم توليد محتوى للنشر")
     logger.info("🏁 تمت المهمة.")
 
 if __name__ == "__main__":
