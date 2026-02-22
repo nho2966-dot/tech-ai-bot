@@ -1,15 +1,17 @@
-# --- API & Networking ---
+# الأساسيات والطلبات الشبكية
 httpx==0.28.1
 requests==2.32.5
+python-dotenv==1.2.1
 
-# --- Social Media Platforms ---
+# منصات التواصل الاجتماعي
 tweepy==4.15.0
 python-telegram-bot==21.10
 
-# --- AI Engine ---
+# محركات الذكاء الاصطناعي
 google-genai==1.64.0
+openai==1.63.0
 
-# --- Utilities & Environment ---
-python-dotenv==1.2.1
+# الأدوات المساعدة واللوق
 loguru==0.7.2
 pydantic==2.10.0
+typing-extensions>=4.11.0
