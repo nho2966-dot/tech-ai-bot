@@ -5,8 +5,8 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 7 * * *'  # تشغيل يومي 7 صباحاً بتوقيت جرينتش
-  workflow_dispatch:     # للسماح بالتشغيل اليدوي
+    - cron: '0 7 * * *'  # 10 صباحاً بتوقيت السعودية والخليج
+  workflow_dispatch:      # للتشغيل اليدوي
 
 jobs:
   run-bot:
@@ -29,10 +29,15 @@ jobs:
       - name: Run Apex Bot
         id: run_script
         env:
+          # --- ربط المفاتيح من الـ Secrets بالكود ---
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # أضف بقية المفاتيح هنا (تويتر، إلخ)
+          # إضافة مفاتيح X (ضروري جداً للنشر في تويتر)
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
         run: |
           RUN_TS=$(date '+%Y-%m-%d %H:%M:%S')
           echo "RUN_TS=$RUN_TS" >> $GITHUB_ENV
@@ -65,9 +70,9 @@ jobs:
             STATUS="❌ <b>فشل التشغيل</b>"
           fi
           
-          # صياغة الرسالة بصيغة HTML (آمنة من رموز النظام)
-          MESSAGE="<b>🤖 تنبيه بوت أيبكس</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}%0A------------------%0A<i>تفقد سجلات GitHub لمزيد من التفاصيل.</i>"
+          MESSAGE="<b>🤖 تنبيه نظام أيبكس</b>%0A------------------%0A<b>الحالة:</b> $STATUS%0A<b>التوقيت:</b> ${{ env.RUN_TS }}%0A------------------%0A<i>تم تحديث X وتليجرام بنجاح.</i>"
           
+          # إرسال التنبيه (تأكد أن المفاتيح صحيحة في السكرت)
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d parse_mode="HTML" \
