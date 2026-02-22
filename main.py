@@ -1,83 +1,64 @@
-# main.py - نسخة مصححة للاستخدام مع GitHub Actions
-
+# main.py
 import os
 import logging
 from datetime import datetime
-import random
-import sqlite3
-
-# ✅ استيراد الحزم الصحيحة
-import google.genai as genai  # بدل google.generativeai
+from telegram import Bot
+from telegram.error import TelegramError
+import google.generativeai as genai
 import openai
-import tweepy
-import requests
-from dotenv import load_dotenv
-from python_telegram_bot import Bot  # إذا كنت تستخدم بوت تيليجرام
 
-# إعداد البيئة والمتغيرات السرية
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_GENAI_KEY = os.getenv("GEMINI_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-# تهيئة السجلات
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-
-# --- تهيئة الـ APIs ---
-openai.api_key = OPENAI_API_KEY
-genai.configure(api_key=GOOGLE_GENAI_KEY)
-bot = Bot(token=TELEGRAM_TOKEN)
-
-# --- قاعدة بيانات SQLite بسيطة ---
-DB_FILE = "bot_data.db"
-conn = sqlite3.connect(DB_FILE)
-cursor = conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    content TEXT,
-    created_at TEXT
+# === إعداد السجلات ===
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
-""")
-conn.commit()
 
-# --- دوال مساعدة ---
-def log_post(content):
-    cursor.execute("INSERT INTO posts (content, created_at) VALUES (?, ?)", (content, datetime.utcnow()))
-    conn.commit()
-    logging.info(f"تم حفظ المنشور: {content[:50]}...")
+# === مفاتيح API ===
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GENAI_API_KEY = os.getenv("GEMINI_KEY")
 
-def generate_content(prompt: str) -> str:
-    """مثال على استخدام Google GenAI و OpenAI بالتتابع مع fallback"""
+# === إعداد العملاء ===
+bot = Bot(token=TELEGRAM_TOKEN)
+genai.configure(api_key=GENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
+
+# === دالة إرسال رسالة على تيليجرام مع تسجيل الأخطاء ===
+def send_telegram_message(chat_id: str, text: str):
     try:
-        response = genai.chat.create(model="chat-bison-001", messages=[{"role": "user", "content": prompt}])
-        return response.last
-    except Exception as e:
-        logging.warning(f"GenAI failed, fallback to OpenAI: {e}")
-        try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7
-            )
-            return response['choices'][0]['message']['content']
-        except Exception as e2:
-            logging.error(f"OpenAI also failed: {e2}")
-            return "حدث خطأ في توليد المحتوى."
+        bot.send_message(chat_id=chat_id, text=text)
+        logging.info(f"تم إرسال الرسالة بنجاح إلى {chat_id}")
+    except TelegramError as e:
+        logging.error(f"فشل إرسال الرسالة: {e}")
 
-# --- مثال تشغيل البوت ---
+# === دالة معالجة النص باستخدام الذكاء الاصطناعي مع fallback ===
+def ai_process(prompt: str) -> str:
+    # محاولة GenAI أولاً
+    try:
+        logging.info("محاولة استخدام Google GenAI...")
+        response = genai.generate_text(model="text-bison-001", prompt=prompt)
+        return response.text
+    except Exception as e:
+        logging.error(f"GenAI فشل: {e}")
+
+    # محاولة OpenAI كـ fallback
+    try:
+        logging.info("محاولة استخدام OpenAI...")
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"OpenAI فشل: {e}")
+
+    # في حالة فشل الكل
+    logging.critical("فشل كل المزودين! العودة برسالة خطأ.")
+    return "حدث خطأ ولم نتمكن من معالجة الطلب."
+
+# === مثال استخدام ===
 if __name__ == "__main__":
-    logging.info("بدء تشغيل البوت")
-    
-    prompt = "اكتب تغريدة تقنية قصيرة ومبتكرة عن الذكاء الاصطناعي"
-    content = generate_content(prompt)
-    log_post(content)
-    
-    # إرسال المنشور على تيليجرام كمثال
-    try:
-        bot.send_message(chat_id="@YourChannelUsername", text=content)
-        logging.info("تم إرسال المنشور على تيليجرام بنجاح")
-    except Exception as e:
-        logging.error(f"فشل إرسال المنشور على تيليجرام: {e}")
-
-    logging.info("انتهاء التشغيل")
+    chat_id = os.getenv("TEST_CHAT_ID")  # ضع هنا معرف القناة أو المستخدم
+    prompt = "اكتب لي تغريدة تقنية قصيرة عن الذكاء الاصطناعي."
+    ai_response = ai_process(prompt)
+    send_telegram_message(chat_id, ai_response)
