@@ -1,64 +1,58 @@
-# main.py
 import os
 import logging
-from datetime import datetime
-from telegram import Bot
-from telegram.error import TelegramError
+from dotenv import load_dotenv
 import google.generativeai as genai
 import openai
+from loguru import logger
+import tweepy
+from telegram import Bot
 
-# === إعداد السجلات ===
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+# تحميل متغيرات البيئة
+load_dotenv()
 
-# === مفاتيح API ===
+# --- إعدادات اللوق ---
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger.info("Initializing Tech AI Bot...")
+
+# --- إعداد مفاتيح OpenAI و Google GenAI ---
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_KEY = os.getenv("GEMINI_KEY")
+
+openai.api_key = OPENAI_KEY
+genai.configure(api_key=GOOGLE_KEY)
+
+# --- إعداد حسابات التواصل ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GENAI_API_KEY = os.getenv("GEMINI_KEY")
+telegram_bot = Bot(token=TELEGRAM_TOKEN)
 
-# === إعداد العملاء ===
-bot = Bot(token=TELEGRAM_TOKEN)
-genai.configure(api_key=GENAI_API_KEY)
-openai.api_key = OPENAI_API_KEY
+TWEEPY_API_KEY = os.getenv("TWEEPY_API_KEY")
+TWEEPY_API_SECRET = os.getenv("TWEEPY_API_SECRET")
+TWEEPY_ACCESS_TOKEN = os.getenv("TWEEPY_ACCESS_TOKEN")
+TWEEPY_ACCESS_SECRET = os.getenv("TWEEPY_ACCESS_SECRET")
 
-# === دالة إرسال رسالة على تيليجرام مع تسجيل الأخطاء ===
-def send_telegram_message(chat_id: str, text: str):
+auth = tweepy.OAuth1UserHandler(
+    TWEEPY_API_KEY, TWEEPY_API_SECRET, TWEEPY_ACCESS_TOKEN, TWEEPY_ACCESS_SECRET
+)
+twitter_api = tweepy.API(auth)
+
+# --- دالة اختبار بسيطة ---
+def test_ai_engines():
     try:
-        bot.send_message(chat_id=chat_id, text=text)
-        logging.info(f"تم إرسال الرسالة بنجاح إلى {chat_id}")
-    except TelegramError as e:
-        logging.error(f"فشل إرسال الرسالة: {e}")
+        # اختبار Google GenAI
+        response_g = genai.Text.generate(model="chat-bison-001", prompt="Hello world!")
+        logger.info(f"Google GenAI response: {response_g.text[:50]}...")
 
-# === دالة معالجة النص باستخدام الذكاء الاصطناعي مع fallback ===
-def ai_process(prompt: str) -> str:
-    # محاولة GenAI أولاً
-    try:
-        logging.info("محاولة استخدام Google GenAI...")
-        response = genai.generate_text(model="text-bison-001", prompt=prompt)
-        return response.text
-    except Exception as e:
-        logging.error(f"GenAI فشل: {e}")
-
-    # محاولة OpenAI كـ fallback
-    try:
-        logging.info("محاولة استخدام OpenAI...")
-        response = openai.ChatCompletion.create(
+        # اختبار OpenAI
+        response_o = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": "Hello world!"}]
         )
-        return response.choices[0].message.content
+        logger.info(f"OpenAI response: {response_o.choices[0].message.content[:50]}...")
+
     except Exception as e:
-        logging.error(f"OpenAI فشل: {e}")
+        logger.error(f"AI test failed: {e}")
 
-    # في حالة فشل الكل
-    logging.critical("فشل كل المزودين! العودة برسالة خطأ.")
-    return "حدث خطأ ولم نتمكن من معالجة الطلب."
-
-# === مثال استخدام ===
+# --- تشغيل الاختبارات ---
 if __name__ == "__main__":
-    chat_id = os.getenv("TEST_CHAT_ID")  # ضع هنا معرف القناة أو المستخدم
-    prompt = "اكتب لي تغريدة تقنية قصيرة عن الذكاء الاصطناعي."
-    ai_response = ai_process(prompt)
-    send_telegram_message(chat_id, ai_response)
+    test_ai_engines()
+    logger.info("Bot initialized successfully!")
