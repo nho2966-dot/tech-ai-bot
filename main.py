@@ -2,139 +2,103 @@ import os, asyncio, httpx, random, datetime, tweepy
 from loguru import logger
 
 # =========================
-# 🔐 إعدادات الهوية والأمان
+# 🔐 إعدادات البريميوم
 # =========================
 GEMINI_KEY = os.getenv("GEMINI_KEY")
-XAI_KEY = os.getenv("XAI_API_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
 RAW_TG_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+TG_CHAT_ID = f"-100{RAW_TG_ID}" if RAW_TG_ID and not RAW_TG_ID.startswith(("-100", "@")) else RAW_TG_ID
 
-if RAW_TG_ID and not RAW_TG_ID.startswith("-100") and not RAW_TG_ID.startswith("@"):
-    TG_CHAT_ID = f"-100{RAW_TG_ID}"
-else:
-    TG_CHAT_ID = RAW_TG_ID
-
-X_KEY = os.getenv("X_API_KEY")
-X_SECRET = os.getenv("X_API_SECRET")
-X_TOKEN = os.getenv("X_ACCESS_TOKEN")
-X_ACCESS_S = os.getenv("X_ACCESS_SECRET")
+X_KEYS = {
+    "ck": os.getenv("X_API_KEY"),
+    "cs": os.getenv("X_API_SECRET"),
+    "at": os.getenv("X_ACCESS_TOKEN"),
+    "ts": os.getenv("X_ACCESS_SECRET")
+}
 
 # =========================
-# 🧠 محرك صناعة المحتوى
+# 🧠 محرك القيمة المضافة القصوى
 # =========================
-def get_strictly_fresh_prompt():
+def get_ultra_premium_prompt():
+    # قائمة مواضيع "ذهبية" للفرد في 2026
     topics = [
-        "أدوات الذكاء الاصطناعي الشخصية (AI Agents) في 2026",
-        "كيف تغير أجهزة الذكاء الاصطناعي القابلة للارتداء حياتنا اليومية",
-        "أتمتة المهام المنزلية والعملية باستخدام Artificial Intelligence and its latest tools",
-        "نصائح ذهبية للفرد لاستخدام الـ AI في تنظيم الوقت والإنتاجية"
+        "خطوات بناء 'موظف رقمي' كامل يدير عملك الخاص باستخدام AI Agents",
+        "تحليل عميق لأحدث 10 أدوات AI ظهرت هذا الأسبوع وكيف تستخدمها فوراً",
+        "دليل الفرد للسيادة التقنية: كيف تحمي بياناتك وتضاعف إنتاجيتك في عصر الذكاء الاصطناعي",
+        "استراتيجية الأتمتة الكاملة (Hyper-Automation) للمهام اليومية والمالية"
     ]
-    current_moment = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d")
     return f"""
-أنت 'أيبكس' الخبير التقني، اكتب ثريد خليجي احترافي من 3 تغريدات عن: {random.choice(topics)}.
-القواعد الصارمة:
-1. اللغة: خليجية بيضاء (فصحى مبسطة بلهجة تقنية).
-2. افصل بين كل تغريدة وأخرى بـ [SPLIT].
-3. المحتوى حصري لعام 2026 وغير مكرر.
-4. التزم بذكر 'الذكاء الاصطناعي وأحدث أدواته'.
-5. سياق الوقت: {current_moment}.
+أنت 'أيبكس' المحرك السيادي، اكتب مقالاً طويلاً (Premium Long-Form) لمنصة X.
+الموضوع: {random.choice(topics)}
+التوقيت: {current_time}
+
+المتطلبات لتعظيم القيمة:
+1. العناوين: استخدم عناوين رئيسية وفرعية واضحة.
+2. التفاصيل: ادخل في صلب 'كيفية التنفيذ' وليس فقط 'ما هو'.
+3. الأدوات: اذكر أسماء أدوات محددة (مثل Cursor, Replit, AutoGPT) وكيفية الربط بينها.
+4. اللغة: خليجية بيضاء، احترافية، ممتعة.
+5. المصطلح الثابت: استخدم 'الذكاء الاصطناعي وأحدث أدواته'.
+6. الطول: استهدف أكثر من 2000 كلمة (نحن في اشتراك بريميوم!).
 """
 
-async def generate_content():
-    if GEMINI_KEY:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
-            payload = {
-                "contents": [{"parts": [{"text": get_strictly_fresh_prompt()}]}],
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-            }
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(url, json=payload)
-                if r.status_code == 200:
-                    data = r.json()
-                    text = data['candidates'][0]['content']['parts'][0]['text']
-                    parts = [p.strip() for p in text.split("[SPLIT]") if p.strip()]
-                    if len(parts) >= 2:
-                        parts[-1] += f"\n\n🔖 {random.getrandbits(16):x}"
-                        return parts
-        except Exception as e:
-            logger.error(f"⚠️ تعثر Gemini: {e}")
-
-    # محتوى الطوارئ
-    return [
-        f"عالم الذكاء الاصطناعي في 2026 يتطور 🚀\n{datetime.datetime.now().second}",
-        "أدواتك الشخصية صارت أذكى وتنفذ مهامك عنك 🎯",
-        f"تابع أيبكس لكل جديد 🔥\nID: {random.randint(100,999)}"
-    ]
-
-# =========================
-# 📤 قنوات النشر
-# =========================
-def check_x_keys():
-    """تحقق من صلاحية المفاتيح قبل النشر"""
+async def generate_ultra_content():
+    if not GEMINI_KEY: return None
     try:
-        client = tweepy.Client(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
-        # تجربة بسيطة للتحقق من صلاحية الحساب
-        client.get_user(username="any")  # username افتراضي للتأكد من صلاحية القراءة
-        return client
-    except tweepy.errors.Forbidden:
-        logger.warning("⚠️ مفاتيح X غير صالحة أو صلاحيات محدودة")
-        return None
-    except Exception as e:
-        logger.error(f"⚠️ خطأ عند التحقق من مفاتيح X: {e}")
-        return None
-
-def post_to_x(content):
-    client = check_x_keys()
-    if not client:
-        logger.info("⏩ تجاوز النشر في X بسبب مشاكل في المفاتيح")
-        return
-    try:
-        last_id = None
-        for part in content:
-            res = client.create_tweet(text=part[:275], in_reply_to_tweet_id=last_id)
-            last_id = res.data["id"]
-        logger.success("✅ تم نشر الثريد في X")
-    except tweepy.errors.Forbidden as e:
-        logger.error(f"❌ رفض X: {e}")
-    except Exception as e:
-        logger.error(f"❌ خطأ X: {e}")
-
-async def post_to_tg(content):
-    if not TG_CHAT_ID or not TG_TOKEN:
-        logger.warning("⚠️ بيانات تليجرام غير مكتملة")
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        formatted_text = "🧵 <b>ثريد أيبكس التقني</b>\n" + "—"*15 + "\n\n"
-        formatted_text += "\n\n🔹 ".join(content)
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(url, json={
-                "chat_id": TG_CHAT_ID,
-                "text": formatted_text,
-                "parse_mode": "HTML"
-            })
+        # استخدام موديل 1.5 Pro إذا توفر لنتائج أعمق، أو Flash للسرعة
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={GEMINI_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": get_ultra_premium_prompt()}]}],
+            "generationConfig": {"maxOutputTokens": 8000, "temperature": 0.8}
+        }
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(url, json=payload)
             if r.status_code == 200:
-                logger.success("✅ تم النشر في تليجرام")
-            else:
-                logger.error(f"❌ تليجرام رفض: {r.text}")
+                return r.json()['candidates'][0]['content']['parts'][0]['text'].strip()
     except Exception as e:
-        logger.error(f"❌ عطل تليجرام: {e}")
+        logger.error(f"⚠️ فشل توليد المحتوى العميق: {e}")
+    return None
+
+# =========================
+# 📤 النشر السيادي
+# =========================
+def post_to_x_premium(content):
+    try:
+        # تويبي يدعم v2 تلقائياً وهو الأفضل للمقالات الطويلة
+        client = tweepy.Client(X_KEYS["ck"], X_KEYS["cs"], X_KEYS["at"], X_KEYS["ts"])
+        
+        # نشر المحتوى كـ "تغريدة طويلة" (Long Tweet)
+        # خوارزمية X ترفع رانك المشتركين اللي ينشرون محتوى طويل ومنسق
+        res = client.create_tweet(text=content)
+        logger.success(f"✅ تم نشر مقال سيادي طويل! ID: {res.data['id']}")
+    except Exception as e:
+        logger.error(f"❌ فشل استغلال البريميوم في X: {e}")
+
+async def post_to_tg_premium(content):
+    try:
+        # تقطيع الرسالة لتليجرام لأن لديهم حد 4096 حرف
+        msg_header = "<b>🏛️ مركز أيبكس للدراسات والتقنية</b>\n" + "═"*15 + "\n\n"
+        full_msg = msg_header + content
+        
+        async with httpx.AsyncClient() as client:
+            # إذا كان النص طويلاً جداً، تليجرام قد يرفضه، لذا نرسل أول 4000 حرف
+            await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                             json={"chat_id": TG_CHAT_ID, "text": full_msg[:4090], "parse_mode": "HTML"})
+        logger.success("✅ تم النشر في تليجرام")
+    except Exception as e:
+        logger.error(f"❌ خطأ تليجرام: {e}")
 
 # =========================
 # 🔄 المشغل الرئيسي
 # =========================
 async def main():
-    logger.info("🚀 محرك أيبكس في وضع الاستعداد...")
-    content = await generate_content()
-    post_to_x(content)        # يحاول النشر على X أولًا
-    await post_to_tg(content) # دائمًا ينشر على Telegram
-    logger.info("🏁 تمت المهمة بنجاح.")
+    logger.info("🔥 تشغيل محرك أيبكس (أقصى قدرة بريميوم)...")
+    content = await generate_ultra_content()
+    if content:
+        post_to_x_premium(content)
+        await post_to_tg_premium(content)
+    logger.info("🏁 تمت المهمة.")
 
 if __name__ == "__main__":
     asyncio.run(main())
