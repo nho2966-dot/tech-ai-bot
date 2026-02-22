@@ -3,77 +3,83 @@ import asyncio
 import httpx
 import random
 import tweepy
-from datetime import datetime
 
-# --- إعدادات التوثيق ---
-# تليجرام
+# --- جلب المفاتيح من الصورة (Secrets) ---
+GEMINI_KEY = os.getenv("GEMINI_KEY")
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# إكس (X)
-X_API_KEY = os.getenv("X_API_KEY")
-X_API_SECRET = os.getenv("X_API_SECRET")
-X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
-X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
-# جمناي
-GEMINI_KEY = os.getenv("GEMINI_KEY")
 
-# --- محرك الشخصية ---
-APEX_RULES = "أنت أيبكس، خبير تقني خليجي. تخصصك Artificial Intelligence and its latest tools. لهجتك خليجية بيضاء."
+X_KEY = os.getenv("X_API_KEY")
+X_SECRET = os.getenv("X_API_SECRET")
+X_TOKEN = os.getenv("X_ACCESS_TOKEN")
+X_ACCESS_S = os.getenv("X_ACCESS_SECRET")
 
-async def generate_content(prompt):
+# --- محرك توليد المحتوى ---
+async def generate_apex_content():
+    prompt = """
+    أنت أيبكس، خبير تقني خليجي. اكتب ثريد تقني من 3 أجزاء عن 'أدوات AI لزيادة إنتاجية الأفراد في 2026'.
+    استخدم لهجة خليجية بيضاء، واجعل كل جزء مفصل. أضف رابط مصدر تخيلي (مثلاً: tech-apex.com).
+    فصل بين كل تغريدة بكلمة [SPLIT].
+    """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     async with httpx.AsyncClient() as client:
-        r = await client.post(url, json={"contents":[{"parts":[{"text": f"{APEX_RULES} {prompt}"}]}]}, timeout=40)
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        r = await client.post(url, json={"contents":[{"parts":[{"text":prompt}]}]})
+        text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return text.split("[SPLIT]")
 
-# --- وظيفة النشر في X (ثريد) ---
-def publish_to_x(thread_list):
+# --- النشر في X (ثريد مترابط) ---
+def post_to_x(thread_parts):
     try:
-        auth = tweepy.Client(
-            consumer_key=X_API_KEY, consumer_secret=X_API_SECRET,
-            access_token=X_ACCESS_TOKEN, access_token_secret=X_ACCESS_SECRET
+        # توثيق V2 للنشر
+        client_x = tweepy.Client(
+            consumer_key=X_KEY, consumer_secret=X_SECRET,
+            access_token=X_TOKEN, access_token_secret=X_ACCESS_S
         )
-        previous_tweet_id = None
-        for i, tweet in enumerate(thread_list):
-            if i == 0:
-                response = auth.create_tweet(text=tweet)
+        
+        last_id = None
+        for part in thread_parts:
+            text = part.strip()[:280] # التأكد من طول التغريدة
+            if not last_id:
+                response = client_x.create_tweet(text=text)
             else:
-                response = auth.create_tweet(text=tweet, in_reply_to_tweet_id=previous_tweet_id)
-            previous_tweet_id = response.data['id']
-        print("✅ تم النشر في X بنجاح")
+                response = client_x.create_tweet(text=text, in_reply_to_tweet_id=last_id)
+            last_id = response.data['id']
+        print("✅ تم نشر الثريد في X")
     except Exception as e:
-        print(f"❌ خطأ في X: {e}")
+        print(f"❌ خطأ X: {e}")
 
-# --- وظيفة النشر في تليجرام ---
-async def publish_to_tg(content, photo_url, poll_q, poll_options):
+# --- النشر في تليجرام ---
+async def post_to_tg(thread_parts):
+    full_text = "🧵 <b>ثريد أيبكس التقني</b>\n\n" + "\n\n".join([p.strip() for p in thread_parts])
+    base_url = f"https://api.telegram.org/bot{TG_TOKEN}"
+    
     async with httpx.AsyncClient() as client:
-        base_url = f"https://api.telegram.org/bot{TG_TOKEN}"
-        # 1. إرسال الثريد كنص واحد منسق
-        await client.post(f"{base_url}/sendMessage", json={"chat_id": TG_CHAT_ID, "text": content, "parse_mode": "HTML"})
-        # 2. إرسال الصورة
-        await client.post(f"{base_url}/sendPhoto", json={"chat_id": TG_CHAT_ID, "photo": photo_url, "caption": "📸 رؤية أيبكس التقنية"})
-        # 3. إرسال الاستطلاع
-        await client.post(f"{base_url}/sendPoll", json={
-            "chat_id": TG_CHAT_ID, "question": poll_q, "options": poll_options, "is_anonymous": False
+        # 1. إرسال النص
+        await client.post(f"{base_url}/sendMessage", json={
+            "chat_id": TG_CHAT_ID, "text": full_text, "parse_mode": "HTML"
         })
+        # 2. إرسال الصورة (تستخدم صورة تقنية متغيرة)
+        img_url = "https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=1000&auto=format&fit=crop"
+        await client.post(f"{base_url}/sendPhoto", json={
+            "chat_id": TG_CHAT_ID, "photo": img_url, "caption": "📸 رؤية أيبكس لعام 2026"
+        })
+        # 3. إرسال استطلاع رأي
+        await client.post(f"{base_url}/sendPoll", json={
+            "chat_id": TG_CHAT_ID,
+            "question": "هل تستخدم هذه الأدوات في عملك؟",
+            "options": ["نعم، بشكل يومي 🚀", "قريباً ببدأ ⏳", "أفضل الطريقة التقليدية 🧐"],
+            "is_anonymous": False
+        })
+        print("✅ تم النشر في تليجرام")
 
-# --- المحرك الرئيسي ---
-async def run_apex_system():
-    topic = "أحدث أدوات الـ AI الشخصية في 2026"
-    
-    # توليد المحتوى
-    thread_raw = await generate_content(f"اكتب ثريد من 3 تغريدات عن {topic}. اجعلها مشوقة مع رابط مصدر تخيلي احترافي.")
-    thread_list = thread_raw.split("\n\n")[:3]
-    
-    full_tg_content = f"🧵 <b>ثريد أيبكس التقني</b>\n\n" + "\n\n".join(thread_list)
-    photo_url = f"https://source.unsplash.com/featured/?technology,ai"
-    
-    # النشر
-    print("🚀 جاري النشر في المنصات...")
-    # 1. تليجرام
-    await publish_to_tg(full_tg_content, photo_url, f"وش رايكم في {topic}؟", ["رهيب 🚀", "عادي 🧐"])
-    # 2. إكس
-    publish_to_x(thread_list)
+# --- التشغيل ---
+async def main():
+    print("🚀 بدء تشغيل محرك أيبكس...")
+    content = await generate_apex_content()
+    if content:
+        # تنفيذ النشر
+        post_to_x(content)
+        await post_to_tg(content)
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_system())
+    asyncio.run(main())
