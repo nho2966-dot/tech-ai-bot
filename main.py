@@ -2,7 +2,6 @@ import os
 import re
 import asyncio
 import random
-import sqlite3
 import tweepy
 import httpx
 import telegram
@@ -13,7 +12,7 @@ from openai import OpenAI
 from bs4 import BeautifulSoup
 
 # ==========================================
-# ⚙️ الإعدادات والربط مع Secrets
+# ⚙️ الربط والسيادة (Secrets)
 # ==========================================
 KEYS = {
     "GEMINI": os.getenv("GEMINI_KEY"),
@@ -31,123 +30,104 @@ TG_CONFIG = {
     "chat_id": os.getenv("TELEGRAM_CHAT_ID")
 }
 
-# المصادر الموثوقة (عالمية، عربية، خليجية)
-TRUSTED_SOURCES = {
-    "Global": [
-        "https://www.theverge.com/ai-artificial-intelligence",
-        "https://techcrunch.com/category/artificial-intelligence/",
-        "https://www.wired.com/tag/artificial-intelligence/"
-    ],
-    "Regional": [
-        "https://aitnews.com",  # البوابة العربية للأخبار التقنية
-        "https://www.skynewsarabia.com/technology"
-    ]
-}
-
 # ==========================================
-# 🧠 محرك العقول (نظام المناوبة ضد الانهيار)
+# 🧠 محرك العقول (نظام التبديل الذكي)
 # ==========================================
-async def gemini_brain(p):
-    client = genai.Client(api_key=KEYS["GEMINI"])
-    res = await asyncio.to_thread(lambda: client.models.generate_content(model="gemini-2.0-flash", contents=p))
-    return res.text
-
-async def openai_brain(p):
-    client = OpenAI(api_key=KEYS["OPENAI"])
-    res = await asyncio.to_thread(lambda: client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": p}]))
-    return res.choices[0].message.content
-
-async def groq_brain(p):
-    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
-    res = await asyncio.to_thread(lambda: client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": p}]))
-    return res.choices[0].message.content
-
 async def smart_fetch_content(prompt):
-    brains = [("Gemini", gemini_brain), ("OpenAI", openai_brain), ("Groq", groq_brain)]
+    # ترتيب العقول: OpenAI أولاً ثم Groq لضمان جودة اللغة، وGemini كدعم
+    brains = [
+        ("OpenAI", lambda p: OpenAI(api_key=KEYS["OPENAI"]).chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p}]).choices[0].message.content),
+        ("Groq", lambda p: OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"]).chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}]).choices[0].message.content),
+        ("Gemini", lambda p: genai.Client(api_key=KEYS["GEMINI"]).models.generate_content(model="gemini-2.0-flash", contents=p).text)
+    ]
+    
     for name, func in brains:
-        if not KEYS.get(name.upper()) and name != "Gemini": continue
         try:
+            if not KEYS.get(name.upper()) and name != "Gemini": continue
             logger.info(f"🔄 محاولة التوليد عبر: {name}")
-            content = await func(prompt)
-            if content and len(content) > 10: return content, name
+            content = await asyncio.to_thread(func, prompt)
+            if content and len(content) > 20: return content, name
         except Exception as e:
-            logger.warning(f"⚠️ {name} واجه مشكلة: {e}")
+            logger.warning(f"⚠️ {name} فشل أو (Quota): {e}")
             continue
-    return "الذكاء الاصطناعي يغير قواعد اللعبة للأفراد؛ الأدوات الجديدة هي استثمارك الحقيقي في 2026.", "Manual_Safety"
+    return "الذكاء الاصطناعي يطور مهارات الأفراد بشكل مذهل اليوم. (تحديث سريع).", "Emergency"
 
 # ==========================================
-# 🔍 رادار الأخبار الموثوقة (Anti-Hallucination)
+# 🔍 رادار Google News (الأخبار العاجلة فقط)
 # ==========================================
-async def fetch_verified_news():
-    cat = random.choice(list(TRUSTED_SOURCES.keys()))
-    source = random.choice(TRUSTED_SOURCES[cat])
+async def fetch_fresh_news():
+    # البحث عن أخبار الذكاء الاصطناعي في آخر 24 ساعة
+    rss_url = "https://news.google.com/rss/search?q=AI+tools+for+individuals+when:1d&hl=ar&gl=SA&ceid=SA:ar"
+    
     try:
-        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            r = await client.get(source, headers={'User-Agent': 'Mozilla/5.0'})
-            soup = BeautifulSoup(r.text, 'html.parser')
-            articles = []
-            for link in soup.find_all('a', href=True):
-                title = link.get_text().strip()
-                if len(title) > 45 and any(kw in title.lower() for kw in ['ai', 'ذكاء', 'tech', 'apple', 'google', 'تطبيق']):
-                    url = link['href']
-                    if not url.startswith('http'):
-                        url = ("https://aitnews.com" if "aitnews" in source else "https://www.theverge.com") + url
-                    articles.append((title, url))
-            if articles: return random.choice(articles)
-    except: pass
-    return "إطلاق أدوات ذكاء اصطناعي جديدة لتعزيز الإنتاجية الشخصية", "https://news.google.com"
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(rss_url)
+            soup = BeautifulSoup(r.text, 'xml')
+            items = soup.find_all('item')
+            
+            for item in items:
+                title = item.title.text
+                link = item.link.text
+                pub_date = item.pubDate.text
+                
+                # التأكد أن الخبر ليس "إعلان" أو "عام جداً"
+                if len(title) > 35:
+                    logger.info(f"✅ تم العثور على خبر طازج: {title}")
+                    return title, link
+    except Exception as e:
+        logger.error(f"🚨 فشل رادار الأخبار: {e}")
+    
+    return "تطورات جديدة في أدوات الذكاء الاصطناعي الشخصية", "https://news.google.com"
 
 # ==========================================
-# 🚀 المهمة السيادية (The Mission)
+# 🚀 المهمة الرئيسية (النشر البشري المحترف)
 # ==========================================
 async def apex_mission():
     try:
         api_v2 = tweepy.Client(consumer_key=X_CRED["ck"], consumer_secret=X_CRED["cs"],
                                access_token=X_CRED["at"], access_token_secret=X_CRED["ts"])
         
-        # 1. جلب خبر حقيقي وموثوق
-        headline, source_url = await fetch_verified_news()
+        # 1. جلب أحدث خبر من جوجل نيوز
+        headline, source_link = await fetch_fresh_news()
         
-        # 2. برومبت الهندسة البشرية (تقسيم احترافي + لهجة خليجية)
+        # 2. برومبت الصياغة البشرية (تقسيم احترافي)
         prompt = (
-            f"حلل هذا الخبر الحقيقي: ({headline}).\n\n"
-            "المطلوب صياغة تغريدة احترافية بالهيكل التالي:\n"
-            "1. السطر الأول: الخبر بلهجة خليجية بيضاء (فخمة ومباشرة).\n"
+            f"صغ تغريدة بشرية محترفة عن هذا الخبر العاجل: ({headline}).\n\n"
+            "الهيكل الصارم:\n"
+            "1. ابدأ بالخبر مباشرة بلهجة خليجية بيضاء فخمة.\n"
             "2. مسافة سطر.\n"
-            "3. قائمة نقاط (Bullets) تشرح فائدة الخبر للفرد وكيف يستخدمه.\n"
+            "3. استخدم الرمز (•) لنقاط مختصرة جداً توضح 'الفائدة للفرد'.\n"
             "4. مسافة سطر.\n"
-            "5. 'الخلاصة' في سطر واحد فقط.\n\n"
-            "شروط صارمة: أسلوب بشري 100%، لا تذكر أنك بوت، المصطلحات التقنية بين قوسين بالإنجليزية، ممنوع الهلوسة."
+            "5. الزبدة: (سطر واحد يختصر الموضوع).\n\n"
+            "قواعد ذهبية: لا تذكر أنك بوت، لا تستخدم كلمات أعجمية غريبة، المصطلحات التقنية (الإنجليزية) بين قوسين فقط."
         )
         
         content, brain_used = await smart_fetch_content(prompt)
         
         if content:
-            # 3. دمج المحتوى مع المصدر
-            final_tweet = f"{content}\n\n🔗 المصدر الموثوق:\n{source_url}"
+            # 3. المنشور النهائي
+            final_tweet = f"{content}\n\n🔗 المصدر الموثوق:\n{source_link}"
             
             # 4. النشر على X
             api_v2.create_tweet(text=final_tweet)
-            logger.success(f"🔥 نُشر بنجاح عبر {brain_used}")
+            logger.success(f"🔥 نُشر خبر (عاجل) بنجاح عبر {brain_used}")
             
-            # 5. تليجرام (اختياري)
+            # 5. تليجرام
             if TG_CONFIG["token"]:
                 try:
                     bot = telegram.Bot(token=TG_CONFIG["token"])
                     await bot.send_message(chat_id=TG_CONFIG["chat_id"], text=final_tweet)
                 except: pass
     except Exception as e:
-        logger.error(f"🚨 خطأ حرج: {e}")
+        logger.error(f"🚨 خطأ في المهمة: {e}")
 
 # ==========================================
-# ⏳ المجدول الزمني
+# ⏳ التشغيل
 # ==========================================
 async def main():
-    logger.info("🚀 تشغيل نظام أيبكس المطور 2026")
-    while True:
-        await apex_mission()
-        # النشر كل 6 ساعات (21600 ثانية)
-        await asyncio.sleep(21600)
+    logger.info("🚀 رادار أيبكس 2026 قيد التشغيل...")
+    # تنفيذ المهمة فوراً عند التشغيل
+    await apex_mission()
 
 if __name__ == "__main__":
     asyncio.run(main())
