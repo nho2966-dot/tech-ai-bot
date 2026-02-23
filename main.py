@@ -2,97 +2,124 @@ import os
 import asyncio
 import random
 import tweepy
-import httpx
+import pytz
+from datetime import datetime
 from loguru import logger
 from google import genai
 from openai import OpenAI
-from anthropic import Anthropic  # العقل الرابع
+from anthropic import Anthropic
 from bs4 import BeautifulSoup
+import httpx
 
 # ==========================================
-# ⚙️ الربط والسيادة
+# ⚙️ منظومة المفاتيح والسيادة (Secrets)
 # ==========================================
 KEYS = {
     "GEMINI": os.getenv("GEMINI_KEY"),
+    "CLAUDE": os.getenv("ANTHROPIC_API_KEY"),
     "OPENAI": os.getenv("OPENAI_API_KEY"),
-    "GROQ": os.getenv("GROQ_API_KEY"),
-    "CLAUDE": os.getenv("ANTHROPIC_API_KEY") # مفتاح كلود
+    "GROQ": os.getenv("GROQ_API_KEY")
 }
 
 X_CRED = {
-    "ck": os.getenv("X_API_KEY"), "cs": os.getenv("X_API_SECRET"),
-    "at": os.getenv("X_ACCESS_TOKEN"), "ts": os.getenv("X_ACCESS_SECRET")
+    "consumer_key": os.getenv("X_API_KEY"),
+    "consumer_secret": os.getenv("X_API_SECRET"),
+    "access_token": os.getenv("X_ACCESS_TOKEN"),
+    "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
 
 # ==========================================
-# 🧠 منظومة العقول الرباعية (Succession V2)
+# 🧠 محرك العقول المتعاقبة (Succession Engine)
 # ==========================================
 async def get_ai_response(prompt):
+    """ينتقل بين العقول لضمان عدم توقف الخدمة وصياغة لغة راقية"""
     brains = [
         ("Gemini", lambda p: genai.Client(api_key=KEYS["GEMINI"]).models.generate_content(model="gemini-2.0-flash", contents=p).text),
-        ("Claude", lambda p: Anthropic(api_key=KEYS["CLAUDE"]).messages.create(model="claude-3-5-sonnet-20241022", max_tokens=500, messages=[{"role": "user", "content": p}]).content[0].text),
+        ("Claude", lambda p: Anthropic(api_key=KEYS["CLAUDE"]).messages.create(model="claude-3-5-sonnet-20241022", max_tokens=800, messages=[{"role": "user", "content": p}]).content[0].text),
         ("OpenAI", lambda p: OpenAI(api_key=KEYS["OPENAI"]).chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p}]).choices[0].message.content),
         ("Groq", lambda p: OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"]).chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}]).choices[0].message.content)
     ]
     
     for name, func in brains:
         try:
-            if not KEYS.get(name.upper()) and name != "Groq": continue # Groq هو الفزعة الدائمة
+            if not KEYS.get(name.upper()) and name != "Groq": continue
             content = await asyncio.to_thread(func, prompt)
-            if content: 
+            if content:
                 logger.info(f"💡 تمت الصياغة بواسطة عقل: {name}")
                 return content.strip()
         except Exception as e:
-            logger.warning(f"⚠️ العقل {name} متوقف: {e}")
+            logger.warning(f"⚠️ العقل {name} في حالة استراحة: {e}")
     return None
 
 # ==========================================
-# 🏆 نظام المسابقات والجوائز (Contests)
+# 🗞️ رادار الأخبار (لحصاد الجمعة)
 # ==========================================
-def get_contest_prompt():
-    contests = [
-        "صمم سؤال مسابقة تقنية ذكي (لغز) عن أداة AI جديدة للأفراد، واطلب من المتابعين الإجابة بجوائز معنوية (دعم فني/نشر حساب).",
-        "اطرح 'تحدي' للمتابعين: ابتكار فكرة لاستخدام ChatGPT في تسهيل الحياة اليومية بالخليج، وأفضل فكرة لها منشن."
-    ]
-    return random.choice(contests)
+async def fetch_weekly_news():
+    url = "https://news.google.com/rss/search?q=AI+tools+for+individuals+this+week&hl=ar&gl=SA&ceid=SA:ar"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url)
+            items = BeautifulSoup(r.text, 'xml').find_all('item')[:5]
+            return "\n".join([f"- {i.title.text}" for i in items])
+    except: return "أحدث أدوات الذكاء الاصطناعي وتطبيقاتها الإنتاجية."
 
 # ==========================================
-# 🚀 التنفيذ الاستراتيجي
+# 🎯 المهمة التنفيذية (ساعة أيبكس 1:00 ظهراً)
 # ==========================================
-async def run_apex_mission():
-    logger.info("🔥 تشغيل نظام أيبكس الشامل...")
-    client_v2 = tweepy.Client(
-        consumer_key=X_CRED["ck"], consumer_secret=X_CRED["cs"],
-        access_token=X_CRED["at"], access_token_secret=X_CRED["ts"]
-    )
-
-    # قرار عشوائي: خبر أو مسابقة؟
-    mode = random.choice(["news", "contest"])
+async def run_apex_system():
+    gulf_tz = pytz.timezone('Asia/Riyadh')
+    logger.info("🔥 منظومة أيبكس تعمل الآن.. ننتظر ساعة الذروة (1:00 PM).")
     
-    if mode == "news":
-        # كود جلب الأخبار (نفسه السابق)
-        logger.info("🗞 النمط الحالي: نشر خبر سبق صحفي.")
-        url = "https://news.google.com/rss/search?q=AI+tools+individuals+2026&hl=ar&gl=SA&ceid=SA:ar"
-        async with httpx.AsyncClient() as c:
-            r = await c.get(url)
-            item = BeautifulSoup(r.text, 'xml').find('item')
-            headline = item.title.text if item else "تحديثات الذكاء الاصطناعي اليوم"
-            link = item.link.text if item else ""
-            prompt = f"حلل الخبر بأسلوب خليجي دسم للأفراد: ({headline}). التقسيم: 🔹الخبر، ✨الخفايا، 🛠التطبيق، 📍الزبدة. (مصطلحات إنجليزية)."
-    else:
-        logger.info("🏆 النمط الحالي: طرح مسابقة تفاعلية.")
-        prompt = get_contest_prompt() + " (اجعل الأسلوب خليجي حماسي جداً، استخدم إيموجيات)."
-        link = ""
+    client_v2 = tweepy.Client(**X_CRED, wait_on_rate_limit=True)
 
-    final_text = await get_ai_response(prompt)
-    
-    if final_text:
-        try:
-            full_post = f"{final_text}\n\n🔗 {link}" if link else final_text
-            client_v2.create_tweet(text=full_post)
-            logger.success(f"✅ تم تنفيذ مهمة الـ {mode} بنجاح!")
-        except Exception as e:
-            logger.error(f"❌ خطأ تنفيذ التغريدة: {e}")
+    while True:
+        now = datetime.now(gulf_tz)
+        
+        # التوقيت المستهدف: الساعة 1 ظهراً بتوقيت مكة/مسقط
+        if now.hour == 13 and now.minute == 0:
+            day_name = now.strftime('%A')
+            
+            if day_name == 'Friday':
+                # --- نمط حصاد الجمعة (رصين ومعرفي) ---
+                logger.info("🌴 بدأت مهمة حصاد الجمعة التقني...")
+                raw_news = await fetch_weekly_news()
+                prompt = (
+                    f"استناداً لهذه الأخبار: ({raw_news})\n"
+                    "اكتب 'حصاد الجمعة التقني' للأفراد بأسلوب خليجي أبيض، رزين ووقور.\n"
+                    "التركيز على أفضل 3 أدوات (AI Tools) ترفع الإنتاجية. استخدم إيموجيات هادئة ومصطلحات إنجليزية (بين قوسين)."
+                )
+                final_text = await get_ai_response(prompt)
+                if final_text:
+                    client_v2.create_tweet(text=f"📌 حصاد أيبكس للأسبوع:\n\n{final_text}")
+                    logger.success("✅ تم نشر حصاد الجمعة!")
+
+            else:
+                # --- نمط مسابقة الأسبوع (تفاعلية Poll) ---
+                logger.info(f"🎁 بدأت مهمة مسابقة يوم {day_name}...")
+                prompt = (
+                    "صمم سؤال مسابقة تقنية ذكي (اختيار من متعدد) للأفراد.\n"
+                    "اللغة: خليجية بيضاء راقية. التنسيق: السطر الأول السؤال، السطر الثاني 4 خيارات تفصلها فاصلة.\n"
+                    "تنبيه: يجب أن تكون الخيارات قصيرة جداً (كلمة أو كلمتين)."
+                )
+                raw_quiz = await get_ai_response(prompt)
+                if raw_quiz and "\n" in raw_quiz:
+                    lines = raw_quiz.split("\n")
+                    question = lines[0].strip()
+                    options = [o.strip() for o in lines[1].split(",")][:4]
+                    try:
+                        client_v2.create_tweet(text=f"🎁 مسابقة أيبكس اليومية:\n\n{question}", 
+                                             poll_options=options, 
+                                             poll_duration_minutes=1440)
+                        logger.success("✅ تم نشر المسابقة بنجاح!")
+                    except Exception as e: logger.error(f"X Poll Error: {e}")
+
+            await asyncio.sleep(61) # منع التكرار في نفس الدقيقة
+        
+        await asyncio.sleep(30) # فحص الوقت كل 30 ثانية
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_mission())
+    # تشغيل المنظومة
+    try:
+        asyncio.run(run_apex_system())
+    except KeyboardInterrupt:
+        logger.info("👋 تم إيقاف المنظومة يدوياً.")
