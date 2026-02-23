@@ -1,5 +1,4 @@
 import os
-import re
 import asyncio
 import random
 import tweepy
@@ -7,15 +6,17 @@ import httpx
 from loguru import logger
 from google import genai
 from openai import OpenAI
+from anthropic import Anthropic  # العقل الرابع
 from bs4 import BeautifulSoup
 
 # ==========================================
-# ⚙️ الربط والسيادة (Secrets)
+# ⚙️ الربط والسيادة
 # ==========================================
 KEYS = {
     "GEMINI": os.getenv("GEMINI_KEY"),
     "OPENAI": os.getenv("OPENAI_API_KEY"),
-    "GROQ": os.getenv("GROQ_API_KEY")
+    "GROQ": os.getenv("GROQ_API_KEY"),
+    "CLAUDE": os.getenv("ANTHROPIC_API_KEY") # مفتاح كلود
 }
 
 X_CRED = {
@@ -24,93 +25,74 @@ X_CRED = {
 }
 
 # ==========================================
-# 🧠 نظام العقول المتعاقبة (The Succession Brains)
+# 🧠 منظومة العقول الرباعية (Succession V2)
 # ==========================================
-async def smart_fetch_content(prompt):
-    # قائمة العقول المتاحة بترتيب الأولوية
+async def get_ai_response(prompt):
     brains = [
         ("Gemini", lambda p: genai.Client(api_key=KEYS["GEMINI"]).models.generate_content(model="gemini-2.0-flash", contents=p).text),
+        ("Claude", lambda p: Anthropic(api_key=KEYS["CLAUDE"]).messages.create(model="claude-3-5-sonnet-20241022", max_tokens=500, messages=[{"role": "user", "content": p}]).content[0].text),
         ("OpenAI", lambda p: OpenAI(api_key=KEYS["OPENAI"]).chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p}]).choices[0].message.content),
         ("Groq", lambda p: OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"]).chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role":"user","content":p}]).choices[0].message.content)
     ]
     
     for name, func in brains:
         try:
-            # التأكد من وجود المفتاح قبل المحاولة
-            if not KEYS.get(name.upper()):
-                continue
-                
+            if not KEYS.get(name.upper()) and name != "Groq": continue # Groq هو الفزعة الدائمة
             content = await asyncio.to_thread(func, prompt)
-            if content and len(content) > 40:
+            if content: 
                 logger.info(f"💡 تمت الصياغة بواسطة عقل: {name}")
                 return content.strip()
         except Exception as e:
-            logger.warning(f"⚠️ العقل {name} اعتذر عن العمل: {e}")
-            continue
+            logger.warning(f"⚠️ العقل {name} متوقف: {e}")
     return None
 
 # ==========================================
-# 🔍 رادار الذكاء الاصطناعي (أخبار الأفراد)
+# 🏆 نظام المسابقات والجوائز (Contests)
 # ==========================================
-async def get_latest_insider_news():
-    queries = [
-        "أحدث أدوات الذكاء الاصطناعي للأفراد 2026",
-        "new AI tools hidden features 2026",
-        "ChatGPT vs Claude vs Gemini 2026 comparison"
+def get_contest_prompt():
+    contests = [
+        "صمم سؤال مسابقة تقنية ذكي (لغز) عن أداة AI جديدة للأفراد، واطلب من المتابعين الإجابة بجوائز معنوية (دعم فني/نشر حساب).",
+        "اطرح 'تحدي' للمتابعين: ابتكار فكرة لاستخدام ChatGPT في تسهيل الحياة اليومية بالخليج، وأفضل فكرة لها منشن."
     ]
-    query = random.choice(queries)
-    rss_url = f"https://news.google.com/rss/search?q={query}+when:24h&hl=ar&gl=SA&ceid=SA:ar"
-    
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(rss_url)
-            soup = BeautifulSoup(r.text, 'xml')
-            items = soup.find_all('item')
-            if items:
-                # اختيار خبر عشوائي لضمان التجديد (Freshness)
-                item = random.choice(items[:5]) 
-                return item.title.text, item.link.text
-    except Exception as e:
-        logger.error(f"News Fetch Error: {e}")
-    return None, None
+    return random.choice(contests)
 
 # ==========================================
-# 🚀 المهمة الرئيسية (Apex Execution)
+# 🚀 التنفيذ الاستراتيجي
 # ==========================================
-async def run_apex_bot():
-    logger.info("⚙️ انطلاق منظومة أيبكس بالعقول المتعاقبة...")
-    
+async def run_apex_mission():
+    logger.info("🔥 تشغيل نظام أيبكس الشامل...")
     client_v2 = tweepy.Client(
         consumer_key=X_CRED["ck"], consumer_secret=X_CRED["cs"],
-        access_token=X_CRED["at"], access_token_secret=X_CRED["ts"],
-        wait_on_rate_limit=True
+        access_token=X_CRED["at"], access_token_secret=X_CRED["ts"]
     )
 
-    # جلب الخبر
-    headline, source_link = await get_latest_insider_news()
+    # قرار عشوائي: خبر أو مسابقة؟
+    mode = random.choice(["news", "contest"])
     
-    if headline:
-        prompt = (
-            f"بصفتك خبير تقني خليجي، حلل هذا الخبر: ({headline}).\n"
-            "اكتب تغريدة دسمة للأفراد مقسمة كالتالي:\n"
-            "🔹 الخبر بعمق: (شرح التحديث).\n"
-            "✨ الخفايا: (ميزة خفية أو مقارنة).\n"
-            "🛠 الجانب التطبيقي: (كيف يستفيد المتابع الآن؟).\n"
-            "📍 الزبدة: (سطر الختام).\n\n"
-            "قواعد: أسلوب بشري، مصطلحات إنجليزية (بين أقواس)، لا تذكر أنك بوت."
-        )
-        
-        final_content = await smart_fetch_content(prompt)
-        
-        if final_content:
-            try:
-                tweet_text = f"{final_content}\n\n🔗 تفاصيل الخبر:\n{source_link}"
-                client_v2.create_tweet(text=tweet_text)
-                logger.success("✅ تم النشر بنجاح!")
-            except Exception as e:
-                logger.error(f"❌ خطأ في النشر: {e}")
+    if mode == "news":
+        # كود جلب الأخبار (نفسه السابق)
+        logger.info("🗞 النمط الحالي: نشر خبر سبق صحفي.")
+        url = "https://news.google.com/rss/search?q=AI+tools+individuals+2026&hl=ar&gl=SA&ceid=SA:ar"
+        async with httpx.AsyncClient() as c:
+            r = await c.get(url)
+            item = BeautifulSoup(r.text, 'xml').find('item')
+            headline = item.title.text if item else "تحديثات الذكاء الاصطناعي اليوم"
+            link = item.link.text if item else ""
+            prompt = f"حلل الخبر بأسلوب خليجي دسم للأفراد: ({headline}). التقسيم: 🔹الخبر، ✨الخفايا، 🛠التطبيق، 📍الزبدة. (مصطلحات إنجليزية)."
     else:
-        logger.warning("📭 لم يتم العثور على أخبار جديدة في هذه الدورة.")
+        logger.info("🏆 النمط الحالي: طرح مسابقة تفاعلية.")
+        prompt = get_contest_prompt() + " (اجعل الأسلوب خليجي حماسي جداً، استخدم إيموجيات)."
+        link = ""
+
+    final_text = await get_ai_response(prompt)
+    
+    if final_text:
+        try:
+            full_post = f"{final_text}\n\n🔗 {link}" if link else final_text
+            client_v2.create_tweet(text=full_post)
+            logger.success(f"✅ تم تنفيذ مهمة الـ {mode} بنجاح!")
+        except Exception as e:
+            logger.error(f"❌ خطأ تنفيذ التغريدة: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_bot())
+    asyncio.run(run_apex_mission())
