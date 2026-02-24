@@ -2,35 +2,31 @@ name: Apex Bot Cycle
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # تشغيل تلقائي كل ساعتين
-  workflow_dispatch: # زر للتشغيل اليدوي للتجربة
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v2
-
-      - name: Install Dependencies
+          
+      - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Run Apex Engine
+          sudo apt-get update && sudo apt-get install ffmpeg -y
+          
+      - name: Run Bot
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          # إذا عندك مفاتيح ثانية مثل TG_TOKEN ضيفها هنا بنفس الطريقة
         run: python main.py
