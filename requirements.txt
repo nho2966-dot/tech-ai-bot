@@ -1,18 +1,8 @@
-# المحركات الأساسية (بدون تحديد إصدارات تعجيزية)
-google-genai
-openai
-anthropic
-
-# منصات التواصل
+openai>=1.0.0
 tweepy>=4.15.0
-aiogram
-
-# الرادار والبحث
 httpx
 beautifulsoup4
-lxml
-
-# إدارة النظام
 loguru
 python-dotenv
 yt-dlp
+schedule
