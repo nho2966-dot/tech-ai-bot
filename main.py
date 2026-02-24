@@ -1,7 +1,7 @@
 import os
 import asyncio
 import random
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from loguru import logger
 import tweepy
 import httpx
@@ -14,7 +14,6 @@ load_dotenv()
 # ==========================================
 # ⚙️ الإعدادات والمفاتيح
 # ==========================================
-KEYS = {"GROQ": os.getenv("GROQ_API_KEY")}
 X_CRED = {
     "bearer_token": os.getenv("X_BEARER_TOKEN"),
     "consumer_key": os.getenv("X_API_KEY"),
@@ -23,91 +22,127 @@ X_CRED = {
     "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
 
-# القائمة السوداء (الكلمات التي تمنع الرد)
-BLACKLIST = ["سياسة", "مخدرات", "عنصرية", "إباحي", "شتم", "سب", "فضيحة"]
+OFFICIAL_REFS = ["GoogleAI", "OpenAI", "DeepMind", "MetaAI", "Microsoft", "AnthropicAI", "NVIDIAAIDev"]
+BLACKLIST = ["سياسة", "مخدرات", "عنصرية", "شتم", "تحريض", "مظاهرات"]
+RSS_FEEDS = ["https://aitnews.com/feed/", "https://www.tech-wd.com/wd/feed/"]
 
 try:
     client_v2 = tweepy.Client(**X_CRED, wait_on_rate_limit=True)
+    auth_v1 = tweepy.OAuth1UserHandler(X_CRED["consumer_key"], X_CRED["consumer_secret"], X_CRED["access_token"], X_CRED["access_token_secret"])
+    api_v1 = tweepy.API(auth_v1)
     BOT_ID = client_v2.get_me().data.id
-    logger.success("✅ تم تفعيل الذاكرة والقائمة السوداء!")
+    logger.success("✅ المحرك انطلق يا ناصر.. الذاكرة والترند والقنص جاهزة!")
 except Exception as e:
-    logger.error(f"❌ خطأ اتصال: {e}"); exit()
+    logger.error(f"❌ فشل الاتصال: {e}"); exit()
 
 # ==========================================
-# 🧠 نظام منع تكرار المحتوى (الذاكرة)
+# 🛡️ محرك الذكاء الاصطناعي (أيبكس الخليجي)
 # ==========================================
-def is_already_posted(link, filename="posted_links.txt"):
-    if not os.path.exists(filename): return False
-    with open(filename, "r") as f:
-        posted = f.read().splitlines()
-    return link in posted
+async def ai_guard(prompt, mode="news", trend_topic=None):
+    if any(word in prompt.lower() for word in BLACKLIST): return "SKIP"
 
-def save_posted_link(link, filename="posted_links.txt"):
-    with open(filename, "a") as f:
-        f.write(link + "\n")
-
-# ==========================================
-# 🛡️ محرك الذكاء الاصطناعي (أيبكس)
-# ==========================================
-async def ai_guard(prompt, mode="news"):
-    # إذا كان المنشن يحتوي كلمة من القائمة السوداء، نلغي الرد فوراً
-    if any(word in prompt.lower() for word in BLACKLIST):
-        return "SKIP"
-
-    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
-    prompts = {
-        "news": "صغ خبر تقني بلهجة خليجية بيضاء عن الذكاء الاصطناعي وأدواته، بدون كلمات إنجليزية إلا بين أقواس.",
-        "reply": "رد بذكاء خليجي تقني وبأدب رصين.",
-        "snipe": "اقتبس التغريدة وعلق عليها بذكاء خليجي يوضح الفائدة التقنية."
-    }
+    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_API_KEY"))
+    
+    trend_insert = f" (حاول تدمج موضوع '{trend_topic}' بشكل طبيعي إذا كان مناسب)" if trend_topic else ""
+    
+    sys_prompt = f"""أنت 'أيبكس'. خبير في الذكاء الاصطناعي وأحدث أدواته.
+    - اللهجة: خليجية بيضاء راقية.
+    - المصطلحات: استبدل 'الثورة الصناعية' بـ 'الذكاء الاصطناعي وأحدث أدواته'.
+    - اللغة: لا تستخدم الإنجليزية إلا بين أقواس (Name).
+    - النمط: {mode}. {trend_insert}."""
 
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": f"أنت 'أيبكس'. {prompts.get(mode)}"}, {"role": "user", "content": prompt}],
-            temperature=0.1 # تقليل الحرارة لضمان دقة الخبر وعدم الهلوسة
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
+            temperature=0.2
         )
         return response.choices[0].message.content.strip()
     except: return "SKIP"
 
 # ==========================================
-# 🚀 محرك النشر الدوري (مع منع التكرار)
+# 📈 محرك تحليل الترند (Trending)
 # ==========================================
-async def post_daily_news():
-    logger.info("📰 فحص الأخبار الجديدة...")
+async def get_saudi_trend():
+    try:
+        # جلب الترندات (نستخدم API v1.1 لجلب الترندات الجغرافية)
+        # WOEID للسعودية هو 23424938
+        trends = api_v1.get_place_trends(id=23424938)
+        top_trend = trends[0]['trends'][0]['name']
+        logger.info(f"📊 الترند الحالي في السعودية: {top_trend}")
+        return top_trend
+    except:
+        return None
+
+# ==========================================
+# 🎯 محرك القنص المحدث
+# ==========================================
+async def snipe_official_refs(trend=None):
+    target = random.choice(OFFICIAL_REFS)
+    try:
+        user = client_v2.get_user(username=target)
+        tweets = client_v2.get_users_tweets(id=user.data.id, max_results=5)
+        if tweets.data:
+            tweet = tweets.data[0]
+            comment = await ai_guard(tweet.text, mode="snipe", trend_topic=trend)
+            if "SKIP" not in comment:
+                await asyncio.sleep(random.randint(120, 300))
+                client_v2.create_tweet(text=comment, quote_tweet_id=tweet.id)
+                logger.success(f"🚀 تم قنص تغريدة من {target}")
+    except Exception as e: logger.error(f"❌ خطأ قنص: {e}")
+
+# ==========================================
+# 📰 محرك النشر الفريد (منع التكرار)
+# ==========================================
+async def post_unique_news(trend=None):
     try:
         async with httpx.AsyncClient() as c:
-            r = await c.get("https://aitnews.com/feed/", timeout=10)
+            r = await c.get(random.choice(RSS_FEEDS), timeout=10)
             soup = BeautifulSoup(r.content, 'xml')
             items = soup.find_all('item')
             
+            my_tweets = client_v2.get_users_tweets(id=BOT_ID, max_results=15)
+            posted_urls = [t.text for t in my_tweets.data] if my_tweets.data else []
+
             for item in items:
                 link = item.link.text
-                # إذا الخبر تم نشره من قبل، ننتقل للخبر اللي بعده
-                if is_already_posted(link):
-                    continue
+                if any(link in t for t in posted_urls): continue
                 
-                title = item.title.text
-                tweet_text = await ai_guard(title, mode="news")
-                
-                if "SKIP" not in tweet_text:
-                    client_v2.create_tweet(text=f"{tweet_text}\n\n🔗 {link}")
-                    save_posted_link(link) # حفظ الرابط في الذاكرة
-                    logger.success(f"✅ تم نشر خبر جديد وحفظه في الذاكرة: {title}")
-                    return # نكتفي بنشر خبر واحد في كل دورة
-            
-            logger.info("😴 لا يوجد أخبار جديدة لم تُنشر من قبل.")
-    except Exception as e:
-        logger.error(f"❌ خطأ في محرك النشر: {e}")
+                txt = await ai_guard(item.title.text, mode="news", trend_topic=trend)
+                if "SKIP" not in txt:
+                    client_v2.create_tweet(text=f"{txt}\n\n🔗 {link}")
+                    logger.success(f"✅ خبر جديد: {item.title.text}")
+                    return True
+        return False
+    except Exception as e: logger.error(f"❌ خطأ نشر: {e}"); return False
 
 # ==========================================
-# 🚀 تشغيل المحرك الكامل
+# 🚀 المحرك الرئيسي (Apex Engine)
 # ==========================================
 async def run_apex_engine():
-    # ترتيب العمليات: رد على المنشن -> قنص -> نشر خبر جديد
-    # (تم اختصار الكود هنا للتركيز على الحل، احتفظ بدوال الرد والقنص السابقة وادمجها)
-    await post_daily_news()
+    # 1. تحليل الترند أولاً
+    current_trend = await get_saudi_trend()
+    
+    # 2. القنص (3 محاولات بفاصل بشري)
+    for _ in range(3):
+        await snipe_official_refs(trend=current_trend)
+        await asyncio.sleep(random.randint(600, 900))
+
+    # 3. النشر الدوري للأخبار (3 أخبار فريدة)
+    published = 0
+    for _ in range(10): # 10 محاولات كحد أقصى لإيجاد 3 أخبار جديدة
+        if published >= 3: break
+        if await post_unique_news(trend=current_trend):
+            published += 1
+            await asyncio.sleep(random.randint(900, 1200)) # فاصل 15-20 دقيقة
+
+async def scheduler():
+    while True:
+        logger.info("🔄 تبدأ دورة العمل الآن...")
+        await run_apex_engine()
+        logger.info("⏰ دورة كاملة انتهت. انتظار ساعة...")
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_engine())
+    asyncio.run(scheduler())
