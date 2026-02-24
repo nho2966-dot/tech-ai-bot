@@ -1,13 +1,14 @@
 import os
 import asyncio
-import random
-import tweepy
-from datetime import datetime, timedelta
 from loguru import logger
+import tweepy
 from openai import OpenAI
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import Message
 
 # ==========================================
-# ⚙️ الإعدادات (تركيز كامل على النشر V2)
+# ⚙️ الإعدادات والمفاتيح
 # ==========================================
 KEYS = {"GROQ": os.getenv("GROQ_API_KEY")}
 X_CRED = {
@@ -17,76 +18,105 @@ X_CRED = {
     "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
 
-# ==========================================
-# 🧠 محرك صناعة المحتوى (الذكاء الاصطناعي للأفراد)
-# ==========================================
-async def get_apex_content(prompt_type="news"):
-    system_msg = "أنت أيبكس، خبير تقني خليجي رصين. تركز على تطبيقات الذكاء الاصطناعي التي تفيد الأفراد في حياتهم اليومية."
-    
-    prompts = {
-        "news": "اكتب تغريدة عن أداة ذكاء اصطناعي جديدة ومذهلة تفيد الأفراد (مثل تنظيم الوقت أو التصميم). الأسلوب خليجي رصين مع هاشتاقات ذكية.",
-        "poll": "صمم سؤال مسابقة ذكي عن AI. السطر1: السؤال، السطر2: 4 خيارات تفصلها فاصلة.",
-        "tip": "أعط نصيحة تقنية سريعة لمستخدمي الهواتف لزيادة الإنتاجية باستخدام أدوات الذكاء الاصطناعي."
-    }
+TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN")
+TELEGRAM_CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", 0))
 
+# ==========================================
+# 🧠 محرك الذكاء الاصطناعي (تحليل الجمهور المتعدد)
+# ==========================================
+async def generate_insightful_reply(target_text):
+    """
+    يولد ردًا متوازنًا لكل طبقة جمهور: مبتدئ، متوسط، محترف
+    ويضيف قيمة فعلية بناءً على التغريدة أو الخبر.
+    """
+    system_msg = """
+أنت محلل تقني متمكن، تكتب محتوى عربي عملي وذو قيمة فعلية، 
+يشرح الخبر أو المقارنة أو الأداة بطريقة تخدم:
+1- المبتدئين: معلومة بسيطة ومباشرة
+2- المتوسطين: تحليل عملي/تجريبي
+3- المحترفين: insight معمق واستراتيجي
+لا تقدم نصائح سطحية أو مجرد خبر.
+ركز على المقارنات بين الأجهزة الذكية وأدوات الذكاء الاصطناعي والتقنيات العملية.
+الرد يجب أن يكون كتغريدة واحدة (أقل من 280 حرف).
+"""
     try:
         client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompts[prompt_type]}]
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": f"اكتب ردًا على هذا النص:\n{target_text}"}
+            ],
+            temperature=0.7
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logger.error(f"خطأ في المحرك: {e}")
+        logger.error(f"❌ خطأ في محرك الذكاء الاصطناعي: {e}")
         return None
 
 # ==========================================
-# 🛰️ منظومة البث الاستراتيجي
+# 📱 إعداد غرفة عمليات تليجرام (القنص اليدوي الذكي)
 # ==========================================
-async def run_apex_broadcast(client_v2):
-    now_gulf = datetime.utcnow() + timedelta(hours=4)
-    
-    # 1. النشر الصباحي (نصيحة تقنية) - الساعة 9 صباحاً
-    if now_gulf.hour == 9 and now_gulf.minute <= 5:
-        content = await get_apex_content("tip")
-        if content:
-            client_v2.create_tweet(text=f"💡 إشراقة تقنية:\n\n{content}")
-            logger.success("✅ تم نشر النصيحة الصباحية.")
-            await asyncio.sleep(600)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher()
 
-    # 2. ساعة الذروة (المسابقة) - الساعة 1 ظهراً
-    if now_gulf.hour == 13 and now_gulf.minute <= 5:
-        content = await get_apex_content("poll")
-        if content and "\n" in content:
-            lines = content.split("\n")
-            opts = [o.strip() for o in lines[1].split(",")][:4]
-            client_v2.create_tweet(text=f"🎁 مسابقة أيبكس اليومية:\n\n{lines[0]}", poll_options=opts, poll_duration_minutes=1440)
-            logger.success("✅ تم نشر المسابقة.")
-            await asyncio.sleep(600)
+try:
+    client_v2 = tweepy.Client(**X_CRED)
+except Exception as e:
+    logger.error(f"❌ خطأ في إعداد تويتر: {e}")
 
-    # 3. النشر المسائي (أداة جديدة) - الساعة 8 مساءً
-    if now_gulf.hour == 20 and now_gulf.minute <= 5:
-        content = await get_apex_content("news")
-        if content:
-            client_v2.create_tweet(text=f"🚀 أداة اليوم من أيبكس:\n\n{content}")
-            logger.success("✅ تم نشر أداة اليوم.")
-            await asyncio.sleep(600)
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    if message.from_user.id != TELEGRAM_CHAT_ID:
+        return
+    await message.answer(
+        "أهلاً بك في غرفة عمليات أيبكس 🎯\n"
+        "لإرسال الردود العميقة استخدم:\n/reply [رقم_التغريدة] [نص التغريدة]"
+    )
 
-async def main():
-    logger.info("🔥 تشغيل أيبكس (إصدار البث الاستراتيجي)...")
+@dp.message(Command("reply"))
+async def cmd_reply(message: Message):
+    if message.from_user.id != TELEGRAM_CHAT_ID:
+        await message.answer("⛔ غير مصرح لك باستخدام هذا البوت.")
+        return
+
+    parts = message.text.split(" ", 2)
+    if len(parts) < 3:
+        await message.answer("⚠️ صياغة خاطئة! الصيغة الصحيحة:\n/reply 1892837482 نص التغريدة")
+        return
+
+    tweet_id = parts[1]
+    target_text = parts[2]
+
+    if not tweet_id.isdigit():
+        await message.answer("⚠️ رقم التغريدة يجب أن يحتوي على أرقام فقط!")
+        return
+
+    status_msg = await message.answer("⏳ جاري تحليل التغريدة وصياغة الرد المعمق...")
+
+    # توليد الرد
+    reply_content = await generate_insightful_reply(target_text)
+    if not reply_content:
+        await status_msg.edit_text("❌ فشل الذكاء الاصطناعي في صياغة الرد.")
+        return
+
+    # نشر الرد على تويتر
     try:
-        client_v2 = tweepy.Client(**X_CRED, wait_on_rate_limit=True)
-        bot_info = client_v2.get_me()
-        logger.success(f"✅ متصل كـ: @{bot_info.data.username}")
+        client_v2.create_tweet(text=reply_content, in_reply_to_tweet_id=tweet_id)
+        await status_msg.edit_text(f"✅ تم نشر الرد بنجاح!\n\n📝 الرد المنشور:\n{reply_content}")
+        logger.success(f"تم الرد على {tweet_id} بنجاح.")
+    except tweepy.errors.TweepyException as e:
+        await status_msg.edit_text(f"❌ خطأ أثناء النشر على تويتر:\n{e}")
+        logger.error(f"فشل النشر: {e}")
 
-        while True:
-            await run_apex_broadcast(client_v2)
-            # فحص كل 4 دقائق للتأكد من مواعيد النشر
-            await asyncio.sleep(240)
-
-    except Exception as e:
-        logger.error(f"❌ خطأ في التشغيل: {e}")
+# ==========================================
+# 🚀 تشغيل النظام
+# ==========================================
+async def main():
+    logger.info("🚀 تشغيل غرفة عمليات تليجرام للقنص...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
