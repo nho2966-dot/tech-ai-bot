@@ -1,11 +1,15 @@
 import os
 import asyncio
+import random
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 import tweepy
+import httpx
+from bs4 import BeautifulSoup
 from openai import OpenAI
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import Message
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ==========================================
 # ⚙️ الإعدادات والمفاتيح
@@ -18,105 +22,150 @@ X_CRED = {
     "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
 
-TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN")
-TELEGRAM_CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", 0))
+# إعداد مصادقة API v1.1 لرفع الوسائط (الصور)
+auth_v1 = tweepy.OAuth1UserHandler(
+    X_CRED["consumer_key"], X_CRED["consumer_secret"],
+    X_CRED["access_token"], X_CRED["access_token_secret"]
+)
+api_v1 = tweepy.API(auth_v1)
+
+GIANTS_TO_SNIPE = ["44196397", "76837396"] # إيلون ماسك، سام ألتمان
+TIME_WINDOW_MINUTES = 120
+
+MASTER_RSS_FEEDS = [
+    "https://aitnews.com/feed/",                 
+    "https://www.tech-wd.com/wd/feed/",          
+    "https://www.unlimit-tech.com/feed/",        
+    "https://techcrunch.com/category/artificial-intelligence/feed/", 
+    "https://www.theverge.com/rss/index.xml",    
+    "https://www.wired.com/feed/category/gear/latest/rss", 
+    "https://9to5mac.com/feed/"                
+]
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
+IMG_TEMP_FILE = "temp_news_img.jpg"
 
 # ==========================================
-# 🧠 محرك الذكاء الاصطناعي (تحليل الجمهور المتعدد)
+# 📡 محرك الرادار المتطور
 # ==========================================
-async def generate_insightful_reply(target_text):
-    """
-    يولد ردًا متوازنًا لكل طبقة جمهور: مبتدئ، متوسط، محترف
-    ويضيف قيمة فعلية بناءً على التغريدة أو الخبر.
-    """
-    system_msg = """
-أنت محلل تقني متمكن، تكتب محتوى عربي عملي وذو قيمة فعلية، 
-يشرح الخبر أو المقارنة أو الأداة بطريقة تخدم:
-1- المبتدئين: معلومة بسيطة ومباشرة
-2- المتوسطين: تحليل عملي/تجريبي
-3- المحترفين: insight معمق واستراتيجي
-لا تقدم نصائح سطحية أو مجرد خبر.
-ركز على المقارنات بين الأجهزة الذكية وأدوات الذكاء الاصطناعي والتقنيات العملية.
-الرد يجب أن يكون كتغريدة واحدة (أقل من 280 حرف).
-"""
+async def fetch_article_text(url, http_client):
     try:
-        client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
+        response = await http_client.get(url, headers=HEADERS, follow_redirects=True)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, "html.parser")
+            paragraphs = soup.find_all('p')
+            return " ".join([p.get_text().strip() for p in paragraphs if len(p.get_text())>20])[:1500]
+    except: return ""
+
+async def fetch_latest_tech_news_with_image():
+    news_data = {"text": "", "img_url": None}
+    selected_feeds = random.sample(MASTER_RSS_FEEDS, min(3, len(MASTER_RSS_FEEDS)))
+    
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        for feed in selected_feeds:
+            try:
+                response = await client.get(feed, headers=HEADERS)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, "xml")
+                    for item in soup.find_all('item', limit=2):
+                        title = item.title.text if item.title else ""
+                        link = item.link.text if item.link else ""
+                        img_url = None
+                        media = item.find('media:content')
+                        if media: img_url = media.get('url')
+                        
+                        article_text = await fetch_article_text(link, client)
+                        if article_text:
+                            news_data["text"] += f"العنوان: {title}\nالرابط: {link}\nالتفاصيل: {article_text}\n---\n"
+                            if img_url and not news_data["img_url"]: news_data["img_url"] = img_url
+            except: continue
+    return news_data
+
+# ==========================================
+# 🧠 عقل "أيبكس" المبدع
+# ==========================================
+async def generate_ai_content(prompt, system_msg):
+    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
+    try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"اكتب ردًا على هذا النص:\n{target_text}"}
-            ],
-            temperature=0.7
+            messages=[{"role":"system","content":system_msg},{"role":"user","content":prompt}],
+            temperature=0.6
         )
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"❌ خطأ في محرك الذكاء الاصطناعي: {e}")
-        return None
+    except: return None
+
+async def create_news_tweet(news_context, recent_texts, has_image=False):
+    sys_msg = f"""أنت "أيبكس"، كبير المحللين التقنيين. لا تكن ناقلاً للخبر، بل كن صانعاً للنقاش.
+    🚫 المواضيع السابقة: [{recent_texts}]
+
+    🧩 اختر القالب الأنسب للأثر التقني:
+    1. [الخبر العميق]: خطاف ذكي + تحليل مركز + الرابط. (إذا كان الخبر تقنياً بحتاً)
+    2. [الجدل التفاعلي - POLL]: اطرح الخبر + سؤال جدلي + سطر مستقل بالصيغة: [POLL: خيار1, خيار2]. (إذا كان الخبر يمس اختيارات الناس)
+    3. [الثريد الممتع - Thread]: قسم الخبر لـ 3 تغريدات (1/3، 2/3، 3/3) تشرح السيناريوهات المستقبلية.
+
+    💎 القواعد:
+    - المصدر دائماً في التغريدة الأولى.
+    - صياغة إبداعية، بعيدة عن السرد الإخباري الممل.
+    - خيارات الاستطلاع يجب أن تكون حماسية لتظهر النتائج المباشرة للمتابع فور تصويته.
+    - إذا لم تجد ما يبهرك، اكتب: SKIP
+    """
+    return await generate_ai_content(f"الأخبار:\n{news_context}", sys_msg)
 
 # ==========================================
-# 📱 إعداد غرفة عمليات تليجرام (القنص اليدوي الذكي)
+# 📤 محرك النشر الذكي
 # ==========================================
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
-
-try:
-    client_v2 = tweepy.Client(**X_CRED)
-except Exception as e:
-    logger.error(f"❌ خطأ في إعداد تويتر: {e}")
-
-@dp.message(Command("start"))
-async def cmd_start(message: Message):
-    if message.from_user.id != TELEGRAM_CHAT_ID:
-        return
-    await message.answer(
-        "أهلاً بك في غرفة عمليات أيبكس 🎯\n"
-        "لإرسال الردود العميقة استخدم:\n/reply [رقم_التغريدة] [نص التغريدة]"
-    )
-
-@dp.message(Command("reply"))
-async def cmd_reply(message: Message):
-    if message.from_user.id != TELEGRAM_CHAT_ID:
-        await message.answer("⛔ غير مصرح لك باستخدام هذا البوت.")
-        return
-
-    parts = message.text.split(" ", 2)
-    if len(parts) < 3:
-        await message.answer("⚠️ صياغة خاطئة! الصيغة الصحيحة:\n/reply 1892837482 نص التغريدة")
-        return
-
-    tweet_id = parts[1]
-    target_text = parts[2]
-
-    if not tweet_id.isdigit():
-        await message.answer("⚠️ رقم التغريدة يجب أن يحتوي على أرقام فقط!")
-        return
-
-    status_msg = await message.answer("⏳ جاري تحليل التغريدة وصياغة الرد المعمق...")
-
-    # توليد الرد
-    reply_content = await generate_insightful_reply(target_text)
-    if not reply_content:
-        await status_msg.edit_text("❌ فشل الذكاء الاصطناعي في صياغة الرد.")
-        return
-
-    # نشر الرد على تويتر
+async def publish_smart_content(client_v2, ai_output, media_id=None):
     try:
-        client_v2.create_tweet(text=reply_content, in_reply_to_tweet_id=tweet_id)
-        await status_msg.edit_text(f"✅ تم نشر الرد بنجاح!\n\n📝 الرد المنشور:\n{reply_content}")
-        logger.success(f"تم الرد على {tweet_id} بنجاح.")
-    except tweepy.errors.TweepyException as e:
-        await status_msg.edit_text(f"❌ خطأ أثناء النشر على تويتر:\n{e}")
-        logger.error(f"فشل النشر: {e}")
+        if "1/3" in ai_output:
+            tweets = [t.strip() for t in ai_output.split("\n\n") if t.strip()][:3]
+            last_id = None
+            for i, text in enumerate(tweets):
+                res = client_v2.create_tweet(text=text, media_ids=[media_id] if media_id and i==0 else None, in_reply_to_tweet_id=last_id)
+                last_id = res.data['id']
+            logger.success("🧵 تم نشر ثريد.")
+        elif "[POLL:" in ai_output:
+            parts = ai_output.split("[POLL:")
+            text = parts[0].strip()
+            opts = parts[1].replace("]", "").split(",")
+            client_v2.create_tweet(text=text, poll_options=[o.strip() for o in opts][:4], poll_duration_minutes=1440)
+            logger.success("📊 تم نشر استطلاع.")
+        else:
+            client_v2.create_tweet(text=ai_output, media_ids=[media_id] if media_id else None)
+            logger.success("📝 تم نشر تغريدة.")
+    except Exception as e: logger.error(f"❌ خطأ نشر: {e}")
 
 # ==========================================
-# 🚀 تشغيل النظام
+# 🏁 الدورة الرئيسية
 # ==========================================
-async def main():
-    logger.info("🚀 تشغيل غرفة عمليات تليجرام للقنص...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+async def bot_cycle():
+    client_v2 = tweepy.Client(**X_CRED)
+    try: bot_id = client_v2.get_me().data.id
+    except: return
+
+    time_limit = datetime.now(timezone.utc) - timedelta(minutes=TIME_WINDOW_MINUTES)
+    
+    # منع التكرار
+    recent_txt = ""
+    try:
+        recent = client_v2.get_users_tweets(id=bot_id, max_results=10)
+        if recent.data: recent_txt = " | ".join([t.text for t in recent.data])
+    except: pass
+
+    # تشغيل الرادار
+    news_data = await fetch_latest_tech_news_with_image()
+    if news_data["text"]:
+        ai_msg = await create_news_tweet(news_data["text"], recent_txt, bool(news_data["img_url"]))
+        if ai_msg and "SKIP" not in ai_msg.upper():
+            mid = None
+            if news_data["img_url"]:
+                async with httpx.AsyncClient() as c:
+                    r = await c.get(news_data["img_url"])
+                    with open(IMG_TEMP_FILE, 'wb') as f: f.write(r.content)
+                    mid = api_v1.media_upload(filename=IMG_TEMP_FILE).media_id
+                    os.remove(IMG_TEMP_FILE)
+            await publish_smart_content(client_v2, ai_msg, mid)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(bot_cycle())
