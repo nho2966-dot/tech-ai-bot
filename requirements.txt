@@ -18,3 +18,11 @@ asyncio>=3.4.3              # إدارة المهام المتعددة في وق
 schedule
 yt-dlp
 tweepy
+openai
+tweepy
+httpx
+beautifulsoup4
+yt-dlp
+loguru
+python-dotenv
+lxml
