@@ -1,7 +1,9 @@
 import os
+import json
 import asyncio
 import random
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 import tweepy
 import httpx
@@ -9,11 +11,12 @@ import yt_dlp
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from dotenv import load_dotenv
+import schedule
 
 load_dotenv()
 
 # ==========================================
-# ⚙️ الإعدادات والمفاتيح
+# ⚙️ المفاتيح والإعدادات
 # ==========================================
 KEYS = {"GROQ": os.getenv("GROQ_API_KEY")}
 X_CRED = {
@@ -22,112 +25,221 @@ X_CRED = {
     "access_token": os.getenv("X_ACCESS_TOKEN"),
     "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
+TG_TOKEN = os.getenv("TG_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-client_v2 = tweepy.Client(**X_CRED)
-auth_v1 = tweepy.OAuth1UserHandler(X_CRED["consumer_key"], X_CRED["consumer_secret"], X_CRED["access_token"], X_CRED["access_token_secret"])
-api_v1 = tweepy.API(auth_v1)
+GIANTS_TO_SNIPE = ["44196397", "76837396"]  # إيلون ماسك، سام ألتمان
+TIME_WINDOW_MINUTES = 130 # نافذة أكبر من الجدولة (ساعتين) لضمان عدم تفويت شيء
 
-# المصادر الموثوقة (Whitelisted Only)
-RSS_FEEDS = ["https://aitnews.com/feed/", "https://www.tech-wd.com/wd/feed/", "https://www.unlimit-tech.com/feed/"]
 YT_CHANNELS = [
-    "https://www.youtube.com/@MarquesBrownlee/shorts",
-    "https://www.youtube.com/@Mrwhosetheboss/shorts",
+    "https://www.youtube.com/@Omardizer/shorts",
     "https://www.youtube.com/@OsamaOfficial/shorts",
-    "https://www.youtube.com/@Omardizer/shorts"
+    "https://www.youtube.com/@Mrwhosetheboss/shorts",
+    "https://www.youtube.com/@MarquesBrownlee/shorts",
+    "https://www.youtube.com/@AITNews/shorts"
 ]
 
+RSS_FEEDS = [
+    "https://aitnews.com/feed/",
+    "https://www.tech-wd.com/wd/feed/"
+]
+
+DB_FILE = "apex_db.json"
+
 # ==========================================
-# 🛡️ نظام منع الهلوسة والفلترة
+# 🛡️ نظام الذاكرة (لمنع التكرار والهلوسة)
 # ==========================================
-async def ai_guard(prompt, system_instruction):
-    """محرك الذكاء الاصطناعي مع قيود صارمة لمنع الهلوسة"""
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    return {"replied_tweets": []}
+
+def save_db(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f)
+
+async def send_tg_alert(message):
+    if TG_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+            async with httpx.AsyncClient() as client:
+                await client.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": f"⚠️ تنبيه أيبكس:\n{message}"})
+        except Exception as e:
+            logger.error(f"فشل إرسال لتيليجرام: {e}")
+
+# ==========================================
+# 📱 الاتصال بمنصة X
+# ==========================================
+try:
+    client_v2 = tweepy.Client(**X_CRED, wait_on_rate_limit=True)
+    auth_v1 = tweepy.OAuth1UserHandler(
+        X_CRED["consumer_key"], X_CRED["consumer_secret"],
+        X_CRED["access_token"], X_CRED["access_token_secret"]
+    )
+    api_v1 = tweepy.API(auth_v1)
+    logger.success("✅ تم الاتصال بمنصة X بنجاح")
+except Exception as e:
+    logger.error(f"❌ فشل الاتصال بمنصة X: {e}")
+    asyncio.run(send_tg_alert(f"فشل تسجيل الدخول لـ X: {e}"))
+
+# ==========================================
+# 🧠 الذكاء الاصطناعي – صياغة خليجية
+# ==========================================
+async def ai_guard(prompt, context_type="post"):
     client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
+    
+    if context_type == "reply":
+        sys_msg = """أنت 'أيبكس'، خبير تقني رصين. رد على هذا المحتوى بأسلوب احترافي يفيد الأفراد.
+- اللغة: لهجة خليجية بيضاء.
+- القيود: ممنوع الهلوسة، ممنوع استخدام الرموز، ممنوع اللغات غير العربية (عدا أسماء التقنيات بين أقواس).
+- الطول: جملة أو جملتين بالكثير.
+إذا كان المحتوى لا يستحق الرد، أرسل: SKIP"""
+    else:
+        sys_msg = f"""أنت 'أيبكس'، خبير تقني رصين. صغ هذا المحتوى ليكون مفيداً للأفراد ويركز على أحدث أدوات الذكاء الاصطناعي.
+- اللغة: لهجة خليجية بيضاء ومفهومة.
+- القيود: صفر هلوسة، لا تستخدم الرموز، ولا لغات أجنبية (فقط الأسماء بين أقواس).
+- الطول: مكثف ولا يتجاوز 250 حرف.
+- التنسيق: خطاف مشوق + شرح الفائدة + إيموجي.
+إذا كان المحتوى ضعيفاً، أرسل: SKIP"""
+    
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}],
-            temperature=0.1 # تقليل الإبداع لزيادة الدقة (منع الهلوسة)
+            messages=[{"role":"system","content":sys_msg},{"role":"user","content":prompt}],
+            temperature=0.1
         )
         return response.choices[0].message.content.strip()
-    except: return "SKIP"
+    except Exception as e:
+        logger.error(f"❌ خطأ في الذكاء الاصطناعي: {e}")
+        return "SKIP"
 
 # ==========================================
-# 🔍 محركات جلب المحتوى (أخبار + فيديو)
+# 🎥 فيديوهات YouTube & 📰 أخبار RSS
 # ==========================================
-async def get_latest_news():
-    async with httpx.AsyncClient() as client:
-        r = await client.get(random.choice(RSS_FEEDS), timeout=15)
-        soup = BeautifulSoup(r.content, "xml")
-        item = soup.find('item')
-        if item:
-            return {"title": item.title.text, "link": item.link.text, "desc": item.description.text[:500]}
-    return None
-
 def get_latest_video():
+    target = random.choice(YT_CHANNELS)
     ydl_opts = {'quiet': True, 'extract_flat': True, 'playlist_items': '1'}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(random.choice(YT_CHANNELS), download=False)
-            video = info['entries'][0]
-            # شرط الحداثة: 48 ساعة
-            if video.get('upload_date'):
-                upload_date = datetime.strptime(video['upload_date'], '%Y%m%d').replace(tzinfo=timezone.utc)
-                if (datetime.now(timezone.utc) - upload_date).days <= 2:
-                    return video
-    except: return None
+            info = ydl.extract_info(target, download=False)
+            if 'entries' in info and len(info['entries']) > 0:
+                v = info['entries'][0]
+                upload_date = datetime.strptime(v['upload_date'], '%Y%m%d').replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - upload_date) <= timedelta(hours=48):
+                    return v
+    except Exception as e:
+        logger.error(f"❌ فشل جلب الفيديو: {e}")
+    return None
+
+async def get_latest_rss():
+    target_feed = random.choice(RSS_FEEDS)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(target_feed, timeout=15)
+        soup = BeautifulSoup(response.content, 'xml')
+        items = soup.find_all('item')
+        if items:
+            return {"title": items[0].title.text, "link": items[0].link.text}
+    except Exception as e:
+        logger.error(f"❌ فشل جلب الأخبار: {e}")
     return None
 
 # ==========================================
-# 📤 محرك النشر الذكي والتنوع
+# 💬 التفاعل الذكي (منشنات وقنص العمالقة)
+# ==========================================
+async def process_interactions(bot_id, time_limit):
+    db = load_db()
+    
+    # 1. الرد على المنشنات
+    try:
+        mentions = client_v2.get_users_mentions(id=bot_id, max_results=5, tweet_fields=["created_at"])
+        if mentions and mentions.data:
+            for m in mentions.data:
+                if m.created_at > time_limit and str(m.id) not in db["replied_tweets"]:
+                    reply = await ai_guard(m.text, "reply")
+                    if reply != "SKIP":
+                        client_v2.create_tweet(text=reply, in_reply_to_tweet_id=m.id)
+                        db["replied_tweets"].append(str(m.id))
+                        logger.success(f"✅ تم الرد على المنشن {m.id}")
+                        await asyncio.sleep(5)
+    except Exception as e:
+        logger.error(f"❌ خطأ في المنشن: {e}")
+
+    # 2. Sniper Mode (قنص العمالقة)
+    for giant_id in GIANTS_TO_SNIPE:
+        try:
+            tweets = client_v2.get_users_tweets(id=giant_id, max_results=5, exclude=["retweets","replies"], tweet_fields=["created_at"])
+            if tweets and tweets.data:
+                latest = tweets.data[0]
+                if latest.created_at > time_limit and str(latest.id) not in db["replied_tweets"]:
+                    reply = await ai_guard(latest.text, "reply")
+                    if reply != "SKIP":
+                        client_v2.create_tweet(text=reply, in_reply_to_tweet_id=latest.id)
+                        db["replied_tweets"].append(str(latest.id))
+                        logger.success(f"🎯 تم قنص التغريدة للعملاق {giant_id}")
+                        await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"❌ خطأ في قنص {giant_id}: {e}")
+            
+    # تنظيف الذاكرة القديمة وحفظها
+    db["replied_tweets"] = db["replied_tweets"][-100:] 
+    save_db(db)
+
+# ==========================================
+# 🚀 المهمة الرئيسية – دورة أيبكس
 # ==========================================
 async def run_apex_engine():
-    dice = random.random()
-    logger.info(f"🎲 النسبة المحققة: {dice:.2f}")
+    now_utc = datetime.now(timezone.utc)
+    time_limit = now_utc - timedelta(minutes=TIME_WINDOW_MINUTES)
+    
+    bot_info = client_v2.get_me()
+    bot_id = bot_info.data.id
 
-    # 1. مسار الفيديو (35%)
-    if dice < 0.35:
-        video = get_latest_video()
-        if video:
-            sys_msg = "أنت رقيب محتوى. إذا كان الفيديو تقنياً ومفيداً وأخلاقياً، صغ تغريدة مشوقة. إذا كان غير ذلك اكتب SKIP."
-            content = await ai_guard(f"العنوان: {video['title']}\nالرابط: {video['url']}", sys_msg)
-            if "SKIP" not in content:
-                # تحميل ونشر الفيديو (نفس الكود السابق)
-                path = "temp_v.mp4"
-                with yt_dlp.YoutubeDL({'format': 'mp4', 'outtmpl': path, 'max_filesize': 15*1024*1024}) as ydl:
+    logger.info("🎬 محاولة النشر الأساسي (فيديو/أخبار)...")
+    video = get_latest_video()
+    if video:
+        prompt = f"العنوان: {video['title']}\nالوصف: {video.get('description','أداة ذكاء اصطناعي جديدة')}"
+        tweet_text = await ai_guard(prompt, "post")
+        if tweet_text != "SKIP":
+            video_file = "apex_video.mp4"
+            try:
+                with yt_dlp.YoutubeDL({'format': 'best', 'outtmpl': video_file, 'max_filesize': 15*1024*1024}) as ydl:
                     ydl.download([video['url']])
-                media = api_v1.media_upload(filename=path, media_category='tweet_video')
-                await asyncio.sleep(20) # انتظار المعالجة
-                client_v2.create_tweet(text=content[:280], media_ids=[media.media_id])
-                os.remove(path)
-
-    # 2. مسار الأخبار والثريدات (65%)
+                media = api_v1.media_upload(filename=video_file, media_category='tweet_video')
+                await asyncio.sleep(30)
+                client_v2.create_tweet(text=tweet_text, media_ids=[media.media_id])
+                logger.success("✅ تم نشر الفيديو بنجاح")
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء رفع الفيديو: {e}")
+            finally:
+                if os.path.exists(video_file): os.remove(video_file)
     else:
-        news = await get_latest_news()
-        if news:
-            sys_msg = """أنت محرر تقني. 
-            - امنع الهلوسة: لا تضف أي معلومة غير موجودة في النص.
-            - الفلترة: ارفض أخبار التمويل والأرباح.
-            - التنوع: اختر عشوائياً بين (تغريدة عادية، استطلاع رأي POLL، أو ثريد 1/3).
-            - التنسيق: سطر فارغ بين الجمل + إيموجي تقني.
-            إذا كان الخبر غير مهم للمتابع اكتب SKIP."""
-            
-            content = await ai_guard(f"الخبر: {news['title']}\nالتفاصيل: {news['desc']}\nالمصدر: {news['link']}", sys_msg)
-            
-            if "SKIP" not in content:
-                if "POLL:" in content: # استطلاع رأي
-                    parts = content.split("POLL:")
-                    opts = [o.strip()[:25] for o in parts[1].split(",")][:4]
-                    client_v2.create_tweet(text=parts[0][:280], poll_options=opts, poll_duration_minutes=1440)
-                elif "1/3" in content: # ثريد
-                    tweets = [t.strip() for t in content.split("\n\n") if len(t) > 5]
-                    last_id = None
-                    for t in tweets[:3]:
-                        res = client_v2.create_tweet(text=t[:280], in_reply_to_tweet_id=last_id)
-                        last_id = res.data['id']
-                        await asyncio.sleep(random.randint(20, 40)) # فاصل بشري
-                else: # تغريدة عادية
-                    client_v2.create_tweet(text=content[:280])
+        news_item = await get_latest_rss()
+        if news_item:
+            tweet_text = await ai_guard(news_item['title'], "post")
+            if tweet_text != "SKIP":
+                try:
+                    client_v2.create_tweet(text=f"{tweet_text}\n\n🔗 {news_item['link']}")
+                    logger.success("✅ تم نشر الخبر بنجاح")
+                except Exception as e:
+                    logger.error(f"❌ خطأ في نشر الخبر: {e}")
+
+    logger.info("💬 بدء التفاعل والردود...")
+    await process_interactions(bot_id, time_limit)
+    logger.info("🏁 دورة البوت اكتملت بنجاح")
+
+# ==========================================
+# ⏰ الجدولة
+# ==========================================
+def start_cycle():
+    asyncio.run(run_apex_engine())
 
 if __name__ == "__main__":
-    asyncio.run(run_apex_engine())
+    start_cycle() # تشغيل فوري أول مرة
+    schedule.every(2).hours.do(start_cycle)
+    logger.info("🚀 البوت يعمل تلقائيًا الآن وينتظر الجدولة...")
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
