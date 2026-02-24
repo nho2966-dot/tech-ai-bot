@@ -1,33 +1,30 @@
-name: Apex 2026 Bot
+name: Apex Bot Cycle
+
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  push:
-    branches: [main]
-  workflow_dispatch:
+    # سيتم التشغيل كل 6 ساعات (بتوقيت UTC)
+    # يمكنك تغيير الأوقات لتناسب ذروة التفاعل في منطقتك
+    - cron: '0 */6 * * *' 
+  workflow_dispatch: # يتيح لك تشغيله يدوياً للتحربة
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          python-version: '3.11'
-      - name: Install
-        run: pip install -r requirements.txt
-      - name: Run
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get install ffmpeg # ضروري جداً لمعالجة الفيديوهات
+      - name: Run Bot
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
