@@ -2,31 +2,32 @@ name: Apex Bot Cycle
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */2 * * *' # تشغيل تلقائي كل ساعتين
+  workflow_dispatch: # زر للتشغيل اليدوي للتجربة
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # تحديث لنسخة v4
+      - uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v5 # تحديث لنسخة v5
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # رفع النسخة إلى 3.10 أو 3.11
-          
-      - name: Install dependencies
+          python-version: '3.10'
+
+      - name: Install Dependencies
         run: |
-          pip install --upgrade pip
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
           pip install -r requirements.txt
-          sudo apt-get update && sudo apt-get install ffmpeg -y
-          
-      - name: Run Bot
+
+      - name: Run Apex Engine
         env:
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # أضف بقية المفاتيح هنا في Secrets الخاصة بالمستودع
         run: python main.py
