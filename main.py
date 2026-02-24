@@ -1,7 +1,6 @@
 import os
 import asyncio
 import random
-from datetime import datetime, timezone, timedelta
 from loguru import logger
 import tweepy
 import httpx
@@ -12,127 +11,95 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================================
-# ⚙️ المفاتيح والصلاحيات
+# ⚙️ الإعدادات المعتمدة من الـ Secrets الخاصة بك
 # ==========================================
-KEYS = {"GROQ": os.getenv("GROQ_API_KEY")}
 X_CRED = {
-    "bearer_token": os.getenv("X_BEARER_TOKEN"),            # v2 للقراءة فقط
-    "consumer_key": os.getenv("X_API_KEY"),                 # v1 للنشر
+    "bearer_token": os.getenv("X_BEARER_TOKEN"),
+    "consumer_key": os.getenv("X_API_KEY"),
     "consumer_secret": os.getenv("X_API_SECRET"),
     "access_token": os.getenv("X_ACCESS_TOKEN"),
     "access_token_secret": os.getenv("X_ACCESS_SECRET")
 }
 
-OFFICIAL_REFS = ["GoogleAI", "OpenAI", "DeepMind", "MetaAI", "Microsoft", "AnthropicAI", "NVIDIAAIDev"]
-BLACKLIST = ["سياسة", "مخدرات", "عنصرية", "شتم", "تحريض"]
+# المراجع الموثوقة (مثل Google AI)
+OFFICIAL_REFS = ["GoogleAI", "OpenAI", "DeepMind", "MetaAI", "AnthropicAI"]
+RSS_FEEDS = ["https://aitnews.com/feed/", "https://www.tech-wd.com/wd/feed/"]
 
-# ==========================================
-# 🔑 المصادقة
-# ==========================================
 try:
-    # v2 للقراءة
+    # استخدام Bearer Token للعمليات الحساسة لضمان تخطي خطأ 401
     client_v2 = tweepy.Client(
         bearer_token=X_CRED["bearer_token"],
+        consumer_key=X_CRED["consumer_key"],
+        consumer_secret=X_CRED["consumer_secret"],
+        access_token=X_CRED["access_token"],
+        access_token_secret=X_CRED["access_token_secret"],
         wait_on_rate_limit=True
     )
-
-    # v1 للنشر
-    auth_v1 = tweepy.OAuth1UserHandler(
-        X_CRED["consumer_key"],
-        X_CRED["consumer_secret"],
-        X_CRED["access_token"],
-        X_CRED["access_token_secret"]
-    )
-    api_v1 = tweepy.API(auth_v1)
-
     BOT_ID = client_v2.get_me().data.id
-    logger.success("✅ المحرك انطلق، المصادقة ناجحة لكل من v1 و v2!")
+    logger.success("✅ تم ربط المفاتيح بنجاح يا ناصر!")
 except Exception as e:
-    logger.error(f"❌ فشل المصادقة: {e}")
-    exit()
+    logger.error(f"❌ تأكد من صحة مفاتيح X في الـ Secrets: {e}"); exit()
 
 # ==========================================
-# 🛡️ محرك الذكاء الاصطناعي
+# 🛡️ محرك الذكاء الاصطناعي (أيبكس)
 # ==========================================
 async def ai_guard(prompt, mode="news"):
-    if any(word in prompt.lower() for word in BLACKLIST):
-        return "SKIP"
-
-    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=KEYS["GROQ"])
+    # نستخدم GROQ للسرعة والكفاءة كما هو موجود في قائمتك
+    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_API_KEY"))
     
-    sys_prompt = f"""أنت 'أيبكس'. خبير في الذكاء الاصطناعي وأحدث أدواته.
-    - اللهجة: خليجية بيضاء (بدوية حضرية راقية).
-    - القيود: يمنع ذكر 'الثورة الصناعية' نهائياً، استبدلها بـ 'الذكاء الاصطناعي وأحدث أدواته'.
-    - اللغة: لا تستخدم الإنجليزية في النص، فقط بين أقواس (Name).
-    - النمط: { 'اقتبس وعلق بذكاء' if mode == 'snipe' else 'صغ خبر مفيد للأفراد' }."""
+    sys_prompt = """أنت 'أيبكس'. خبير في الذكاء الاصطناعي وأحدث أدواته.
+    - اللهجة: خليجية بيضاء (مزيج راقي).
+    - القيود: ممنوع ذكر 'الثورة الصناعية'، استبدلها بـ 'الذكاء الاصطناعي وأحدث أدواته'.
+    - المحتوى: ركز على الفائدة المباشرة للأفراد."""
 
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}],
-            temperature=0.1
+            temperature=0.2
         )
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"❌ خطأ AI: {e}")
-        return "SKIP"
+    except: return "SKIP"
 
 # ==========================================
-# 🎯 القنص من المراجع الموثوقة
-# ==========================================
-async def snipe_official_refs():
-    target = random.choice(OFFICIAL_REFS)
-    logger.info(f"🎯 فحص مرجع موثوق: {target}")
-    try:
-        user = client_v2.get_user(username=target)
-        tweets = client_v2.get_users_tweets(
-            id=user.data.id,
-            max_results=5,
-            tweet_fields=['text', 'id']
-        )
-
-        if tweets.data:
-            tweet = tweets.data[0]
-            comment = await ai_guard(tweet.text, mode="snipe")
-            if "SKIP" not in comment:
-                await asyncio.sleep(random.randint(60, 180))
-                # استخدام v1 للنشر لتجنب 401
-                api_v1.update_status(status=comment, in_reply_to_status_id=tweet.id, auto_populate_reply_metadata=True)
-                logger.success(f"🚀 تم قنص تغريدة من {target}!")
-    except Exception as e:
-        logger.error(f"❌ فشل القنص: {e}")
-
-# ==========================================
-# 📰 النشر الدوري
-# ==========================================
-async def post_unique_news():
-    logger.info("📰 جلب أخبار الذكاء الاصطناعي وأحدث أدواته...")
-    try:
-        async with httpx.AsyncClient() as c:
-            r = await c.get("https://aitnews.com/feed/", timeout=10)
-            soup = BeautifulSoup(r.content, 'xml')
-            item = soup.find('item')
-            if item:
-                link = item.link.text
-                my_tweets = client_v2.get_users_tweets(id=BOT_ID, max_results=10)
-                if my_tweets.data and any(link in t.text for t in my_tweets.data):
-                    logger.warning("⚠️ هذا الخبر تم نشره مسبقاً، تخطي...")
-                    return
-
-                tweet_text = await ai_guard(item.title.text, mode="news")
-                if "SKIP" not in tweet_text:
-                    api_v1.update_status(status=f"{tweet_text}\n\n🔗 {link}")
-                    logger.success("✅ تم نشر الخبر بنجاح!")
-    except Exception as e:
-        logger.error(f"❌ خطأ النشر: {e}")
-
-# ==========================================
-# 🚀 المحرك الرئيسي
+# 🎯 محرك القنص ومنع التكرار
 # ==========================================
 async def run_apex_engine():
-    await snipe_official_refs()
-    await post_unique_news()
+    # 1. القنص من المراجع (اقتباس تغريدة تقنية)
+    target = random.choice(OFFICIAL_REFS)
+    try:
+        user = client_v2.get_user(username=target)
+        tweets = client_v2.get_users_tweets(id=user.data.id, max_results=5)
+        if tweets.data:
+            comment = await ai_guard(tweets.data[0].text, mode="snipe")
+            if "SKIP" not in comment:
+                await asyncio.sleep(random.randint(60, 180)) # فاصل بشري
+                client_v2.create_tweet(text=comment, quote_tweet_id=tweets.data[0].id)
+                logger.success(f"🚀 تم قنص تغريدة {target}")
+    except Exception as e: logger.error(f"⚠️ فشل القنص: {e}")
+
+    # 2. نشر خبر RSS (مع فحص التكرار)
+    try:
+        async with httpx.AsyncClient() as c:
+            r = await c.get(random.choice(RSS_FEEDS), timeout=10)
+            soup = BeautifulSoup(r.content, 'xml')
+            items = soup.find_all('item')
+            
+            # فحص آخر تغريداتنا لمنع تكرار الخبر
+            my_history = client_v2.get_users_tweets(id=BOT_ID, max_results=15)
+            history_text = [t.text for t in my_history.data] if my_history.data else []
+
+            for item in items:
+                link = item.link.text
+                if any(link in h for h in history_text): continue
+                
+                txt = await ai_guard(item.title.text, mode="news")
+                if "SKIP" not in txt:
+                    client_v2.create_tweet(text=f"{txt}\n\n🔗 {link}")
+                    logger.success("✅ تم نشر خبر جديد وحصري")
+                    break 
+    except Exception as e: logger.error(f"⚠️ خطأ النشر: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_apex_engine())
