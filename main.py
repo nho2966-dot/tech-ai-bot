@@ -11,7 +11,6 @@ import yt_dlp
 import time
 from datetime import datetime
 from loguru import logger
-import schedule
 
 # =========================================================
 # 🔐 KEYS & AUTH
@@ -27,11 +26,12 @@ BEARER_TOKEN = os.getenv("BEARER_TOKEN")
 
 auth = tweepy.OAuth1UserHandler(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
 api_v1 = tweepy.API(auth)
+# تفعيل wait_on_rate_limit لتجنب حظر حساب X إذا تجاوزت الحد المسموح
 client_v2 = tweepy.Client(
     bearer_token=BEARER_TOKEN,
     consumer_key=X_KEY, consumer_secret=X_SECRET,
     access_token=X_TOKEN, access_token_secret=X_ACCESS_S,
-    wait_on_rate_limit=True
+    wait_on_rate_limit=True 
 )
 
 # =========================================================
@@ -45,7 +45,7 @@ conn.commit()
 # =========================================================
 # ⚙️ CONFIGURABLE PARAMETERS
 # =========================================================
-daily_videos_count = 2           # عدد الفيديوهات اليومية
+daily_videos_count = 1           # تم التعديل إلى 1 لضمان عدم تجاوز حدود X المجانية يومياً (يمكنك زيادته لاحقاً)
 video_length_seconds = 45        # مدة الفيديو بالثواني
 tweets_per_thread = 3            # عدد التغريدات لكل سلسلة
 
@@ -56,7 +56,6 @@ def nasser_filter(text):
     if not text: return ""
     text = text.replace("الثورة الصناعية الرابعة", "الذكاء الاصطناعي وأحدث أدواته")
     
-    # قائمة الكلمات الممنوعة
     banned = [
         "stock","market","investment","funding","revenue","profit","سهم","تداول","عملة","cryptocurrency","بيتكوين"
     ]
@@ -105,7 +104,6 @@ TRUSTED_CHANNELS = [
 
 def fetch_tech_video():
     logger.info("🔎 البحث عن خبايا تقنية جديدة لم تُنشر من قبل...")
-    # البحث في الفيديوهات المنشورة خلال اليومين الماضيين
     ydl_opts = {'quiet': True, 'extract_flat': True, 'daterange': yt_dlp.utils.DateRange('now-2days','now')}
     random.shuffle(TRUSTED_CHANNELS)
     
@@ -114,20 +112,17 @@ def fetch_tech_video():
             try:
                 res = ydl.extract_info(channel, download=False)
                 if 'entries' in res and res['entries']:
-                    # المرور على أول 5 فيديوهات بدلاً من الأول فقط
                     for video in res['entries'][:5]:
                         title = video.get('title','')
                         v_url = video.get('url')
                         
-                        # تخطي الفيديوهات التي تحتوي على كلمات ممنوعة في العنوان
                         if any(w in title.lower() for w in ["stock","market","earnings"]):
                             continue
                             
-                        # التحقق من قاعدة البيانات
                         v_hash = hashlib.sha256(title.encode()).hexdigest()
                         cursor.execute("SELECT hash FROM published WHERE hash=?", (v_hash,))
                         if cursor.fetchone():
-                            continue # الفيديو تم نشره، نبحث عن الذي يليه
+                            continue 
                             
                         return {"title": title, "url": v_url, "hash": v_hash}
             except Exception as e:
@@ -164,17 +159,17 @@ async def post_nasser_thread(title, video_path):
     tweets = [nasser_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
     
     logger.info("🐦 رفع الفيديو والتغريدة الأولى...")
-    # استخدام chunked=True لضمان رفع الفيديوهات دون مشاكل
+    # رفع مجزأ لتخطي قيود الحجم في X
     media = api_v1.media_upload(video_path, media_category='tweet_video', chunked=True)
     
-    # انتظار المعالجة الذكي على سيرفرات X
+    # انتظار المعالجة على سيرفرات X قبل التغريد (مهم جداً لتجنب خطأ Media Not Found)
     for _ in range(15):
         try:
             status = api_v1.get_media_upload_status(media.media_id)
             if status.processing_info.get("state") == "succeeded":
                 break
         except: pass
-        logger.info("⏳ الفيديو قيد المعالجة على X...")
+        logger.info("⏳ الفيديو قيد المعالجة على منصة X...")
         time.sleep(5)
     
     first_tweet = client_v2.create_tweet(text=tweets[0], media_ids=[media.media_id])
@@ -187,7 +182,7 @@ async def post_nasser_thread(title, video_path):
     logger.success("✅ تم نشر السلسلة التقنية بنجاح!")
 
 # =========================================================
-# 🔄 DAILY FLEXIBLE EXECUTION
+# 🚀 EXECUTION FLOW
 # =========================================================
 async def run_daily_task():
     for _ in range(daily_videos_count):
@@ -210,18 +205,7 @@ async def run_daily_task():
         except Exception as e:
             logger.error(f"❌ حدث خطأ أثناء المعالجة أو النشر: {e}")
 
-def schedule_daily(hour=10, minute=0):
-    schedule.clear()
-    schedule.every().day.at(f"{hour:02d}:{minute:02d}").do(lambda: asyncio.run(run_daily_task()))
-    logger.info(f"🕒 تم جدولة المهمة اليومية الساعة {hour:02d}:{minute:02d}")
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
-
-# =========================================================
-# 🚀 START FLEXIBLE DAILY SCHEDULER
-# =========================================================
 if __name__ == "__main__":
-    # ضبط الوقت اليومي (مثلاً الساعة 10:00 صباحًا)
-    schedule_daily(hour=10, minute=0)
+    logger.info("🚀 بدء تشغيل السكربت من GitHub Actions...")
+    asyncio.run(run_daily_task())
+    logger.info("🏁 تمت المهمة وسيتم إغلاق السكربت للحفاظ على الموارد.")
