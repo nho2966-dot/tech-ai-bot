@@ -13,16 +13,19 @@ from datetime import datetime
 from loguru import logger
 
 # =========================================================
-# 🔐 KEYS & AUTH
+# 🔐 KEYS & AUTH (تطابق تام مع أسرار GitHub المرفقة)
 # =========================================================
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 XAI_KEY = os.getenv("XAI_API_KEY")        
 QWEN_KEY = os.getenv("QWEN_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+
 X_KEY = os.getenv("X_API_KEY")
 X_SECRET = os.getenv("X_API_SECRET")
 X_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_S = os.getenv("X_ACCESS_SECRET")
-BEARER_TOKEN = os.getenv("BEARER_TOKEN")
+BEARER_TOKEN = os.getenv("X_BEARER_TOKEN") # تم التحديث هنا
 
 auth = tweepy.OAuth1UserHandler(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
 api_v1 = tweepy.API(auth)
@@ -64,15 +67,20 @@ def nasser_filter(text):
     return text.strip()
 
 # =========================================================
-# 🧠 SOVEREIGN BRAIN
+# 🧠 SOVEREIGN BRAIN (تمت إضافة Groq و OpenRouter الأسرع والأكثر استقراراً)
 # =========================================================
 class SovereignBrain:
     async def generate(self, prompt, system_msg):
-        brains = [
-            ("GROK", "https://api.x.ai/v1/chat/completions", {"Authorization": f"Bearer {XAI_KEY}"}, "grok-beta"),
-            ("OPENAI", "https://api.openai.com/v1/chat/completions", {"Authorization": f"Bearer {OPENAI_KEY}"}, "gpt-4o-mini"),
-            ("QWEN", "https://api.labs.qwen.ai/v1/chat/completions", {"Authorization": f"Bearer {QWEN_KEY}"}, "qwen-7b")
-        ]
+        brains = []
+        if GROQ_KEY:
+            brains.append(("GROQ", "https://api.groq.com/openai/v1/chat/completions", {"Authorization": f"Bearer {GROQ_KEY}"}, "llama3-70b-8192"))
+        if OPENROUTER_KEY:
+            brains.append(("OPENROUTER", "https://openrouter.ai/api/v1/chat/completions", {"Authorization": f"Bearer {OPENROUTER_KEY}"}, "google/gemini-2.5-flash"))
+        if OPENAI_KEY:
+            brains.append(("OPENAI", "https://api.openai.com/v1/chat/completions", {"Authorization": f"Bearer {OPENAI_KEY}"}, "gpt-4o-mini"))
+        if XAI_KEY:
+            brains.append(("GROK", "https://api.x.ai/v1/chat/completions", {"Authorization": f"Bearer {XAI_KEY}"}, "grok-beta"))
+            
         for name, url, headers, model in brains:
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
@@ -85,7 +93,9 @@ class SovereignBrain:
             except Exception as e:
                 logger.warning(f"⚠️ Brain {name} failed: {e}")
                 continue
-        return "سر تقني جديد في الطريق إليكم.."
+                
+        logger.error("❌ فشلت جميع نماذج الذكاء الاصطناعي في الاستجابة!")
+        return None # صمام الأمان لمنع تكرار التغريدات
 
 brain = SovereignBrain()
 
@@ -158,8 +168,12 @@ async def post_nasser_thread(title, video_path):
     prompt = f"حول هذا الموضوع التقني إلى سلسلة تغريدات (Thread) خليجية عن الخبايا: {title}. قسمها لـ {tweets_per_thread} تغريدات."
     system = "أنت ناصر، خبير خبايا الأجهزة وأسرار الإنترنت والذكاء الاصطناعي."
     raw_content = await brain.generate(prompt, system)
-    tweets = [nasser_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
     
+    if not raw_content:
+        logger.warning("🛑 تم إيقاف النشر لعدم توفر محتوى من الذكاء الاصطناعي.")
+        return
+        
+    tweets = [nasser_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
     if not tweets: return
     
     logger.info("🐦 رفع الفيديو والتغريدة الأولى...")
@@ -192,11 +206,13 @@ async def post_text_only_thread():
     system = "أنت ناصر، خبير خبايا الأجهزة وأسرار الإنترنت والذكاء الاصطناعي."
     
     raw_content = await brain.generate(prompt, system)
-    tweets = [nasser_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
     
-    if not tweets:
-        logger.error("❌ فشل الذكاء الاصطناعي في توليد النص البديل.")
+    if not raw_content:
+        logger.warning("🛑 فشل الذكاء الاصطناعي تماماً، تم إيقاف عملية النشر بأمان.")
         return
+        
+    tweets = [nasser_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
+    if not tweets: return
         
     logger.info("🐦 جاري نشر السلسلة النصية...")
     first_tweet = client_v2.create_tweet(text=tweets[0])
@@ -215,7 +231,6 @@ async def run_daily_task():
     for _ in range(daily_videos_count):
         video_data = fetch_tech_video()
         
-        # الخطة البديلة 1: إذا لم يجد السكربت أي فيديو جديد
         if not video_data: 
             logger.warning("⚠️ لا توجد فيديوهات جديدة لم تُنشر اليوم.")
             await post_text_only_thread()
@@ -234,7 +249,6 @@ async def run_daily_task():
                 if os.path.exists(f): os.remove(f)
                 
         except Exception as e:
-            # الخطة البديلة 2: إذا حدث أي خطأ أثناء التحميل، أو قص الفيديو، أو الرفع
             logger.error(f"❌ حدث خطأ أثناء معالجة أو رفع الفيديو: {e}")
             await post_text_only_thread()
 
