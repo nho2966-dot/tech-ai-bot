@@ -95,7 +95,7 @@ class SovereignBrain:
 brain = SovereignBrain()
 
 # =========================================================
-# 🎥 MULTI-SOURCE RADAR (المصادر الموسعة ومحرك البحث)
+# 🎥 MULTI-SOURCE RADAR
 # =========================================================
 TRUSTED_CHANNELS = [
     "https://www.youtube.com/@mkbhd",
@@ -126,7 +126,6 @@ def fetch_tech_video():
     ydl_opts_channels = {'quiet': True, 'extract_flat': True, 'daterange': yt_dlp.utils.DateRange('now-3days','now')}
     random.shuffle(TRUSTED_CHANNELS)
     
-    # 1. البحث في القنوات المحددة أولاً (لضمان الجودة العالية)
     with yt_dlp.YoutubeDL(ydl_opts_channels) as ydl:
         for channel in TRUSTED_CHANNELS:
             try:
@@ -147,7 +146,6 @@ def fetch_tech_video():
             except Exception:
                 continue
 
-    # 2. الخطة البديلة المضمونة: محرك البحث المفتوح (إذا لم تجد القنوات شيئاً جديداً)
     logger.info("⚠️ لم نجد فيديوهات جديدة في القنوات، جاري تفعيل محرك البحث المفتوح الشامل...")
     ydl_opts_search = {'quiet': True, 'extract_flat': True} 
     random.shuffle(SEARCH_QUERIES)
@@ -226,9 +224,16 @@ async def post_video_thread(title, video_path):
     try:
         first_tweet = client_v2.create_tweet(text=tweets[0], media_ids=[media.media_id])
         last_id = first_tweet.data['id']
+        
         for i in range(1, len(tweets)):
+            # أنسنة: فاصل زمني عشوائي بين 10 و 25 ثانية ليوحي بأن هناك من يكتب
+            delay = random.randint(10, 25)
+            logger.info(f"⏳ (أنسنة) جاري الانتظار لمدة {delay} ثانية قبل نشر التغريدة التالية...")
+            await asyncio.sleep(delay)
+            
             reply = client_v2.create_tweet(text=tweets[i], in_reply_to_tweet_id=last_id)
             last_id = reply.data['id']
+            
         logger.success("✅ تم نشر السلسلة التقنية (مع الفيديو) بنجاح!")
     except Exception as e:
         logger.error(f"❌ فشل النشر على منصة X. السبب: {e}")
@@ -274,6 +279,11 @@ async def post_text_only_thread():
         last_id = first_tweet.data['id']
         
         for i in range(1, len(tweets)):
+            # أنسنة: فاصل زمني عشوائي بين 10 و 25 ثانية ليوحي بأن هناك من يكتب
+            delay = random.randint(10, 25)
+            logger.info(f"⏳ (أنسنة) جاري الانتظار لمدة {delay} ثانية قبل نشر التغريدة التالية...")
+            await asyncio.sleep(delay)
+            
             reply = client_v2.create_tweet(text=tweets[i], in_reply_to_tweet_id=last_id)
             last_id = reply.data['id']
             
