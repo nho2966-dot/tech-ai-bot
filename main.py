@@ -58,11 +58,12 @@ tweets_per_thread = 3
 def content_filter(text):
     if not text: return ""
     banned = [
-        "stock","market","investment","funding","revenue","profit","سهم","تداول","عملة","cryptocurrency","بيتكوين"
+        "stock","market","investment","funding","revenue","profit","سهم","تداول","عملة","cryptocurrency","بيتكوين", "ناصر", "خبير"
     ]
     for word in banned: 
         text = re.sub(rf"\b{word}\b", "", text, flags=re.IGNORECASE)
-    return text.strip()
+    text = re.sub(r'^(التغريدة \d+:|تغريدة \d+)\s*', '', text, flags=re.IGNORECASE).strip()
+    return text
 
 # =========================================================
 # 🧠 SOVEREIGN BRAIN
@@ -70,7 +71,6 @@ def content_filter(text):
 class SovereignBrain:
     async def generate(self, prompt, system_msg):
         brains = []
-        
         if GEMINI_KEY: brains.append(("GEMINI", f"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {"Authorization": f"Bearer {GEMINI_KEY}"}, "gemini-2.5-flash"))
         if GROQ_KEY: brains.append(("GROQ", "https://api.groq.com/openai/v1/chat/completions", {"Authorization": f"Bearer {GROQ_KEY}"}, "llama-3.3-70b-versatile"))
         if XAI_KEY: brains.append(("GROK", "https://api.x.ai/v1/chat/completions", {"Authorization": f"Bearer {XAI_KEY}"}, "grok-2-latest"))
@@ -89,14 +89,13 @@ class SovereignBrain:
             except Exception as e:
                 logger.warning(f"⚠️ Brain {name} failed: {e}")
                 continue
-                
         logger.error("❌ فشلت جميع نماذج الذكاء الاصطناعي في الاستجابة!")
         return None
 
 brain = SovereignBrain()
 
 # =========================================================
-# 🎥 MULTI-SOURCE RADAR
+# 🎥 MULTI-SOURCE RADAR (المصادر الموسعة ومحرك البحث)
 # =========================================================
 TRUSTED_CHANNELS = [
     "https://www.youtube.com/@mkbhd",
@@ -104,25 +103,66 @@ TRUSTED_CHANNELS = [
     "https://www.youtube.com/@ProperHonestTech",
     "https://www.youtube.com/@HowToMen",
     "https://www.youtube.com/@MattWolfe",
-    "https://www.youtube.com/@TheAIAdvantage"
+    "https://www.youtube.com/@TheAIAdvantage",
+    "https://www.youtube.com/@ThioJoe",
+    "https://www.youtube.com/@zoneoftech",
+    "https://www.youtube.com/@TechSpurt",
+    "https://www.youtube.com/@AndroidAuthority",
+    "https://www.youtube.com/@TheVerge",
+    "https://www.youtube.com/@cnet"
+]
+
+SEARCH_QUERIES = [
+    "ytsearch10: tech tips and tricks",
+    "ytsearch10: hidden smartphone features shorts",
+    "ytsearch10: secret iphone tricks",
+    "ytsearch10: best AI tools tutorial",
+    "ytsearch10: android hacks shorts",
+    "ytsearch10: cool tech gadgets"
 ]
 
 def fetch_tech_video():
-    logger.info("🔎 البحث عن خبايا تقنية جديدة لم تُنشر من قبل...")
-    ydl_opts = {'quiet': True, 'extract_flat': True, 'daterange': yt_dlp.utils.DateRange('now-2days','now')}
+    logger.info("🔎 البحث عن خبايا تقنية جديدة من القنوات الموثوقة...")
+    ydl_opts_channels = {'quiet': True, 'extract_flat': True, 'daterange': yt_dlp.utils.DateRange('now-3days','now')}
     random.shuffle(TRUSTED_CHANNELS)
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    # 1. البحث في القنوات المحددة أولاً (لضمان الجودة العالية)
+    with yt_dlp.YoutubeDL(ydl_opts_channels) as ydl:
         for channel in TRUSTED_CHANNELS:
             try:
                 res = ydl.extract_info(channel, download=False)
                 if 'entries' in res and res['entries']:
                     for video in res['entries'][:5]:
                         title = video.get('title') or ""
-                        v_url = video.get('url')
+                        v_url = video.get('url') or (f"https://www.youtube.com/watch?v={video.get('id')}" if video.get('id') else None)
                         
-                        if not v_url or not isinstance(v_url, str): continue
-                        if any(w in title.lower() for w in ["stock","market","earnings"]): continue
+                        if not v_url: continue
+                        if any(w in title.lower() for w in ["stock","market","earnings","review","podcast"]): continue
+                            
+                        v_hash = hashlib.sha256(title.encode()).hexdigest()
+                        cursor.execute("SELECT hash FROM published WHERE hash=?", (v_hash,))
+                        if cursor.fetchone(): continue 
+                            
+                        return {"title": title, "url": v_url, "hash": v_hash}
+            except Exception:
+                continue
+
+    # 2. الخطة البديلة المضمونة: محرك البحث المفتوح (إذا لم تجد القنوات شيئاً جديداً)
+    logger.info("⚠️ لم نجد فيديوهات جديدة في القنوات، جاري تفعيل محرك البحث المفتوح الشامل...")
+    ydl_opts_search = {'quiet': True, 'extract_flat': True} 
+    random.shuffle(SEARCH_QUERIES)
+    
+    with yt_dlp.YoutubeDL(ydl_opts_search) as ydl:
+        for query in SEARCH_QUERIES:
+            try:
+                res = ydl.extract_info(query, download=False)
+                if 'entries' in res and res['entries']:
+                    for video in res['entries']:
+                        title = video.get('title') or ""
+                        v_url = video.get('url') or (f"https://www.youtube.com/watch?v={video.get('id')}" if video.get('id') else None)
+                        
+                        if not v_url: continue
+                        if any(w in title.lower() for w in ["stock","market","earnings","review","podcast"]): continue
                             
                         v_hash = hashlib.sha256(title.encode()).hexdigest()
                         cursor.execute("SELECT hash FROM published WHERE hash=?", (v_hash,))
@@ -130,8 +170,9 @@ def fetch_tech_video():
                             
                         return {"title": title, "url": v_url, "hash": v_hash}
             except Exception as e:
-                logger.warning(f"⚠️ فشل الجلب من {channel}: {e}")
+                logger.warning(f"⚠️ فشل البحث في الاستعلام {query}: {e}")
                 continue
+
     return None
 
 def process_video(url):
@@ -154,14 +195,23 @@ def process_video(url):
 # 🐦 THREAD POSTING (WITH VIDEO)
 # =========================================================
 async def post_video_thread(title, video_path):
-    prompt = f"لخص هذا الموضوع التقني: ({title}) في سلسلة من {tweets_per_thread} تغريدات. **بما أن الحساب يمتلك اشتراك X Premium، لديك مساحة حرة لكتابة تغريدات طويلة ومفصلة.** ادخل في صلب الموضوع فوراً واذكر الفائدة المباشرة للمتابع بطريقة مشوقة وواضحة."
-    system = "أنت حساب تقني احترافي. **تنبيه صارم: لا تذكر أي أسماء أشخاص أبداً. اكتب بأسلوب خليجي تقني مباشر، وقدم معلومة متكاملة ومفيدة للمتابع مستغلاً ميزة التغريدات الطويلة.**"
-    raw_content = await brain.generate(prompt, system)
+    prompt = f"""اكتب سلسلة من {tweets_per_thread} تغريدات تفصيلية تشرح هذا الموضوع التقني: ({title}).
+يجب أن تحتوي السلسلة على قيمة مضافة حقيقية ومعلومات دسمة (استغل مساحة X Premium).
+
+القالب الإلزامي:
+التغريدة 1: ادخل في صلب الموضوع مباشرة. اذكر اسم التقنية/الميزة والفائدة الحقيقية التي ستقدمها للمستخدم (بدون مقدمات طويلة).
+التغريدة 2: اشرح "كيف تعمل" هذه التقنية بالتفصيل أو اذكر مميزاتها القوية بأمثلة عملية.
+التغريدة 3: اذكر "كيفية الاستخدام" أو الخطوات العملية للاستفادة منها، واختم بـ 2 هاشتاجات.
+
+يجب الفصل بين كل تغريدة وأخرى بسطرين فارغين (\\n\\n)."""
+
+    system = "أنت حساب تقني احترافي يقدم محتوى عالي الجودة. لا تستخدم أي أسماء شخصية. لا تكتب مقدمات فارغة أو ثرثرة. قدم معلومة تقنية مركزة، مفصلة، ومفيدة جداً للقارئ بأسلوب خليجي واضح."
     
+    raw_content = await brain.generate(prompt, system)
     if not raw_content: return
         
-    tweets = [content_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
-    if not tweets: return
+    tweets = [content_filter(t) for t in raw_content.split('\n\n') if len(t.strip()) > 10][:tweets_per_thread]
+    if len(tweets) < tweets_per_thread: return
     
     logger.info("🐦 رفع الفيديو والتغريدة الأولى...")
     media = api_v1.media_upload(video_path, media_category='tweet_video', chunked=True)
@@ -174,13 +224,12 @@ async def post_video_thread(title, video_path):
         time.sleep(5)
     
     try:
-        # تمت إزالة القيود [:280] للاستفادة من اشتراك Premium
         first_tweet = client_v2.create_tweet(text=tweets[0], media_ids=[media.media_id])
         last_id = first_tweet.data['id']
         for i in range(1, len(tweets)):
             reply = client_v2.create_tweet(text=tweets[i], in_reply_to_tweet_id=last_id)
             last_id = reply.data['id']
-        logger.success("✅ تم نشر السلسلة التقنية (مع الفيديو) بنجاح مستغلاً مساحة X Premium!")
+        logger.success("✅ تم نشر السلسلة التقنية (مع الفيديو) بنجاح!")
     except Exception as e:
         logger.error(f"❌ فشل النشر على منصة X. السبب: {e}")
 
@@ -189,21 +238,38 @@ async def post_video_thread(title, video_path):
 # =========================================================
 async def post_text_only_thread():
     logger.info("📝 تفعيل الخطة البديلة: جاري إنشاء محتوى نصي...")
-    prompt = f"اكتب سلسلة من {tweets_per_thread} تغريدات تشرح 'ميزة تقنية مخفية ومفيدة' في الهواتف الذكية أو أداة ذكاء اصطناعي.\n**تنويه: الحساب يمتلك اشتراك X Premium، لذا اكتب تغريدات طويلة ودسمة بالمعلومات والخطوات التفصيلية.**\nالتغريدة 1: اذكر المشكلة الشائعة بأسلوب مشوق ومفصل.\nالتغريدة 2: اذكر اسم الميزة المخفية وكيف تحل المشكلة بعمق.\nالتغريدة 3: اشرح خطوات تفعيلها بالتفصيل."
-    system = "أنت حساب تقني احترافي. **تنبيه صارم: لا تذكر أي أسماء أشخاص أبداً. اكتب بأسلوب خليجي تقني مباشر، وقدم معلومة متكاملة ومفيدة جداً للمتابع.**"
+    
+    tech_topics = [
+        "ميزة مخفية في الآيفون لحماية الخصوصية من التطبيقات التي تتجسس على الحافظة (Clipboard).",
+        "طريقة استخدام الذكاء الاصطناعي لتلخيص ملفات PDF الطويلة جداً في ثوانٍ.",
+        "كيفية تفعيل ميزة عزل الصوت المحيطي في المكالمات المزدحمة للآيفون والأندرويد.",
+        "تطبيق مخفي أو ميزة غير معروفة لتحسين أداء بطارية الهاتف وإيقاف استنزاف الخلفية."
+    ]
+    topic = random.choice(tech_topics)
+
+    prompt = f"""اكتب سلسلة من {tweets_per_thread} تغريدات تفصيلية تشرح هذا الموضوع: ({topic}).
+يجب أن تقدم السلسلة قيمة مضافة حقيقية ومعلومات دقيقة (استغل مساحة X Premium).
+
+القالب الإلزامي:
+التغريدة 1: ادخل في صلب الموضوع مباشرة. اشرح الفائدة الحقيقية ولماذا يحتاج المستخدم هذه الميزة (تجنب المقدمات الفارغة).
+التغريدة 2: اشرح بتعمق كيف تعمل الميزة، وأين توجد بالضبط في النظام أو التطبيق.
+التغريدة 3: اكتب "الخطوات العملية" 1، 2، 3 بشكل واضح جداً ليتمكن المستخدم من تطبيقها فوراً، واختم بهاشتاجين.
+
+يجب الفصل بين كل تغريدة وأخرى بسطرين فارغين (\\n\\n)."""
+
+    system = "أنت حساب تقني احترافي يقدم محتوى عالي الجودة. لا تستخدم أي أسماء شخصية. لا تكتب مقدمات فارغة. قدم معلومة تقنية مركزة، مفصلة، ومفيدة جداً للقارئ بأسلوب خليجي واضح ومباشر."
     
     raw_content = await brain.generate(prompt, system)
     if not raw_content: return
         
-    tweets = [content_filter(t) for t in raw_content.split('\n\n') if t][:tweets_per_thread]
-    if not tweets: return
+    tweets = [content_filter(t) for t in raw_content.split('\n\n') if len(t.strip()) > 10][:tweets_per_thread]
+    if len(tweets) < tweets_per_thread: return
         
     logger.info("🐦 جاري نشر السلسلة النصية... إليك المحتوى الذي سيتم نشره:")
     for idx, t in enumerate(tweets):
-        logger.info(f"التغريدة {idx+1} (طولها {len(t)} حرف): {t}")
+        logger.info(f"التغريدة {idx+1}:\n{t}\n---")
         
     try:
-        # تمت إزالة القيود [:280] للاستفادة من اشتراك Premium
         first_tweet = client_v2.create_tweet(text=tweets[0])
         last_id = first_tweet.data['id']
         
@@ -211,7 +277,7 @@ async def post_text_only_thread():
             reply = client_v2.create_tweet(text=tweets[i], in_reply_to_tweet_id=last_id)
             last_id = reply.data['id']
             
-        logger.success("✅ تم نشر السلسلة النصية البديلة بنجاح مستغلاً مساحة X Premium!")
+        logger.success("✅ تم نشر السلسلة النصية البديلة بنجاح!")
     except Exception as e:
         logger.error(f"❌ فشل النشر على منصة X: {e}")
 
