@@ -2,9 +2,8 @@ name: Nasser Tech Bot Daily Run
 
 on:
   schedule:
-    # يعمل يومياً الساعة 06:00 UTC (ما يعادل 10:00 صباحاً بتوقيت مسقط)
     - cron: '0 6 * * *'
-  workflow_dispatch: # زر التشغيل اليدوي من واجهة GitHub
+  workflow_dispatch:
 
 jobs:
   build_and_run:
@@ -31,12 +30,15 @@ jobs:
 
       - name: Run Nasser Tech Bot
         env:
+          # تم تحديث الأسماء لتتطابق تماماً مع الصورة المرفقة
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
