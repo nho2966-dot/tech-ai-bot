@@ -13,19 +13,20 @@ from datetime import datetime
 from loguru import logger
 
 # =========================================================
-# 🔐 KEYS & AUTH (تطابق تام مع أسرار GitHub المرفقة)
+# 🔐 KEYS & AUTH (تطابق تام مع أسرار GitHub)
 # =========================================================
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 XAI_KEY = os.getenv("XAI_API_KEY")        
 QWEN_KEY = os.getenv("QWEN_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_KEY = os.getenv("GEMINI_KEY")
 
 X_KEY = os.getenv("X_API_KEY")
 X_SECRET = os.getenv("X_API_SECRET")
 X_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_S = os.getenv("X_ACCESS_SECRET")
-BEARER_TOKEN = os.getenv("X_BEARER_TOKEN") # تم التحديث هنا
+BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 
 auth = tweepy.OAuth1UserHandler(X_KEY, X_SECRET, X_TOKEN, X_ACCESS_S)
 api_v1 = tweepy.API(auth)
@@ -67,20 +68,32 @@ def nasser_filter(text):
     return text.strip()
 
 # =========================================================
-# 🧠 SOVEREIGN BRAIN (تمت إضافة Groq و OpenRouter الأسرع والأكثر استقراراً)
+# 🧠 SOVEREIGN BRAIN (النماذج المحدثة وإضافة Gemini)
 # =========================================================
 class SovereignBrain:
     async def generate(self, prompt, system_msg):
         brains = []
+        
+        # 1. Gemini (مجاني، سريع، وموثوق)
+        if GEMINI_KEY:
+            brains.append(("GEMINI", f"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {"Authorization": f"Bearer {GEMINI_KEY}"}, "gemini-2.5-flash"))
+            
+        # 2. Groq (أحدث نسخة من النموذج)
         if GROQ_KEY:
-            brains.append(("GROQ", "https://api.groq.com/openai/v1/chat/completions", {"Authorization": f"Bearer {GROQ_KEY}"}, "llama3-70b-8192"))
+            brains.append(("GROQ", "https://api.groq.com/openai/v1/chat/completions", {"Authorization": f"Bearer {GROQ_KEY}"}, "llama-3.3-70b-versatile"))
+            
+        # 3. Grok (أحدث نسخة)
+        if XAI_KEY:
+            brains.append(("GROK", "https://api.x.ai/v1/chat/completions", {"Authorization": f"Bearer {XAI_KEY}"}, "grok-2-latest"))
+            
+        # 4. OpenRouter
         if OPENROUTER_KEY:
             brains.append(("OPENROUTER", "https://openrouter.ai/api/v1/chat/completions", {"Authorization": f"Bearer {OPENROUTER_KEY}"}, "google/gemini-2.5-flash"))
+            
+        # 5. OpenAI
         if OPENAI_KEY:
             brains.append(("OPENAI", "https://api.openai.com/v1/chat/completions", {"Authorization": f"Bearer {OPENAI_KEY}"}, "gpt-4o-mini"))
-        if XAI_KEY:
-            brains.append(("GROK", "https://api.x.ai/v1/chat/completions", {"Authorization": f"Bearer {XAI_KEY}"}, "grok-beta"))
-            
+
         for name, url, headers, model in brains:
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
@@ -95,7 +108,7 @@ class SovereignBrain:
                 continue
                 
         logger.error("❌ فشلت جميع نماذج الذكاء الاصطناعي في الاستجابة!")
-        return None # صمام الأمان لمنع تكرار التغريدات
+        return None # صمام الأمان لمنع التكرار
 
 brain = SovereignBrain()
 
