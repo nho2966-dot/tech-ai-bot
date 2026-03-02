@@ -2,7 +2,7 @@ name: Nasser Sovereign AI Bot
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # يشتغل تلقائياً كل 3 ساعات
+    - cron: '0 */3 * * *' # يشتغل كل 3 ساعات
   workflow_dispatch:      # زر تشغيل يدوي
 
 jobs:
@@ -16,7 +16,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # تسريع تثبيت المكتبات
+          cache: 'pip'
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Install System Dependencies
         run: |
@@ -30,7 +35,7 @@ jobs:
       - name: Restore Database Cache
         uses: actions/cache@v3
         with:
-          path: nasser_scoops_final.db
+          path: nasser_sovereign_v2.db
           key: ${{ runner.os }}-db-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-db-
@@ -43,11 +48,11 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-        run: python your_script_name.py # تأكد من تغيير الاسم لاسم ملفك
+        run: python main.py  # تأكدت إن الاسم هو main.py
 
       - name: Save Database Changes
         if: always()
         uses: actions/cache@v3
         with:
-          path: nasser_scoops_final.db
+          path: nasser_sovereign_v2.db
           key: ${{ runner.os }}-db-${{ github.run_id }}
