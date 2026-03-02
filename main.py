@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime
 from loguru import logger
 
-# --- 🔐 الإعدادات (تأكد من ضبط المتغيرات في البيئة) ---
+# --- 🔐 الإعدادات ---
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 X_CREDS = {
     "key": os.getenv("X_API_KEY"),
@@ -19,20 +19,23 @@ X_CREDS = {
     "bearer": os.getenv("X_BEARER_TOKEN")
 }
 
-# إعداد Tweepy (V1 للوسائط و V2 للتغريدات)
-auth = tweepy.OAuth1UserHandler(X_CREDS["key"], X_CREDS["secret"], X_CREDS["token"], X_CREDS["access_s"])
-api_v1 = tweepy.API(auth)
-client_v2 = tweepy.Client(
-    bearer_token=X_CREDS["bearer"],
-    consumer_key=X_CREDS["key"], consumer_secret=X_CREDS["secret"],
-    access_token=X_CREDS["token"], access_token_secret=X_CREDS["access_s"]
-)
+# إعداد تويتر (Tweepy)
+try:
+    auth = tweepy.OAuth1UserHandler(X_CREDS["key"], X_CREDS["secret"], X_CREDS["token"], X_CREDS["access_s"])
+    api_v1 = tweepy.API(auth)
+    client_v2 = tweepy.Client(
+        bearer_token=X_CREDS["bearer"],
+        consumer_key=X_CREDS["key"], consumer_secret=X_CREDS["secret"],
+        access_token=X_CREDS["token"], access_token_secret=X_CREDS["access_s"]
+    )
+    logger.info("📡 تم تهيئة اتصال تويتر بنجاح")
+except Exception as e:
+    logger.critical(f"🛑 خطأ في إعدادات API تويتر: {e}")
 
 # --- 🗄️ قاعدة البيانات ---
 def init_db():
     conn = sqlite3.connect("nasser_tech.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS archive (id TEXT PRIMARY KEY, content TEXT, date TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY, date TEXT)")
     conn.commit()
     return conn
@@ -41,124 +44,108 @@ conn = init_db()
 
 # --- 🧠 ذكاء ناصر (Gemini) ---
 async def ask_gemini(prompt, system_role="tech_expert"):
-    # شخصية ناصر الخليجي
     nasir_persona = (
-        "أنت ناصر، خبير تقني خليجي متمكن. أسلوبك: لهجة خليجية بيضاء، محفز، بسيط، وقريب من الناس. "
-        "تستخدم عبارات مثل: 'يا جماعة الخير'، 'لقطة اليوم'، 'خلوكم قريبين'. "
-        "لا تستخدم الفصحى المعقدة. إذا شرحت أداة، ركز على كيف تسهل حياة الشخص."
+        "أنت ناصر، خبير تقني خليجي متمكن. أسلوبك: لهجة خليجية بيضاء، حماسي، بسيط. "
+        "تستخدم كلمات مثل 'يا هلا'، 'شي بطل'، 'لا يفوتكم'. "
+        "تشرح الأدوات بأسلوب عملي بعيداً عن الفصحى الجامدة."
     )
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
     payload = {
-        "contents": [{"parts": [{"text": f"{nasir_persona}\n\nالسياق: {system_role}\nالطلب: {prompt}"}]}],
-        "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
+        "contents": [{"parts": [{"text": f"{nasir_persona}\n\nسياق الموضوع: {system_role}\nالطلب: {prompt}"}]}]
     }
     
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=40) as client:
             r = await client.post(url, json=payload)
             data = r.json()
-            res = data['candidates'][0]['content']['parts'][0]['text']
-            # تنظيف النص من أي فلاتر غير مرغوبة
-            return res.replace("الثورة الصناعية الرابعة", "الذكاء الاصطناعي").strip()
+            
+            # فحص دقيق للرد لتجنب KeyError 'candidates'
+            if r.status_code == 200 and 'candidates' in data and data['candidates']:
+                res_text = data['candidates'][0]['content']['parts'][0]['text']
+                return res_text.strip()
+            else:
+                logger.error(f"⚠️ فشل استجابة AI: {data.get('error', 'تنسيق غير متوقع')}")
+                return None
     except Exception as e:
-        logger.error(f"❌ خطأ AI: {e}")
+        logger.error(f"❌ خطأ تقني في Gemini: {e}")
         return None
 
-# --- 🎥 رادار الفيديو ---
+# --- 🎥 جلب الفيديوهات ---
 async def download_video():
-    sources = [
-        "https://www.youtube.com/@Omardizer", 
-        "https://www.youtube.com/@FaisalAlsaif",
-        "https://www.youtube.com/@TheVerge"
-    ]
+    sources = ["https://www.youtube.com/@Omardizer", "https://www.youtube.com/@FaisalAlsaif"]
     target = random.choice(sources)
-    filename = f"nasser_vid_{random.getrandbits(16)}.mp4"
+    filename = f"vid_{random.getrandbits(16)}.mp4"
     
+    # تحميل أول 15 ثانية فقط لضمان سرعة الرفع وتجنب رفض تويتر
     cmd = [
         "yt-dlp", "--quiet", "--no-warnings", "--format", "mp4",
-        "--max-filesize", "15M", "--playlist-items", "1",
-        "--download-sections", "*0-25", "-o", filename, target
+        "--max-filesize", "8M", "--playlist-items", "1",
+        "--download-sections", "*0-15", "-o", filename, target
     ]
     
     try:
         process = await asyncio.create_subprocess_exec(*cmd)
-        await process.wait()
+        await asyncio.wait_for(process.wait(), timeout=120)
         return filename if os.path.exists(filename) else None
     except:
         return None
 
-# --- 🐦 وظائف النشر والردود ---
+# --- 🐦 النشر والردود الذكية ---
 async def post_to_x(content, video_path=None):
     try:
         media_id = None
         if video_path:
-            logger.info("📤 جاري رفع الفيديو بنظام الأجزاء...")
-            # استخدام chunked=True لضمان رفع الملفات الكبيرة بنجاح
+            logger.info("📤 جاري رفع الفيديو...")
             media = api_v1.media_upload(filename=video_path, media_category='tweet_video', chunked=True)
             media_id = media.media_id
-            
-            # انتظار معالجة الفيديو في سيرفرات تويتر
-            logger.info("⏳ انتظار معالجة الفيديو...")
-            time.sleep(15) 
+            time.sleep(15) # انتظار المعالجة
 
-        response = client_v2.create_tweet(text=content, media_ids=[media_id] if media_id else None)
-        logger.success(f"✅ تم النشر! ID: {response.data['id']}")
-        return response.data['id']
+        client_v2.create_tweet(text=content, media_ids=[media_id] if media_id else None)
+        logger.success("✅ تم نشر التغريدة بنجاح")
     except Exception as e:
-        logger.error(f"❌ فشل النشر: {e}")
-        return None
+        if "403" in str(e):
+            logger.error("🛑 خطأ 403: تويتر ما زال يرفض الكتابة. (تأكد من تجديد الـ Tokens)")
+        else:
+            logger.error(f"❌ فشل النشر: {e}")
 
 async def handle_mentions():
     try:
         me = client_v2.get_me().data
-        mentions = client_v2.get_users_mentions(id=me.id, tweet_fields=['text', 'author_id']).data
-        
+        mentions = client_v2.get_users_mentions(id=me.id).data
         if not mentions: return
 
-        for tweet in mentions[:5]: # معالجة آخر 5 منشن فقط لتجنب الحظر
+        for tweet in mentions[:3]:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),))
             if cursor.fetchone(): continue
 
-            # هل السائل يطلب رابط؟
-            is_asking_link = any(word in tweet.text.lower() for word in ["رابط", "لينك", "وين", "اسم", "link", "url"])
-            
-            context = "رد ذكي وقصير"
-            if is_asking_link:
-                context = "رد على شخص يطلب رابط الأداة. أخبره أنك ستحاول توفيره قريباً أو ابحث له عن اسم الأداة المقترحة."
-
-            reply_text = await ask_gemini(f"المنشن: {tweet.text}", context)
-            
+            reply_text = await ask_gemini(f"رد بلهجة ناصر على: {tweet.text}", "رد على منشن")
             if reply_text:
                 client_v2.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
                 cursor.execute("INSERT INTO replies VALUES (?,?)", (str(tweet.id), datetime.now().isoformat()))
                 conn.commit()
-                logger.info(f"📩 تم الرد على: {tweet.id}")
-                await asyncio.sleep(20) # فاصل زمني بين الردود
+                logger.info(f"📩 تم الرد على {tweet.id}")
+                await asyncio.sleep(15)
     except Exception as e:
-        logger.error(f"❌ خطأ في الردود: {e}")
+        logger.error(f"❌ خطأ في المنشن: {e}")
 
-# --- 🚀 المحرك الرئيسي ---
+# --- 🚀 التشغيل الدوري ---
 async def main():
-    logger.info("🤖 تشغيل بوت ناصر التقني...")
+    logger.info("🤖 بوت ناصر التقني بدأ العمل...")
     
     while True:
-        # 1. توليد ونشر محتوى جديد
-        topics = ["أداة AI جديدة", "تطبيق يختصر الوقت", "موقع ذكاء اصطناعي للصور", "تقنية بطلة للطلاب"]
-        prompt = f"اكتب تغريدة عن {random.choice(topics)} مع شرح بسيط وفائدة ملموسة."
-        
-        content = await ask_gemini(prompt, "نشر تغريدة جديدة")
-        
+        # 1. نشر تغريدة جديدة (كل دورة)
+        content = await ask_gemini("اكتب تغريدة عن أداة ذكاء اصطناعي مفيدة للأفراد", "تغريدة عامة")
         if content:
             video = await download_video()
             await post_to_x(content, video)
             if video and os.path.exists(video): os.remove(video)
 
-        # 2. تفقد الردود والمنشن (لمدة ساعة قبل التغريدة التالية)
-        for _ in range(12): # 12 مرة كل 5 دقائق = ساعة
+        # 2. مراقبة المنشن والرد (6 مرات كل 10 دقائق = ساعة كاملة)
+        for _ in range(6):
             await handle_mentions()
-            await asyncio.sleep(300) # انتظار 5 دقائق
+            await asyncio.sleep(600) # انتظار 10 دقائق
 
 if __name__ == "__main__":
     asyncio.run(main())
