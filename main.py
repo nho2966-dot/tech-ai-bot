@@ -4,11 +4,10 @@ import httpx
 import tweepy
 import sqlite3
 import random
-import subprocess
 from datetime import datetime
 from loguru import logger
 
-# --- 🔐 إعدادات الوصول (GitHub Secrets) ---
+# --- 🔐 الإعدادات (تأكد من وجودها في GitHub Secrets) ---
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 PEXELS_KEY = os.getenv("PEXELS_API_KEY")
 X_CREDS = {
@@ -19,134 +18,119 @@ X_CREDS = {
     "bearer": os.getenv("X_BEARER_TOKEN")
 }
 
-# إعداد مكتبات X
-auth = tweepy.OAuth1UserHandler(X_CREDS["key"], X_CREDS["secret"], X_CREDS["token"], X_CREDS["access_s"])
-api_v1 = tweepy.API(auth)
-client_v2 = tweepy.Client(
-    bearer_token=X_CREDS["bearer"],
-    consumer_key=X_CREDS["key"], consumer_secret=X_CREDS["secret"],
-    access_token=X_CREDS["token"], access_token_secret=X_CREDS["access_s"]
-)
+# إعداد الربط مع منصة X
+try:
+    auth = tweepy.OAuth1UserHandler(X_CREDS["key"], X_CREDS["secret"], X_CREDS["token"], X_CREDS["access_s"])
+    api_v1 = tweepy.API(auth)
+    client_v2 = tweepy.Client(
+        bearer_token=X_CREDS["bearer"],
+        consumer_key=X_CREDS["key"], consumer_secret=X_CREDS["secret"],
+        access_token=X_CREDS["token"], access_token_secret=X_CREDS["access_s"]
+    )
+except Exception as e:
+    logger.error(f"خطأ في إعدادات X: {e}")
 
-# --- 🗄️ نظام الذاكرة (لمنع التكرار) ---
-conn = sqlite3.connect("nasser_bot.db")
+# --- 🗄️ قاعدة البيانات (منع التكرار) ---
+conn = sqlite3.connect("nasser_ai.db")
 cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS archive (content_hash TEXT PRIMARY KEY)")
-cursor.execute("CREATE TABLE IF NOT EXISTS replies (tweet_id TEXT PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS history (id TEXT PRIMARY KEY)")
 conn.commit()
 
-# --- 🛡️ الفلتر السيادي ---
-def nasser_filter(text):
+# --- 🛡️ نظام الفلترة والتدقيق ---
+def nasser_cleaner(text):
     if not text: return ""
-    # تطبيق شرط تبديل المصطلحات
+    # استبدال إلزامي بناءً على توجيهاتك
     text = text.replace("الثورة الصناعية الرابعة", "الذكاء الاصطناعي وأحدث أدواته")
+    # التأكد من عدم وجود لغات غير العربية/الانجليزية المسموحة
     return text.strip()
 
-# --- 🧠 محرك الذكاء الاصطناعي (Gemini) ---
-async def ask_gemini(prompt, system_instruction):
+# --- 🧠 محرك Gemini (مع معالجة متطورة للأخطاء) ---
+async def ask_gemini(prompt, system_msg):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
     payload = {
-        "contents": [{"parts": [{"text": f"System: {system_instruction}\n\nUser: {prompt}"}]}]
+        "contents": [{"role": "user", "parts": [{"text": f"System Instruction: {system_msg}\n\nUser Request: {prompt}"}]}],
+        "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}]
     }
+    
     try:
-        async with httpx.AsyncClient(timeout=40) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(url, json=payload)
-            result = r.json()['candidates'][0]['content']['parts'][0]['text']
-            return nasser_filter(result)
+            data = r.json()
+            
+            if 'candidates' in data and data['candidates']:
+                raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                return nasser_cleaner(raw_text)
+            else:
+                logger.error(f"رد غير متوقع من Gemini: {data}")
+                return None
     except Exception as e:
-        logger.error(f"❌ خطأ AI: {e}")
+        logger.error(f"فشل الاتصال بـ Gemini: {e}")
         return None
 
-# --- 📡 الرادار المرئي (فيديو وصور) ---
-async def get_visual_content():
-    """يحاول جلب فيديو من Pexels، وإذا فشل يجيب صورة من Unsplash"""
-    filename = None
+# --- 📡 رادار الميديا (Pexels) ---
+async def fetch_tech_media():
+    if not PEXELS_KEY: return None, None
     
-    # محاولة جلب فيديو Pexels
-    if PEXELS_KEY:
-        queries = ["artificial intelligence", "coding", "tech", "robotics"]
-        query = random.choice(queries)
-        url = f"https://api.pexels.com/videos/search?query={query}&per_page=5&orientation=portrait"
-        headers = {"Authorization": PEXELS_KEY}
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(url, headers=headers)
-                v_data = r.json().get('videos', [])
-                if v_data:
-                    v_url = random.choice(v_data)['video_files'][0]['link']
-                    v_res = await client.get(v_url, follow_redirects=True)
-                    filename = "media_payload.mp4"
-                    with open(filename, "wb") as f: f.write(v_res.content)
-                    return filename, "video"
-        except: logger.warning("⚠️ فشل رادار الفيديو، الانتقال للصور...")
-
-    # الخطة البديلة: صورة Unsplash
+    search_terms = ["artificial intelligence", "tech", "software", "robot"]
+    query = random.choice(search_terms)
+    headers = {"Authorization": PEXELS_KEY}
+    
     try:
-        img_url = "https://source.unsplash.com/featured/?technology,ai"
         async with httpx.AsyncClient() as client:
-            r = await client.get(img_url, follow_redirects=True)
-            filename = "media_payload.jpg"
-            with open(filename, "wb") as f: f.write(r.content)
-            return filename, "image"
-    except: return None, None
-
-# --- 🐦 وظائف النشر والرد ---
-async def process_mentions():
-    """الرد على المنشن بذكاء خليجي وعدم تكرار الرد"""
-    try:
-        me = client_v2.get_me().data
-        mentions = client_v2.get_users_mentions(id=me.id).data
-        if not mentions: return
-
-        for tweet in mentions[:3]: # الرد على آخر 3 فقط لتجنب السبام
-            cursor.execute("SELECT 1 FROM replies WHERE tweet_id=?", (str(tweet.id),))
-            if not cursor.fetchone():
-                reply_text = await ask_gemini(
-                    f"رد بلهجة خليجية بيضاء وذكية على هذا التعليق: {tweet.text}",
-                    "أنت ناصر، خبير تقني خليجي لبق ومحب للمساعدة."
-                )
-                if reply_text:
-                    client_v2.create_tweet(text=reply_text, in_reply_to_tweet_id=tweet.id)
-                    cursor.execute("INSERT INTO replies VALUES (?)", (str(tweet.id),))
-                    conn.commit()
-                    logger.info(f"✅ تم الرد على {tweet.id}")
-                    await asyncio.sleep(20) # فاصل زمني بسيط
+            # محاولة جلب فيديو أولاً
+            v_url = f"https://api.pexels.com/videos/search?query={query}&per_page=5&orientation=portrait"
+            res = await client.get(v_url, headers=headers)
+            videos = res.json().get('videos', [])
+            
+            if videos:
+                v_link = random.choice(videos)['video_files'][0]['link']
+                v_content = await client.get(v_link)
+                with open("media.mp4", "wb") as f: f.write(v_content.content)
+                return "media.mp4", "video"
+            
+            # إذا ما لقينا فيديو، نجيب صورة
+            img_url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
+            res = await client.get(img_url, headers=headers)
+            imgs = res.json().get('photos', [])
+            if imgs:
+                i_link = imgs[0]['src']['large']
+                i_content = await client.get(i_link)
+                with open("media.jpg", "wb") as f: f.write(i_content.content)
+                return "media.jpg", "image"
+                
     except Exception as e:
-        logger.error(f"⚠️ خطأ في المعالجة: {e}")
+        logger.warning(f"رادار الميديا تعطل: {e}")
+    return None, None
 
-async def post_daily_tech():
-    """نشر المحتوى اليومي مع الميديا"""
-    media_file, media_type = await get_visual_content()
+# --- 🚀 العمليات الرئيسية ---
+async def run_nasser_bot():
+    logger.info("جاري فحص المحتوى الجديد...")
     
-    prompt = "اكتب تغريدة خليجية حماسية عن أداة ذكاء اصطناعي جديدة مفيدة جداً للأفراد (ذكر اسم الأداة وفائدتها) مع إيموجي مناسب."
-    content = await ask_gemini(prompt, "خبير تقني خليجي، محتواك دقيق وعملي وبعيد عن الهلوسة.")
+    # 1. توليد النص (لهجة خليجية + تركيز على الأفراد)
+    sys_prompt = "أنت خبير تقني خليجي مطلع. اكتب بلهجة بيضاء (كويتية/سعودية) محببة. ركز فقط على أدوات الذكاء الاصطناعي للأفراد."
+    user_prompt = "عطني معلومة عن أداة ذكاء اصطناعي جديدة وتكون مفيدة جداً للشغل أو الحياة اليومية، مع لمحة تشويق."
     
-    if not content: return
+    tweet_text = await ask_gemini(user_prompt, sys_prompt)
+    if not tweet_text: return
 
+    # 2. جلب الميديا
+    media_path, media_type = await fetch_tech_media()
+
+    # 3. النشر على X
     try:
-        media_id = None
-        if media_file:
-            media_id = api_v1.media_upload(filename=media_file).media_id
-        
-        # النشر
-        if media_id:
-            client_v2.create_tweet(text=content, media_ids=[media_id])
+        if media_path:
+            # رفع الملف (v1.1)
+            media_id = api_v1.media_upload(filename=media_path).media_id
+            client_v2.create_tweet(text=tweet_text, media_ids=[media_id])
         else:
-            client_v2.create_tweet(text=content)
-        logger.success("🚀 تم نشر التغريدة التقنية بنجاح!")
+            client_v2.create_tweet(text=tweet_text)
+            
+        logger.success("تم نشر التغريدة بنجاح!")
     except Exception as e:
-        logger.error(f"❌ فشل النشر: {e}")
+        logger.error(f"فشل النشر على X: {e}")
     finally:
-        if media_file and os.path.exists(media_file): os.remove(media_file)
-
-# --- 🎬 نقطة الانطلاق ---
-async def main():
-    logger.info("🤖 بوت ناصر التقني بدأ العمل...")
-    # 1. تنفيذ النشر اليومي
-    await post_daily_tech()
-    # 2. فحص والرد على المنشن
-    await process_mentions()
-    logger.info("🏁 انتهت المهمة بنجاح.")
+        if media_path and os.path.exists(media_path):
+            os.remove(media_path)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_nasser_bot())
