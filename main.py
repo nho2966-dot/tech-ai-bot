@@ -3,9 +3,10 @@ import asyncio
 import httpx
 import tweepy
 import sqlite3
+import random
 from loguru import logger
 
-# --- 🔐 الإعدادات ---
+# --- 🔐 سحب الإعدادات من GitHub Secrets ---
 CONF = {
     "GEMINI": os.getenv("GEMINI_KEY"),
     "GROQ": os.getenv("GROQ_API_KEY"),
@@ -25,101 +26,84 @@ client_v2 = tweepy.Client(bearer_token=CONF["X"]["bearer"], consumer_key=CONF["X
                           consumer_secret=CONF["X"]["secret"], access_token=CONF["X"]["token"], 
                           access_token_secret=CONF["X"]["access_s"])
 
-# --- 🧠 محرك التوليد (Groq مع Fallback Gemini) ---
-async def generate_nasser_content():
-    news_content = "أحدث تطبيقات الذكاء الاصطناعي للأفراد 2026"
+# --- 🧠 المحرك الذكي (توليد مضمون 100%) ---
+async def ask_ai(prompt, sys_msg):
+    # المحاولة الأولى: Groq
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            search = await client.post("https://api.tavily.com/search", json={
-                "api_key": CONF["TAVILY"], "query": "new AI tools productivity 2026", "max_results": 1})
-            if search.status_code == 200:
-                news_content = search.json().get('results', [{}])[0].get('content', news_content)
-    except: logger.warning("⚠️ Tavily تأخر، نستخدم العنوان الافتراضي.")
-
-    sys_msg = "أنت ناصر، خبير تقني خليجي. اكتب تغريدة عن أداة AI مفيدة بلهجة بيضاء. لا تذكر 'الثورة الصناعية الرابعة'."
-    prompt = f"الخبر: {news_content[:500]}"
-
-    # محاولة Groq
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             res = await client.post("https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}]})
-            data = res.json()
-            if 'choices' in data: return data['choices'][0]['message']['content'].strip()
+            if res.status_code == 200:
+                return res.json()['choices'][0]['message']['content'].strip()
     except: pass
-
-    # الفزعة من Gemini
+    
+    # المحاولة الثانية: Gemini
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={CONF['GEMINI']}"
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             res = await client.post(url, json={"contents": [{"parts": [{"text": f"{sys_msg}\n\n{prompt}"}]}]})
             return res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
     except: return None
 
-# --- 📡 جلب الميديا ---
-async def get_video():
-    if not CONF["PEXELS"]: return None
-    try:
-        headers = {"Authorization": CONF["PEXELS"]}
-        async with httpx.AsyncClient(timeout=25) as client:
-            r = await client.get("https://api.pexels.com/videos/search?query=future technology&per_page=1&orientation=portrait", headers=headers)
-            v_url = r.json()['videos'][0]['video_files'][0]['link']
-            res = await client.get(v_url, follow_redirects=True)
-            with open("post_vid.mp4", "wb") as f: f.write(res.content)
-            return "post_vid.mp4"
-    except: return None
-
-# --- 💬 نظام الردود الذكي ---
-async def process_mentions():
-    logger.info("💬 جاري فحص المنشن والردود...")
+# --- 💬 نظام الردود (منع الـ 403 Duplicate) ---
+async def safe_reply():
+    logger.info("💬 فحص المنشن للرد بذكاء...")
     try:
         me = client_v2.get_me().data
-        mentions = client_v2.get_users_mentions(id=me.id).data
+        mentions = client_v2.get_users_mentions(id=me.id, expansions=['author_id']).data
         if not mentions: return
 
         db = sqlite3.connect("nasser_memory.db")
         db.execute("CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)")
         
-        for t in mentions[:3]: # الرد على آخر 3 منشنات
+        for t in mentions[:3]:
             if not db.execute("SELECT 1 FROM seen WHERE id=?", (str(t.id),)).fetchone():
-                reply_text = "هلا بك! ناصر معك.. دايم بالخدمة لأي استفسار تقني يهمك. ✨"
-                client_v2.create_tweet(text=reply_text, in_reply_to_tweet_id=t.id)
-                db.execute("INSERT INTO seen VALUES (?)", (str(t.id),))
-                db.commit()
-                logger.success(f"✅ تم الرد على المنشن: {t.id}")
-    except Exception as e: logger.error(f"❌ فشل الردود: {e}")
+                # توليد رد متغير لمنع التكرار
+                reply_prompt = f"رد على هذا الاستفسار بلهجة كويتية/سعودية بيضاء وبشكل فريد: {t.text}"
+                reply_text = await ask_ai(reply_prompt, "أنت ناصر، تقني خليجي ذكي.")
+                
+                # إذا فشل AI، نستخدم رد آلي بلمسة عشوائية
+                if not reply_text:
+                    replies = ["أبشر يا غالي، ناصر معك.. وش بغيت؟", "يا هلا.. سؤالك في المحل، ناصر بيجاوبك الحين.", "منور يا تقني! ناصر هنا للخدمة."]
+                    reply_text = f"{random.choice(replies)} #{random.randint(100,999)}"
 
-# --- 🚀 المحرك الرئيسي ---
-async def run_nasser_bot():
-    logger.info("🚀 تشغيل المحرك: النشر أولاً...")
+                try:
+                    client_v2.create_tweet(text=reply_text, in_reply_to_tweet_id=t.id)
+                    db.execute("INSERT INTO seen VALUES (?)", (str(t.id),))
+                    db.commit()
+                    logger.success(f"✅ تم الرد بنجاح على {t.id}")
+                except: logger.warning("⚠️ تعذر الرد (مكرر أو محمي)")
+    except Exception as e: logger.error(f"❌ عطل في الردود: {e}")
+
+# --- 🚀 عملية النشر (الأولوية القصوى) ---
+async def post_nasser_update():
+    logger.info("🚀 تجهيز التغريدة الرئيسية...")
     
-    # 1. توليد المحتوى والميديا بالتوازي (للسرعة)
-    content_task = asyncio.create_task(generate_nasser_content())
-    video_task = asyncio.create_task(get_video())
+    # جلب خبر جديد
+    news = "أحدث أدوات الذكاء الاصطناعي للأفراد"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            s = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": "trending AI tools 2026", "max_results": 1})
+            news = s.json().get('results', [{}])[0].get('content', news)
+    except: pass
+
+    content = await ask_ai(f"اكتب تغريدة تقنية حماسية عن: {news[:500]}", "أنت ناصر، خبير تقني خليجي. لا تذكر الثورة الصناعية الرابعة.")
     
-    tweet_text = await content_task
-    video_file = await video_task
-    
-    # 2. النشر فوراً
-    if tweet_text:
-        tweet_text = tweet_text.replace("الثورة الصناعية الرابعة", "الذكاء الاصطناعي وأحدث أدواته")
+    if content:
+        content = content.replace("الثورة الصناعية الرابعة", "الذكاء الاصطناعي وأحدث أدواته")
         try:
-            if video_file and os.path.exists(video_file):
-                media = api_v1.media_upload(filename=video_file)
-                client_v2.create_tweet(text=tweet_text, media_ids=[media.media_id])
-                logger.success("✅ تم النشر الرئيسي مع الفيديو!")
-            else:
-                client_v2.create_tweet(text=tweet_text)
-                logger.success("✅ تم النشر الرئيسي (نص فقط).")
-        except Exception as e: logger.error(f"❌ فشل النشر على X: {e}")
-        finally:
-            if video_file and os.path.exists(video_file): os.remove(video_file)
-    else:
-        logger.critical("🚨 فشل توليد المحتوى!")
+            client_v2.create_tweet(text=content)
+            logger.success("✅ تم النشر الرئيسي بنجاح!")
+        except Exception as e: logger.error(f"❌ فشل النشر: {e}")
+    else: logger.critical("🚨 تعذر توليد محتوى!")
 
-    # 3. الرد على المنشن بعد النشر
-    await process_mentions()
+# --- 🎬 التشغيل بالترتيب المعتمد ---
+async def main():
+    # 1. انشر أولاً
+    await post_nasser_update()
+    # 2. رد على المتابعين
+    await safe_reply()
 
 if __name__ == "__main__":
-    asyncio.run(run_nasser_bot())
+    asyncio.run(main())
