@@ -1,58 +1,52 @@
-name: Nasser Sovereign AI Bot
+name: Tech AI Newsroom Bot
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # يشتغل كل 3 ساعات
-  workflow_dispatch:      # زر تشغيل يدوي
+    # يعمل كل 6 ساعات (بتوقيت UTC) لضمان تغطية الأخبار والردود
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً من صفحة Actions
 
 jobs:
-  build_and_run:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip'
+          cache: 'pip' # تسريع التثبيت في المرات القادمة
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install System Dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Install Python Dependencies
-        run: |
-          pip install httpx tweepy yt-dlp loguru
+          python -m pip install --upgrade pip
+          pip install tweepy httpx loguru python-dotenv
 
       - name: Restore Database Cache
         uses: actions/cache@v3
         with:
-          path: nasser_sovereign_v2.db
+          path: newsroom_v5.db
           key: ${{ runner.os }}-db-${{ github.run_id }}
           restore-keys: |
             ${{ runner.os }}-db-
 
-      - name: Run Sovereign Bot
+      - name: Run Newsroom Bot
+        run: python main.py
         env:
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-        run: python main.py  # تأكدت إن الاسم هو main.py
 
-      - name: Save Database Changes
-        if: always()
+      - name: Save Database Cache
+        if: always() # لضمان حفظ التغييرات في قاعدة البيانات حتى لو حدث خطأ بسيط
         uses: actions/cache@v3
         with:
-          path: nasser_sovereign_v2.db
+          path: newsroom_v5.db
           key: ${{ runner.os }}-db-${{ github.run_id }}
