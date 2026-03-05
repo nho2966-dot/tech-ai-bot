@@ -50,27 +50,28 @@ def init_db():
 
 # ================= 🧠 محرك الذكاء الاصطناعي (AI ENGINE) =================
 async def ask_ai(system, prompt, temp=0.25):
-    """محرك AI محكم لمنع الهلوسة والبتر"""
-    # تعليمات صارمة لضبط الطول ومنع البتر
+    """محرك AI مع نظام إعادة المحاولة لضمان استقرار الاتصال"""
     strict_rules = "\n- لا تتجاوز 220 حرفاً. انهِ جملك دائماً. ممنوع بتر النص. لهجة خليجية بيضاء رصينة."
-    try:
-        async with httpx.AsyncClient(timeout=40) as client_http:
-            res = await client_http.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "temperature": temp,
-                    "messages": [
-                        {"role": "system", "content": system + strict_rules},
-                        {"role": "user", "content": prompt}
-                    ]
-                }
-            )
-            if res.status_code == 200:
-                return res.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        logger.error(f"❌ خطأ AI: {e}")
+    for attempt in range(3): # محاولة لثلاث مرات في حال فشل الشبكة
+        try:
+            async with httpx.AsyncClient(timeout=60) as client_http:
+                res = await client_http.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {CONF['GROQ']}"},
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "temperature": temp,
+                        "messages": [
+                            {"role": "system", "content": system + strict_rules},
+                            {"role": "user", "content": prompt}
+                        ]
+                    }
+                )
+                if res.status_code == 200:
+                    return res.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.warning(f"⚠️ محاولة AI رقم {attempt+1} تعثرت: {e}. جاري الإعادة...")
+            await asyncio.sleep(5)
     return None
 
 # ================= 💬 نظام الردود الذكي (MENTIONS) =================
@@ -93,24 +94,19 @@ async def handle_mentions():
             for t in mentions:
                 if t.created_at < threshold: continue
                 if db.execute("SELECT 1 FROM seen_mentions WHERE id=?", (str(t.id),)).fetchone(): continue
-                # منع الرد على النفس
                 if str(t.author_id) == str(me.id): continue
                 
-                # استرجاع الذاكرة
                 user = db.execute("SELECT last_topic, interaction_count FROM user_memory WHERE user_id=?", (str(t.author_id),)).fetchone()
                 
                 sys_msg = """أنت مستشار تقني خليجي ذكي. 
                 - ابدأ بتقدير رأي المغرد (مثلاً: كلام في محله، إضافة ذكية، نظرة ثاقبة).
                 - أضف تحليلاً تقنياً مختصراً جداً.
-                - لا تكرر الكلام ولا تبتر الجمل.
-                - اجعل الرد يبدو كأنه من إنسان مهتم."""
+                - لا تبتر الجمل واجعل الرد يبدو بشرياً."""
 
                 reply = await ask_ai(sys_msg, f"المغرد يقول: {t.text}")
                 
                 if reply:
-                    # تنظيف نهائي للتأكد من طول النص
-                    final_reply = reply[:275] 
-                    client.create_tweet(text=final_reply, in_reply_to_tweet_id=t.id)
+                    client.create_tweet(text=reply[:275], in_reply_to_tweet_id=t.id)
                     db.execute("INSERT INTO seen_mentions VALUES (?)", (str(t.id),))
                     db.execute("""INSERT INTO user_memory (user_id, last_topic, interaction_count) 
                                   VALUES (?, ?, 1) ON CONFLICT(user_id) 
@@ -129,17 +125,21 @@ async def run_newsroom():
     query = "latest leaked AI tools for individuals productivity March 2026"
     
     try:
-        async with httpx.AsyncClient(timeout=25) as client_http:
+        async with httpx.AsyncClient(timeout=40) as client_http:
             res = await client_http.post("https://api.tavily.com/search",
                 json={"api_key": CONF["TAVILY"], "query": query, "search_depth": "advanced", "max_results": 3})
-            news_list = res.json().get("results", []) if res.status_code == 200 else []
+            
+            if res.status_code != 200:
+                logger.error(f"❌ خطأ Tavily: {res.status_code}")
+                return
+            news_list = res.json().get("results", [])
 
         for item in news_list[:1]:
             title = item["title"]
             with sqlite3.connect("newsroom_v5.db") as db:
                 if db.execute("SELECT 1 FROM published WHERE title=?", (title,)).fetchone(): continue
             
-            sys_msg = "أنت محرر تقني خليجي. صغ ثريد من 3 تغريدات مشوقة للأفراد حول هذا الخبر. لا تبتر النصوص."
+            sys_msg = "أنت محرر تقني خليجي. صغ ثريد من 3 تغريدات مشوقة للأفراد. لا تبتر النصوص."
             content = await ask_ai(sys_msg, f"الخبر: {title}\nالتفاصيل: {item['content']}")
             
             if content:
@@ -154,29 +154,29 @@ async def run_newsroom():
                         final_text = tweet_text
                         if i == len(tweets) - 1: final_text += "\n\nوش رأيكم بهالتطور؟ 👇"
                         
-                        tw = client.create_tweet(text=final_text[:280], in_reply_to_tweet_id=prev_id)
-                        prev_id = tw.data["id"]
-                        db.execute("INSERT INTO tweets_metrics VALUES (?,0,0,0,?)", (prev_id, thread_db_id))
-                        await asyncio.sleep(5)
+                        try:
+                            tw = client.create_tweet(text=final_text[:280], in_reply_to_tweet_id=prev_id)
+                            prev_id = tw.data["id"]
+                            db.execute("INSERT INTO tweets_metrics VALUES (?,0,0,0,?)", (prev_id, thread_db_id))
+                            await asyncio.sleep(5)
+                        except Exception as e:
+                            logger.error(f"❌ فشل نشر تغريدة: {e}")
+                            break 
                     db.commit()
-                logger.success(f"🔥 تم نشر ثريد: {title}")
+                logger.success(f"🔥 تم نشر ثريد بنجاح: {title}")
     except Exception as e:
-        logger.error(f"❌ خطأ في النشر: {e}")
+        logger.error(f"❌ خطأ عام في النشر: {e}")
 
 # ================= 🚀 المحرك الرئيسي (MAIN) =================
 async def main():
     init_db()
-    # 1. الرد على الجمهور أولاً
     await handle_mentions()
     
-    # 2. استراحة إنسانية عشوائية (8-15 دقيقة) لضمان الأمان
-    wait_time = random.randint(480, 900)
-    logger.info(f"☕ استراحة محارب لمدة {wait_time // 60} دقيقة لضمان أنسنة السلوك...")
+    wait_time = random.randint(300, 600) # استراحة بين 5-10 دقائق
+    logger.info(f"☕ استراحة محارب لمدة {wait_time // 60} دقيقة...")
     await asyncio.sleep(wait_time)
     
-    # 3. نشر المحتوى الصحفي
     await run_newsroom()
-    
     logger.info("🏁 انتهت الجولة بنجاح.")
 
 if __name__ == "__main__":
