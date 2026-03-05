@@ -3,13 +3,15 @@ import asyncio
 import httpx
 import tweepy
 import sqlite3
-from datetime import datetime, timedelta, timezone, date
+import random
+from datetime import datetime, timedelta, timezone
 from loguru import logger
 from dotenv import load_dotenv
 
+# تحميل المتغيرات البيئية
 load_dotenv()
 
-# ================= 🔐 CONFIG =================
+# ================= 🔐 الإعدادات (CONFIG) =================
 CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
     "TAVILY": os.getenv("TAVILY_KEY"),
@@ -22,6 +24,7 @@ CONF = {
     }
 }
 
+# إعداد عميل تويتر (V2)
 client = tweepy.Client(
     bearer_token=CONF["X"]["bearer"],
     consumer_key=CONF["X"]["key"],
@@ -30,143 +33,144 @@ client = tweepy.Client(
     access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🗂 DATABASE SETUP =================
+# ================= 🗂 قاعدة البيانات (DATABASE) =================
 def init_db():
     with sqlite3.connect("newsroom_v5.db") as db:
+        # جداول النشر والتحليلات
         db.execute("""CREATE TABLE IF NOT EXISTS published (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT, content TEXT, category TEXT, sources TEXT, 
             published_at TEXT, engagement_score INTEGER DEFAULT 0)""")
+        
         db.execute("""CREATE TABLE IF NOT EXISTS tweets_metrics (
             tweet_id TEXT PRIMARY KEY, likes INTEGER, retweets INTEGER, 
             replies INTEGER, thread_id INTEGER)""")
+        
+        # جداول الردود والذاكرة التفاعلية
+        db.execute("CREATE TABLE IF NOT EXISTS seen_mentions (id TEXT PRIMARY KEY)")
+        
+        db.execute("""CREATE TABLE IF NOT EXISTS user_memory (
+            user_id TEXT PRIMARY KEY, last_topic TEXT, interaction_count INTEGER DEFAULT 1)""")
         db.commit()
 
-# ================= 🧠 AI ENGINE (No Hallucination) =================
+# ================= 🧠 محرك الذكاء الاصطناعي (AI ENGINE) =================
 async def ask_ai(system, prompt, temp=0.25):
+    """محرك AI محكم لمنع الهلوسة وضمان دقة المعلومات"""
+    safety_rule = "\n- التزم بالحقائق التقنية. ممنوع الهلوسة. لهجة خليجية بيضاء رصينة. لا تذكر 'الثورة الصناعية الرابعة'."
     try:
-        async with httpx.AsyncClient(timeout=30) as client_http:
-            r = await client_http.post(
+        async with httpx.AsyncClient(timeout=40) as client_http:
+            res = await client_http.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
                     "messages": [
-                        {"role": "system", "content": system + "\n- التزم بالحقائق. ممنوع الهلوسة. لهجة خليجية بيضاء رصينة."},
+                        {"role": "system", "content": system + safety_rule},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"].strip()
+            if res.status_code == 200:
+                return res.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        logger.error(f"AI Error: {e}")
+        logger.error(f"❌ خطأ AI: {e}")
     return None
 
-# ================= 🕵️ NEWS DISCOVERY =================
-async def fetch_trending_news():
-    # جلب أخبار الـ 24 ساعة الماضية
-    time_limit = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    query = f"breaking AI SaaS tools for individuals productivity news after:{time_limit}"
-    
-    async with httpx.AsyncClient(timeout=20) as client_http:
-        r = await client_http.post("https://api.tavily.com/search",
-            json={"api_key": CONF["TAVILY"], "query": query, "search_depth": "advanced", "max_results": 6})
-        return r.json().get("results", []) if r.status_code == 200 else []
-
-# ================= 📝 PUBLISHING ENGINE =================
-async def publish_thread(thread_text, thread_db_id=None):
-    tweets = [t.strip() for t in thread_text.split("\n\n") if len(t.strip()) > 10]
-    prev_id = None
-    
-    for i, t in enumerate(tweets):
-        try:
-            # إضافة لمسة أنسنة في التغريدة الأخيرة
-            content = t
-            if i == len(tweets) - 1:
-                content += "\n\nوش رأيكم بهالتطور؟ يخدمكم في شغلكم؟ 👇"
-            
-            tw = client.create_tweet(text=content[:280], in_reply_to_tweet_id=prev_id)
-            prev_id = tw.data["id"]
-            
-            with sqlite3.connect("newsroom_v5.db") as db:
-                db.execute("INSERT OR IGNORE INTO tweets_metrics VALUES (?,0,0,0,?)", (prev_id, thread_db_id))
-                db.commit()
-            
-            await asyncio.sleep(3) # فاصل زمني لتجنب الـ Rate Limit
-        except Exception as e:
-            logger.error(f"Publishing error at tweet {i}: {e}")
-    return prev_id
-
-# ================= 📊 WEEKLY DIGEST (حصاد الأسبوع) =================
-async def run_weekly_digest():
-    # يعمل فقط يوم الجمعة
-    if datetime.now().weekday() != 4: 
-        return
-
-    logger.info("📅 جاري تجهيز الحصاد الأسبوعي لأكثر المواضيع تفاعلاً...")
-    with sqlite3.connect("newsroom_v5.db") as db:
-        # جلب أفضل 3 مواضيع حققت تفاعل هذا الأسبوع
-        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        top_news = db.execute("""SELECT title, content FROM published 
-                                 WHERE published_at > ? ORDER BY engagement_score DESC LIMIT 3""", (week_ago,)).fetchall()
+# ================= 💬 نظام الردود الذكي (MENTIONS) =================
+async def handle_mentions():
+    logger.info("🔍 فحص المنشنات الجديدة...")
+    try:
+        me = client.get_me().data
+        mentions = client.get_users_mentions(id=me.id, tweet_fields=['created_at', 'author_id']).data
         
-        if not top_news: return
+        if not mentions:
+            logger.info("✅ لا توجد منشنات جديدة.")
+            return
 
-        combined = "\n---\n".join([f"الخبر: {n[0]}\nالملخص: {n[1][:150]}" for n in top_news])
-        system = "أنت محرر تقني بارع. صغ 'حصاد الأسبوع' لأهم 3 أخبار تقنية بأسلوب مشوق ومختصر للأفراد."
-        digest_text = await ask_ai(system, f"أبرز أحداث الأسبوع:\n{combined}")
-        
-        if digest_text:
-            await publish_thread(f"🚀 حصاد الأسبوع التقني:\n\n{digest_text}")
-            logger.success("✅ تم نشر الحصاد الأسبوعي بنجاح.")
-
-# ================= 📊 METRICS & SCORES =================
-async def update_all_metrics():
-    with sqlite3.connect("newsroom_v5.db") as db:
-        rows = db.execute("SELECT tweet_id, thread_id FROM tweets_metrics").fetchall()
-        for tid, thread_id in rows:
-            try:
-                tweet = client.get_tweet(tid, tweet_fields=["public_metrics"]).data
-                m = tweet["public_metrics"]
-                db.execute("UPDATE tweets_metrics SET likes=?, retweets=?, replies=? WHERE tweet_id=?",
-                           (m["like_count"], m["retweet_count"], m["reply_count"], tid))
-                # تحديث التفاعل الإجمالي للخبر
-                score = m["like_count"] + (m["retweet_count"] * 2) + (m["reply_count"] * 3)
-                db.execute("UPDATE published SET engagement_score = engagement_score + ? WHERE id = ?", (score, thread_id))
-            except: pass
-        db.commit()
-
-# ================= 🚀 MAIN PROCESS =================
-async def run_newsroom():
-    init_db()
-    news = await fetch_trending_news()
-    
-    if not news: return
-
-    for item in news[:2]: # نركز على أفضل خبرين يومياً لضمان الجودة
-        title = item["title"]
         with sqlite3.connect("newsroom_v5.db") as db:
-            if db.execute("SELECT 1 FROM published WHERE title=?", (title,)).fetchone(): continue
-        
-        system = "صغ ثريد تقني من 4 تغريدات مبني على الحقائق. ركز على الفائدة المباشرة للفرد."
-        thread_content = await ask_ai(system, f"الخبر: {title}\nالتفاصيل: {item['content']}")
-        
-        if thread_content:
-            with sqlite3.connect("newsroom_v5.db") as db:
-                cursor = db.execute("INSERT INTO published (title, content, published_at) VALUES (?,?,?)", 
-                                    (title, thread_content, datetime.now().isoformat()))
-                thread_id = cursor.lastrowid
-                db.commit()
-            
-            await publish_thread(thread_content, thread_id)
-            logger.success(f"🔥 تم نشر ثريد جديد: {title}")
+            threshold = datetime.now(timezone.utc) - timedelta(hours=24)
+            for t in mentions:
+                if t.created_at < threshold: continue
+                if db.execute("SELECT 1 FROM seen_mentions WHERE id=?", (str(t.id),)).fetchone(): continue
+                
+                # استرجاع الذاكرة
+                user = db.execute("SELECT last_topic, interaction_count FROM user_memory WHERE user_id=?", (str(t.author_id),)).fetchone()
+                context = f"هذا المتابع تفاعل معك {user[1]} مرات سابقاً." if user else "أول تفاعل لهذا المتابع."
+                
+                sys_msg = f"أنت مستشار تقني خليجي محترف. {context} قدم إجابة دقيقة وعملية للأفراد."
+                reply = await ask_ai(sys_msg, f"سؤال المتابع: {t.text}")
+                
+                if reply:
+                    client.create_tweet(text=reply[:280], in_reply_to_tweet_id=t.id)
+                    db.execute("INSERT INTO seen_mentions VALUES (?)", (str(t.id),))
+                    db.execute("""INSERT INTO user_memory (user_id, last_topic, interaction_count) 
+                                  VALUES (?, ?, 1) ON CONFLICT(user_id) 
+                                  DO UPDATE SET interaction_count=interaction_count+1, last_topic=?""", 
+                               (str(t.author_id), t.text[:50], t.text[:50]))
+                    db.commit()
+                    logger.success(f"✅ تم الرد على {t.author_id}")
+                    await asyncio.sleep(random.randint(2, 5)) # فاصل بسيط بين الردود
+    except Exception as e:
+        logger.error(f"❌ خطأ في الردود: {e}")
 
+# ================= 📝 محرك النشر الصحفي (NEWSROOM) =================
+async def run_newsroom():
+    logger.info("🕵️ البحث عن سبق صحفي تقني جديد...")
+    time_limit = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    query = "latest AI tools for individuals productivity leaks news 2026"
+    
+    try:
+        async with httpx.AsyncClient(timeout=25) as client_http:
+            res = await client_http.post("https://api.tavily.com/search",
+                json={"api_key": CONF["TAVILY"], "query": query, "search_depth": "advanced", "max_results": 3})
+            news_list = res.json().get("results", []) if res.status_code == 200 else []
+
+        for item in news_list[:1]: # نشر ثريد واحد عالي الجودة
+            title = item["title"]
+            with sqlite3.connect("newsroom_v5.db") as db:
+                if db.execute("SELECT 1 FROM published WHERE title=?", (title,)).fetchone(): continue
+            
+            sys_msg = "أنت محرر تقني استقصائي. صغ ثريد (Thread) من 3 تغريدات بلهجة خليجية بيضاء جذابة."
+            content = await ask_ai(sys_msg, f"الخبر: {title}\nالتفاصيل: {item['content']}")
+            
+            if content:
+                tweets = [t.strip() for t in content.split("\n\n") if len(t.strip()) > 10]
+                prev_id = None
+                with sqlite3.connect("newsroom_v5.db") as db:
+                    cursor = db.execute("INSERT INTO published (title, content, published_at) VALUES (?,?,?)", 
+                                        (title, content, datetime.now().isoformat()))
+                    thread_db_id = cursor.lastrowid
+                    
+                    for i, tweet_text in enumerate(tweets):
+                        final_text = tweet_text
+                        if i == len(tweets) - 1: final_text += "\n\nوش رأيكم؟ يهمكم هالتطور؟ 👇"
+                        
+                        tw = client.create_tweet(text=final_text[:280], in_reply_to_tweet_id=prev_id)
+                        prev_id = tw.data["id"]
+                        db.execute("INSERT INTO tweets_metrics VALUES (?,0,0,0,?)", (prev_id, thread_db_id))
+                        await asyncio.sleep(4)
+                    db.commit()
+                logger.success(f"🔥 تم نشر ثريد: {title}")
+    except Exception as e:
+        logger.error(f"❌ خطأ في النشر: {e}")
+
+# ================= 🚀 المحرك الرئيسي (MAIN) =================
 async def main():
+    init_db()
+    
+    # 1. الرد على المنشنات (تفاعل حي)
+    await handle_mentions()
+    
+    # 2. فاصل زمني عشوائي "إنساني" (بين 5 إلى 12 دقيقة)
+    wait_time = random.randint(300, 720)
+    logger.info(f"☕ استراحة محارب لمدة {wait_time // 60} دقيقة قبل البدء في النشر...")
+    await asyncio.sleep(wait_time)
+    
+    # 3. جلب الأخبار ونشرها
     await run_newsroom()
-    await update_all_metrics()
-    await run_weekly_digest()
+    
+    logger.info("🏁 انتهت الدورة الحالية بسلام.")
 
 if __name__ == "__main__":
     asyncio.run(main())
