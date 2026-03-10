@@ -4,6 +4,7 @@ import httpx
 import tweepy
 import sqlite3
 import random
+import json
 from datetime import datetime, timedelta, timezone
 from loguru import logger
 from dotenv import load_dotenv
@@ -34,14 +35,14 @@ client = tweepy.Client(
 # ================= 🗂 DATABASE =================
 def init_db():
     with sqlite3.connect("newsroom_v5.db") as db:
-        db.execute("CREATE TABLE IF NOT EXISTS published (id INTEGER PRIMARY KEY, title TEXT, published_at TEXT)")
         db.execute("CREATE TABLE IF NOT EXISTS seen_mentions (id TEXT PRIMARY KEY)")
-        db.execute("CREATE TABLE IF NOT EXISTS active_polls (poll_id TEXT PRIMARY KEY, question TEXT, options TEXT, created_at TEXT)")
+        db.execute("CREATE TABLE IF NOT EXISTS published (id INTEGER PRIMARY KEY, type TEXT, date TEXT)")
+        # جدول لتتبع آخر تاريخ لنشر استطلاع
+        db.execute("CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, value TEXT)")
         db.commit()
 
 # ================= 🧠 AI ENGINE =================
-async def ask_ai(system, prompt, temp=0.25):
-    rules = "\n- رصانة تقنية خليجية. اختصار غير مخل. ممنوع البتر."
+async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=40) as client_http:
             res = await client_http.post(
@@ -49,80 +50,104 @@ async def ask_ai(system, prompt, temp=0.25):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": temp,
-                    "messages": [{"role": "system", "content": system + rules}, {"role": "user", "content": prompt}]
+                    "temperature": 0.5,
+                    "messages": [
+                        {"role": "system", "content": system + "\n- لهجة خليجية بيضاء. احترافية. اختصار. ممنوع البتر."},
+                        {"role": "user", "content": prompt}
+                    ]
                 }
             )
             return res.json()["choices"][0]["message"]["content"].strip() if res.status_code == 200 else None
     except: return None
 
-# ================= 💬 MENTIONS =================
+# ================= 💬 MENTIONS (V13 PROTECTED) =================
 async def handle_mentions():
-    logger.info("🔍 فحص المنشنات...")
+    logger.info("🔍 فحص المنشنات الحديثة (فلترة 24 ساعة)...")
     try:
         me = client.get_me().data
-        mentions = client.get_users_mentions(id=me.id, tweet_fields=['created_at', 'author_id', 'text']).data
+        bot_id = str(me.id)
+        mentions = client.get_users_mentions(id=bot_id, tweet_fields=['author_id', 'id', 'text', 'created_at'], max_results=15).data
         if not mentions: return
+
+        threshold_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+        processed_users = set()
+
         with sqlite3.connect("newsroom_v5.db") as db:
             for t in mentions:
+                if t.created_at < threshold_24h or str(t.author_id) == bot_id: continue
                 if db.execute("SELECT 1 FROM seen_mentions WHERE id=?", (str(t.id),)).fetchone(): continue
-                sys_msg = "أنت مستشار تقني خليجي خبير. رد بذكاء وتحليل للمنشن."
-                reply = await ask_ai(sys_msg, f"سؤال: {t.text}")
+                if str(t.author_id) in processed_users: continue
+
+                reply = await ask_ai("أنت مستشار تقني خبير. أجب بذكاء واختصار.", f"سؤال من @{t.author_id}: {t.text}")
                 if reply:
                     client.create_tweet(text=reply[:275], in_reply_to_tweet_id=t.id)
                     db.execute("INSERT INTO seen_mentions VALUES (?)", (str(t.id),))
                     db.commit()
-    except Exception as e: logger.error(f"Mentions error: {e}")
+                    processed_users.add(str(t.author_id))
+                    await asyncio.sleep(5)
+    except Exception as e: logger.error(f"Mentions Error: {e}")
 
-# ================= 📊 POLL & ANALYSIS ENGINE =================
-async def manage_polls():
-    """نظام نشر وتحليل الاستطلاعات"""
+# ================= 📅 CONTENT STRATEGY (تنويع المحتوى) =================
+async def run_strategic_content():
+    init_db()
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    
     with sqlite3.connect("newsroom_v5.db") as db:
-        # 1. فحص الاستطلاعات المنتهية لتحليلها
-        old_poll = db.execute("SELECT poll_id, question, options FROM active_polls").fetchone()
-        
-        if old_poll:
-            poll_id, question, options = old_poll
-            try:
-                # جلب نتائج الاستطلاع من تويتر
-                poll_data = client.get_tweet(poll_id, expansions="attachments.poll_ids").data
-                # ملاحظة: في النسخة المجانية قد نحتاج لمحاكاة النتائج أو الاعتماد على الردود إذا لم يتوفر Poll API كامل
-                # هنا سنقوم بصياغة تحليل بناءً على التفاعل العام
-                sys_msg = "أنت محلل بيانات تقني. صغ تغريدة تلخص فيها 'رأي الجمهور' بناءً على سؤال تقني. ابدأ بـ (قراءة في نتائجنا:)."
-                analysis = await ask_ai(sys_msg, f"السؤال كان: {question}. النتائج تشير لاهتمام كبير بالخيار الأول. حلل السبب تقنياً.")
-                
-                if analysis:
-                    client.create_tweet(text=analysis[:280])
-                    db.execute("DELETE FROM active_polls WHERE poll_id=?", (poll_id,))
-                    db.commit()
-                    logger.success("📊 تم نشر تحليل الاستطلاع بنجاح.")
-            except Exception as e:
-                logger.warning(f"Poll analysis delay: {e}")
+        # 1. فحص هل تم النشر اليوم أصلاً؟ (لمنع التكرار)
+        already_published = db.execute("SELECT 1 FROM published WHERE date=?", (today_date,)).fetchone()
+        if already_published:
+            logger.info("📅 تم النشر اليوم بالفعل. نكتفي بالردود.")
+            return
 
-        # 2. نشر استطلاع جديد (مرة كل 3 أيام مثلاً)
-        if random.random() > 0.7: # عشوائية النشر
-            q_list = [
-                {"q": "وش العائق الأكبر أمامكم في أتمتة مهامكم اليومية؟", "o": ["صعوبة الأدوات", "التكلفة", "ضيق الوقت", "الخوف من الخصوصية"]},
-                {"q": "في 2026، هل تتوقعون انقراض الوظائف التقليدية بسبب AI؟", "o": ["نعم، وبشكل كبير", "لا، بيزيد الطلب", "بتتحول فقط", "مبكر الحكم"]}
-            ]
-            poll = random.choice(q_list)
-            tw = client.create_tweet(text=poll["q"], poll_options=poll["o"], poll_duration_minutes=1440)
-            db.execute("INSERT INTO active_polls VALUES (?,?,?,?)", 
-                       (str(tw.data['id']), poll["q"], str(poll["o"]), datetime.now().isoformat()))
-            db.commit()
-            logger.success("✅ تم نشر استطلاع جديد.")
+        # 2. فحص متى كان آخر استطلاع؟ (نظام استطلاع واحد في الأسبوع)
+        last_poll = db.execute("SELECT value FROM stats WHERE key='last_poll_date'").fetchone()
+        can_post_poll = False
+        if not last_poll:
+            can_post_poll = True
+        else:
+            last_date = datetime.strptime(last_poll[0], "%Y-%m-%d")
+            if (datetime.now() - last_date).days >= 7:
+                can_post_poll = True
+
+        # 3. اختيار نوع المحتوى لليوم
+        content_type = "NEWS" # الافتراضي أخبار
+        if can_post_poll and random.random() > 0.5: # إذا مر أسبوع، هناك فرصة لنشر استطلاع
+            content_type = "POLL"
+        elif random.random() > 0.7:
+            content_type = "TIP" # نصيحة تقنية سريعة
+
+        # تنفيذ النشر بناءً على النوع
+        if content_type == "POLL":
+            poll_q = random.choice([
+                {"q": "وش أفضل AI Stack جربته لزيادة إنتاجيتك؟", "o": ["Claude + n8n", "GPT + Zapier", "Perplexity + Notion", "أدوات مخصصة"]},
+                {"q": "في 2026، هل تعتقد أن تعلم 'هندسة الأوامر' لا يزال ضرورة؟", "o": ["نعم، أساسي جداً", "لا، الـ AI صار يفهمنا", "حسب التخصص", "مبكر الحكم"]}
+            ])
+            tw = client.create_tweet(text=poll_q["q"], poll_options=poll_q["o"], poll_duration_minutes=1440)
+            db.execute("INSERT OR REPLACE INTO stats VALUES ('last_poll_date', ?)", (today_date,))
+            logger.success("📊 تم نشر استطلاع الأسبوع.")
+
+        elif content_type == "TIP":
+            tip = await ask_ai("أنت خبير تقني.", "أعط نصيحة تقنية ذهبية قصيرة جداً لمتابعين مهتمين بالإنتاجية والذكاء الاصطناعي.")
+            if tip: client.create_tweet(text=f"💡 نصيحة اليوم:\n\n{tip}")
+            logger.success("💡 تم نشر نصيحة تقنية.")
+
+        else: # أخبار (NEWS)
+            # استدعاء دالة البحث والنشر Tavily كما هي في النسخ السابقة
+            logger.info("🕵️ جاري البحث عن أخبار تقنية لنشرها...")
+            # (هنا تضع منطق البحث في Tavily والنشر كثريد)
+
+        # تسجيل أنه تم النشر اليوم
+        db.execute("INSERT INTO published (type, date) VALUES (?, ?)", (content_type, today_date))
+        db.commit()
 
 # ================= 🚀 MAIN =================
 async def main():
     init_db()
+    # الردود دائماً فعالة للرد على المنشنات الحديثة
     await handle_mentions()
-    await manage_polls() # إضافة محرك الاستطلاعات والتحليل
     
-    # استراحة وتكملة محرك النشر (run_newsroom) كما في السابق
-    wait_time = random.randint(300, 600)
-    logger.info(f"☕ استراحة {wait_time//60} دقيقة...")
-    await asyncio.sleep(wait_time)
-    # استدعاء run_newsroom() هنا...
+    # إدارة المحتوى الاستراتيجي (استطلاع أسبوعي + تنويع)
+    await run_strategic_content()
 
 if __name__ == "__main__":
     asyncio.run(main())
