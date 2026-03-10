@@ -2,7 +2,7 @@ import os
 import asyncio
 import httpx
 import tweepy
-from datetime import datetime, timedelta, timezone
+import random
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -28,93 +28,68 @@ client = tweepy.Client(
     access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ فحص التكرار (LIVE AUDIT) =================
-def get_recent_activity(bot_id):
-    try:
-        tweets = client.get_users_tweets(id=bot_id, max_results=50, tweet_fields=['text', 'created_at', 'attachments'], expansions='attachments.poll_ids')
-        return tweets.data if tweets.data else []
-    except: return []
-
-def is_duplicate(text, recent_tweets):
-    # بصمة النص (أول 40 حرف)
-    fingerprint = text[:40].strip()
-    for tw in recent_tweets:
-        if fingerprint in tw.text: return True
-    return False
-
-# ================= 🧠 محرك التجديد (RENEWAL ENGINE) =================
-async def generate_unique_content(recent_tweets):
-    """يحاول توليد محتوى فريد عبر عدة محاولات إذا وجد تكراراً"""
-    topics = [
-        "أداة ذكاء اصطناعي جديدة للأفراد لم تُطرح في السوق بعد",
-        "طريقة مبتكرة لاستخدام AI في تنظيم الوقت (Workflow)",
-        "تحليل لميزة تقنية مسربة في هواتف 2026",
-        "نصيحة تقنية غريبة وغير تقليدية لزيادة الإنتاجية"
-    ]
-    
-    for attempt in range(5): # 5 محاولات لتوليد شيء جديد
-        topic = random.choice(topics)
-        logger.info(f"🔄 محاولة توليد محتوى فريد (رقم {attempt+1})...")
-        
-        sys_msg = "أنت محرر تقني خليجي استقصائي. ابحث عن فكرة نادرة وغير مكررة."
-        prompt = f"اكتب تغريدة إبداعية عن: {topic}. تأكد أنها تختلف تماماً عن أي محتوى تقني تقليدي."
-        
-        content = await ask_ai(sys_msg, prompt)
-        if content and not is_duplicate(content, recent_tweets):
-            return content
-            
-    return None # إذا فشل بعد 5 محاولات (نادر الحدوث)
-
+# ================= 🧠 محرك "المخططات العملية" (PRACTICAL BLUEPRINTS) =================
 async def ask_ai(system, prompt):
     try:
-        async with httpx.AsyncClient(timeout=40) as client_http:
+        async with httpx.AsyncClient(timeout=90) as client_http:
             res = await client_http.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.9, # حرارة عالية لضمان التجدد وعدم التكرار
-                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+                    "temperature": 0.6,
+                    "messages": [
+                        {"role": "system", "content": system + "\n- ركز على: (الأدوات المستخدمة + طريقة الربط + الفائدة الملموسة).\n- لهجة خليجية بيضاء رصينة وعملية.\n- استخدم التنسيق الواضح جداً (1. 2. 3.)."},
+                        {"role": "user", "content": prompt}
+                    ]
                 }
             )
             return res.json()["choices"][0]["message"]["content"].strip()
-    except: return None
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+        return None
+
+async def generate_actionable_blueprint():
+    """توليد أدلة تطبيقية عملية للأفراد"""
+    scenarios = [
+        "بناء 'مساعد بحثي' شخصي يقرأ ملفات الـ PDF الطويلة ويلخص الأجزاء الحساسة في Notion آلياً.",
+        "سير عمل (Workflow) لاستخراج البيانات من فيديوهات YouTube وتحويلها لدروس تعليمية منظمة باستخدام AI.",
+        "طريقة أتمتة الردود الذكية على رسائل العمل باستخدام (AI Agents) تفهم سياق مشاريعك السابقة.",
+        "كيفية بناء 'لوحة تحكم' (Dashboard) ذكية تتابع تحديثات أدواتك المفضلة وتعطيك ملخص يومي مركز.",
+        "نظام 'أرشفة ذكي' يحول ملاحظاتك الصوتية العشوائية إلى مهام منظمة في تطبيقات الإنجاز (Todoist/TickTick)."
+    ]
+    
+    scenario = random.choice(scenarios)
+    
+    sys_msg = """أنت خبير أتمتة عمليات (Automation Workflow Architect).
+    - هدفك الوحيد: أن يخرج القارئ بخطوات تطبيقية (Actionable Steps).
+    - الهيكل المطلوب: 
+      1. [المشكلة]: وش العائق؟
+      2. [الأدوات]: وش نحمل/نستخدم؟ (مثال: n8n, Make, OpenAI API, Python).
+      3. [التطبيق]: الخطوات التقنية للربط (Logic).
+      4. [القيمة]: وش بنستفيد فعلياً؟
+    - كن دقيقاً جداً في ذكر أسماء التقنيات."""
+    
+    prompt = f"صمم مخططاً تطبيقياً وعملياً لـ: {scenario}"
+    return await ask_ai(sys_msg, prompt)
 
 # ================= 🚀 EXECUTION =================
 async def main():
-    logger.info("🛡️ بدء نظام التجديد المستمر V16...")
+    logger.info("🛠️ بدء توليد المحتوى التطبيقي (V19)...")
     try:
-        me = client.get_me().data
-        bot_id = me.id
-        recent_tweets = get_recent_activity(bot_id)
-
-        # 1. فحص الاستطلاع الأسبوعي
-        has_poll = False
-        now = datetime.now(timezone.utc)
-        for tw in recent_tweets:
-            if tw.attachments and 'poll_ids' in tw.attachments:
-                if (now - tw.created_at).days < 7:
-                    has_poll = True
-                    break
-
-        # 2. توليد المحتوى
-        if has_poll:
-            logger.info("💡 الاستطلاع موجود، سأبحث عن 'سبق تقني' جديد...")
-            unique_content = await generate_unique_content(recent_tweets)
-            if unique_content:
-                client.create_tweet(text=unique_content[:280])
-                logger.success("🔥 تم نشر محتوى فريد وجديد تماماً!")
-        else:
-            # نشر استطلاع جديد (بشرط ألا يكون مكرر الأسئلة)
-            logger.info("📊 جاري صياغة استطلاع أسبوعي جديد...")
-            q = "في 2026، وش الأداة اللي غيرت مفهوم العمل عندك؟"
-            opts = ["Agents الذكية", "نظارات AR", "أتمتة n8n", "أدوات التوليد الصوتي"]
-            client.create_tweet(text=q, poll_options=opts, poll_duration_minutes=1440)
-            logger.success("✅ تم نشر استطلاع الأسبوع.")
-
+        # توليد المخطط العملي
+        blueprint = await generate_actionable_blueprint()
+        
+        if blueprint:
+            # النشر كـ "تغريدة طويلة" بفضل اشتراك بريميوم
+            # سنضيف مقدمة ثابتة لتعزيز الهوية التقنية للحساب
+            final_content = f"📌 مخطط عملي (Practical Blueprint):\n\n{blueprint}\n\n#أتمتة #ذكاء_اصطناعي #الجيل_الرابع"
+            
+            client.create_tweet(text=final_content)
+            logger.success("🔥 تم نشر الدليل التطبيقي بنجاح!")
+            
     except Exception as e:
-        logger.error(f"❌ خطأ: {e}")
+        logger.error(f"❌ خطأ في التنفيذ: {e}")
 
-import random
 if __name__ == "__main__":
     asyncio.run(main())
