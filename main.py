@@ -4,8 +4,7 @@ import httpx
 import tweepy
 import sqlite3
 import re
-import random
-from datetime import datetime, timezone
+from datetime import datetime
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -14,12 +13,10 @@ load_dotenv()
 # ================= 🔐 CONFIG =================
 CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
-    "TAVILY": os.getenv("TAVILY_API_KEY"), # تحتاج مفتاح من tavily.com للأخبار الطازجة
+    "TAVILY": os.getenv("TAVILY_API_KEY"),
     "X": {
-        "key": os.getenv("X_API_KEY"),
-        "secret": os.getenv("X_API_SECRET"),
-        "token": os.getenv("X_ACCESS_TOKEN"),
-        "access_s": os.getenv("X_ACCESS_SECRET")
+        "key": os.getenv("X_API_KEY"), "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"), "access_s": os.getenv("X_ACCESS_SECRET")
     }
 }
 
@@ -28,33 +25,31 @@ client = tweepy.Client(
     access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ THE IRON FILTER (V30) =================
-def extreme_clean(text):
-    # مسح الصيني والرموز الغريبة والكلمات الإنشائية
+# ================= 🛡️ THE ELITE FILTER (V32) =================
+def elite_clean(text):
+    # مسح الصيني والركاكة وتصفية النص
     text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text)
-    forbidden = ["节点", "時代", "أهلاً بك", "في هذا المقال", "نود أن نوضح"]
+    forbidden = ["أهلاً بك", "في هذا المقال", "نود أن نوضح", "عصرنا الحالي"]
     for word in forbidden:
         text = text.replace(word, "")
     return text.strip()
 
-# ================= 🔍 NEWS ENGINE (أخبار طازجة) =================
-async def get_fresh_news():
-    """البحث عن آخر أخبار AI للأفراد في آخر 24 ساعة"""
+# ================= 🔍 DEEP NEWS SEARCH =================
+async def get_deep_news():
     try:
         async with httpx.AsyncClient() as c:
-            # نبحث عن أخبار أدوات مثل OpenAI, Anthropic, Google, n8n
-            query = "latest AI tools news for individuals March 2026"
+            # البحث عن أخبار تقنية عميقة ومحددة
+            query = "cutting-edge AI tools benchmarks release 2026 agents"
             res = await c.post("https://api.tavily.com/search", json={
                 "api_key": CONF["TAVILY"],
                 "query": query,
                 "search_depth": "advanced",
                 "days": 1
             })
-            results = res.json().get('results', [])
-            return "\n".join([f"- {r['title']}: {r['content'][:200]}" for r in results[:3]])
-    except: return "لا توجد أخبار عاجلة حالياً، سأعتمد على المعلومات التحليلية."
+            return "\n".join([f"- {r['title']}: {r['content'][:300]}" for r in res.json().get('results', [])[:3]])
+    except: return "Focus on Local LLMs and Autonomous Agents workflows."
 
-# ================= 🧠 AI ENGINE =================
+# ================= 🧠 ELITE AI ENGINE =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -63,37 +58,39 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.3,
+                    "temperature": 0.4,
                     "messages": [
-                        {"role": "system", "content": system + "\n- لهجة خليجية رصينة.\n- ادخل في الخبر أو الحل فوراً."},
+                        {"role": "system", "content": system + """
+- اللهجة: خليجية بيضاء احترافية (Professional Tech Arabic).
+- الإلزام: اذكر المصطلحات التقنية الإنجليزية بين قوسين بجانب العربي (مثال: الأتمتة الذاتية (Autonomous Agents)).
+- التركيز: ركز على (Workflows), (APIs), (Infrastructure), و (Latency).
+- ممنوع الإنشائيات. ادخل في التفاصيل العميقة فوراً."""},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            return extreme_clean(res.json()["choices"][0]["message"]["content"])
+            return elite_clean(res.json()["choices"][0]["message"]["content"])
     except: return None
 
 # ================= 🚀 EXECUTION =================
 async def main():
-    logger.info("📡 جاري جلب الأخبار الطازجة وتوليد المحتوى...")
+    logger.info("📡 جاري توليد محتوى تقني دسم (V32)...")
     
-    # 1. جلب الخبر
-    news_context = await get_fresh_news()
+    news_data = await get_deep_news()
     
-    # 2. صياغة المحتوى بناءً على الخبر
-    sys_msg = """أنت محرر تقني استقصائي (Journalistic Scoop). 
-    مهمتك: صياغة خبر طازج أو أداة جديدة ظهرت اليوم. 
-    الهيكل: [الخبر] ثم [كيف تستفيد منه كفرد] ثم [خطوة عملية]."""
+    sys_msg = "أنت كبير مهندسي الحلول (Senior Solution Architect). حلل الأخبار للأفراد بأسلوب تقني بحت."
     
-    prompt = f"هذه سياقات للأخبار الحالية:\n{news_context}\n\nاصنع تغريدة احترافية دسمة بناءً على أهم خبر فيها."
+    prompt = f"السياق التقني الحالي:\n{news_data}\n\nصمم تغريدة 'دسمة' تشرح ميزة أو أداة جديدة مع توضيح الـ (Architecture) البسيط لاستخدامها."
     
     content = await ask_ai(sys_msg, prompt)
     
     if content:
-        # إضافة هاشتاقات ذكية وإشارات
-        final_post = f"🚨 جديد اليوم:\n\n{content}\n\n#ذكاء_اصطناعي #أخبار_التقنية #AI_News"
+        # إضافة الوسوم الاستراتيجية
+        final_post = f"🚨 التقنية بعمق (Deep Dive):\n\n{content}\n\n#AI_Architecture #DevTools #ذكاء_اصطناعي #TechDeepDive"
+        
+        # نشر التغريدة
         client.create_tweet(text=final_post)
-        logger.success("🔥 تم نشر الخبر الطازج بنجاح!")
+        logger.success("🔥 تم نشر المحتوى الدسم بنجاح!")
 
 if __name__ == "__main__":
     asyncio.run(main())
