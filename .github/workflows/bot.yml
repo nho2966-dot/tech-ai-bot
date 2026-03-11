@@ -1,56 +1,39 @@
-name: Tech AI Bot V5 - Final
+name: Run Tech AI Bot
 
 on:
   schedule:
-    # يعمل كل 6 ساعات (يمكنك تغييرها لـ '0 */3 * * *' للعمل كل 3 ساعات)
-    - cron: '0 */6 * * *'
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً للتجربة
+    - cron: '0 */6 * * *' # يعمل كل 6 ساعات
+  workflow_dispatch: # تشغيل يدوي
 
 jobs:
-  run-bot:
+  build:
     runs-on: ubuntu-latest
-    # زيادة مدة الانتظار المسموحة لتجنب قطع السكربت أثناء الاستراحة العشوائية
-    timeout-minutes: 30 
+    
+    # إضافة المتغير اللي طلبه نظام قيت هاب لتفعيل النسخة الجديدة
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # حدثنا من v3 إلى v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # حدثنا من v4 إلى v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install tweepy httpx loguru python-dotenv
+          pip install httpx tweepy loguru python-dotenv
 
-      - name: Restore Database Cache
-        uses: actions/cache@v3
-        with:
-          path: newsroom_v5.db
-          # استخدام مفتاح يعتمد على نظام التشغيل لضمان استرجاع قاعدة البيانات
-          key: ${{ runner.os }}-db-newsroom-v5
-          restore-keys: |
-            ${{ runner.os }}-db-newsroom-
-
-      - name: Run Main Script
-        run: python main.py
+      - name: Run Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
-
-      - name: Save Database Cache
-        if: always()
-        uses: actions/cache@v3
-        with:
-          path: newsroom_v5.db
-          # تحديث الكاش في كل مرة لضمان حفظ المنشنات التي تم الرد عليها
-          key: ${{ runner.os }}-db-newsroom-v5-${{ github.run_id }}
+        run: python main.py
