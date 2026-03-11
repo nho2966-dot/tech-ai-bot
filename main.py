@@ -4,6 +4,7 @@ import httpx
 import tweepy
 import sqlite3
 import re
+import random
 from datetime import datetime
 from loguru import logger
 from dotenv import load_dotenv
@@ -30,15 +31,28 @@ client = tweepy.Client(
     access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🧹 LANGUAGE FILTER =================
-def clean_non_ar_en(text):
-    """منع الحروف الصينية، الروسية، أو أي رموز غريبة نهائياً"""
-    # السماح فقط بالعربية، الإنجليزية، الأرقام، والرموز الشائعة (.,!?)
+# ================= 🧹 LANGUAGE & CLEANING =================
+def clean_text(text):
+    """منع الحروف الصينية والروسية والرموز الغريبة"""
+    # السماح بالعربية والإنجليزية والأرقام والرموز الأساسية فقط
     pattern = re.compile(r'[^\u0600-\u06FF\u0750-\u077F\ufb50-\ufdff\ufe70-\ufefc\s\w.,!?;:()@#-]')
     cleaned = pattern.sub('', text)
-    return cleaned
+    # إزالة أي مقدمات إنشائية مملة لو ظهرت
+    removals = ["في هذا المقال", "تعد التكنولوجيا", "عصرنا الحالي", "時代"]
+    for r in removals:
+        cleaned = cleaned.replace(r, "")
+    return cleaned.strip()
 
-# ================= 🧠 AI ENGINE (الضبط العسكري) =================
+# ================= 🗂 DATABASE INIT =================
+def init_db():
+    """تجهيز الجداول لمنع الخطأ اللي ظهر لك"""
+    with sqlite3.connect("newsroom_v5.db") as db:
+        db.execute("CREATE TABLE IF NOT EXISTS daily_post (date TEXT PRIMARY KEY)")
+        db.execute("CREATE TABLE IF NOT EXISTS seen_mentions (id TEXT PRIMARY KEY)")
+        db.commit()
+    logger.info("✅ تم تجهيز قاعدة البيانات بنجاح.")
+
+# ================= 🧠 AI ENGINE =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -47,44 +61,50 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.2, # تقليل جداً لمنع أي خروج عن النص أو هلوسة لغوية
+                    "temperature": 0.3, # دقة عالية لمنع الهلوسة
                     "messages": [
-                        {"role": "system", "content": system + """
-- ممنوع منعاً باتاً استخدام أي حرف صيني أو روسي أو لغة غير العربية.
-- لا تستخدم مقدمات مثل "في هذا المقال" أو "تعد التكنولوجيا".
-- ادخل في صلب الموضوع: (المشكلة، الأداة، الحل العملي).
-- اللهجة: خليجية بيضاء رصينة جداً."""},
+                        {"role": "system", "content": system + "\n- لهجة خليجية رصينة.\n- ممنوع أي حرف صيني.\n- ادخل في الحل العملي فوراً."},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            raw_text = res.json()["choices"][0]["message"]["content"].strip()
-            return clean_non_ar_en(raw_text)
-    except: return None
+            return clean_text(res.json()["choices"][0]["message"]["content"])
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+        return None
 
-# ================= 🚀 EXECUTION =================
+# ================= 🚀 MAIN PROCESS =================
 async def main():
-    logger.info("🛡️ تشغيل فحص اللغة والجودة V27...")
+    init_db()
+    logger.info("🛡️ فحص الجودة والنشر V28...")
+    
     today_date = datetime.now().strftime("%Y-%m-%d")
     
     with sqlite3.connect("newsroom_v5.db") as db:
-        # فحص المنشنات أولاً (الردود)
-        # [دالة handle_mentions السابقة تضاف هنا بنفس الفلاتر]
-
-        # النشر اليومي (تركيز على القيمة)
+        # فحص هل نشرنا اليوم؟
         if not db.execute("SELECT 1 FROM daily_post WHERE date=?", (today_date,)).fetchone():
-            topic = "كيف تستخدم @n8n_io لربط بريدك بـ @OpenAI وتصنيف المهام آلياً؟"
-            sys_msg = "أنت خبير أتمتة تقني. اشرح خطوات عملية (1, 2, 3) بدون ثرثرة."
             
-            content = await ask_ai(sys_msg, f"صمم دليل عملي قصير لـ: {topic}")
+            # اختيار موضوع "دسم" وعملي
+            topics = [
+                "خطوات ربط @n8n_io بـ @OpenAI لتلخيص ملفات العمل تلقائياً.",
+                "كيف تفعل نظام الحماية القصوى لبياناتك الشخصية باستخدام Local LLMs.",
+                "دليل عملي لاستخدام برومبتات التفكير المنطقي في Claude 4."
+            ]
             
-            if content:
-                # حذف أي بقايا لغوية غريبة قبل النشر
-                final_post = content + "\n\n#أتمتة #تقنية #AI"
-                client.create_tweet(text=final_content)
+            sys_msg = "أنت مستشار تقني عملي. اشرح الطريقة بـ (الأدوات + الخطوات + الفائدة)."
+            content = await ask_ai(sys_msg, random.choice(topics))
+            
+            if content and len(content) > 10:
+                final_post = f"{content}\n\n#ذكاء_اصطناعي #تقنية #أتمتة"
+                client.create_tweet(text=final_post)
+                
                 db.execute("INSERT INTO daily_post VALUES (?)", (today_date,))
                 db.commit()
-                logger.success("✅ تم النشر بنجاح مع فلترة اللغة.")
+                logger.success("🔥 تم النشر بنجاح وبدون أخطاء لغوية.")
+            else:
+                logger.warning("⚠️ فشل توليد محتوى مناسب.")
+        else:
+            logger.info("📅 تم النشر مسبقاً لهذا اليوم.")
 
 if __name__ == "__main__":
     asyncio.run(main())
