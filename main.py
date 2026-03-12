@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import asyncio
 import httpx
 import tweepy
@@ -25,7 +26,7 @@ CONF = {
     }
 }
 
-# إعداد تويتر
+# إعداد تويتر V2
 twitter = tweepy.Client(
     consumer_key=CONF["X"]["key"],
     consumer_secret=CONF["X"]["secret"],
@@ -34,25 +35,26 @@ twitter = tweepy.Client(
 )
 
 # ================= 🗄️ MEMORY DB =================
-db = sqlite3.connect("tech_bot.db")
-db.execute("CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY)")
+db = sqlite3.connect("tech_empire_v130.db")
+db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY)")
 db.commit()
 
-def is_processed(uid):
-    return db.execute("SELECT id FROM processed WHERE id=?", (uid,)).fetchone() is not None
+def is_seen(uid):
+    return db.execute("SELECT id FROM memory WHERE id=?", (uid,)).fetchone() is not None
 
-def save_processed(uid):
-    db.execute("INSERT INTO processed (id) VALUES (?)", (uid,))
+def save_seen(uid):
+    db.execute("INSERT INTO memory (id) VALUES (?)", (uid,))
     db.commit()
 
 # ================= 🛡️ TEXT CLEANER =================
 def clean_text(text):
+    # تنظيف الحروف والرموز غير المرغوبة
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
-    boring = ["أهلاً بكم", "في هذا الثريد", "هل تعلم", "تخيل"]
+    boring = ["أهلاً بكم", "في هذا الثريد", "هل تعلم", "تخيل", "إليك الخطوات"]
     for s in boring: text = text.replace(s, "")
     return " ".join(text.split()).strip()
 
-# ================= 🧠 AI ENGINE =================
+# ================= 🧠 AI ENGINE (Expert Mode) =================
 async def ask_ai(system, prompt, temp=0.6):
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -63,7 +65,7 @@ async def ask_ai(system, prompt, temp=0.6):
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
                     "messages": [
-                        {"role": "system", "content": system + "\nاللهجة: خليجية تقنية حادة."},
+                        {"role": "system", "content": system + "\n- اللهجة: خليجية تقنية بيضاء.\n- الشخصية: CTO خبير."},
                         {"role": "user", "content": prompt}
                     ]
                 }
@@ -73,80 +75,101 @@ async def ask_ai(system, prompt, temp=0.6):
         logger.error(f"AI Error: {e}")
         return None
 
-# ================= 📹 VIDEO INTEL =================
+# ================= 📹 VIDEO INTEL (yt-dlp) =================
 async def analyze_video(url):
+    logger.info(f"🎥 تحليل فيديو يوتيوب: {url}")
     ydl_opts = {'quiet': True, 'skip_download': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return f"Title: {info.get('title')}\nDescription: {info.get('description')[:500]}"
-    except: return None
+    except Exception as e:
+        logger.error(f"Video Error: {e}")
+        return "فشل تحليل الفيديو تقنياً."
 
-# ================= 🧵 DAILY THREAD MISSION =================
-async def daily_mission():
-    logger.info("🎯 تبدأ المهمة اليومية: اكتشاف ونشر...")
-    topic_sys = "أنت محلل استخبارات تقنية. اقترح ترند AI Agent أو LLM Architecture دسم."
-    topic = await ask_ai(topic_sys, "أعطني عنواناً تقنياً صادماً.", 0.7)
+# ================= 🧵 CORE MISSION (The Thread) =================
+async def run_daily_mission(custom_topic=None):
+    logger.info("🎯 جاري تنفيذ المهمة (نشر ثريد)...")
     
+    # 1. تحديد الموضوع (تلقائي أو يدوي)
+    if custom_topic:
+        topic = custom_topic
+    else:
+        topic_sys = "اقترح ترند تقني عميق (AI Agents, RAG, Web3) موجه للأفراد."
+        topic = await ask_ai(topic_sys, "أعطني عنواناً داسماً بالخليجي.", 0.8)
+
     if not topic: return
 
-    # بحث وتحليل
+    # 2. بحث Tavily
     async with httpx.AsyncClient() as client:
         r = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"})
         knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
 
-    thread_sys = "أنت Senior Architect. اكتب ثريد من 5 تغريدات. ابدأ بالـ Architecture. اذكر أدوات محددة."
+    # 3. توليد الثريد
+    thread_sys = "أنت Senior Solution Architect. اكتب ثريد من 5 تغريدات. ادخل في الـ Architecture والأدوات فوراً."
     raw_thread = await ask_ai(thread_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.5)
     
     tweets = [clean_text(t) for t in re.split(r'\d+\s*[/-]\s*', raw_thread) if len(t) > 20]
     
     prev_id = None
     for i, t in enumerate(tweets[:5]):
-        text = f"{i+1}/ {t}"
-        res = twitter.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
+        full_tweet = f"{i+1}/ {t}"
+        res = twitter.create_tweet(text=full_tweet, in_reply_to_tweet_id=prev_id)
         prev_id = res.data["id"]
         await asyncio.sleep(5)
-    logger.success("🔥 تم نشر الثريد بنجاح!")
+    
+    logger.success(f"🔥 تم نشر الثريد بنجاح عن: {topic}")
 
-# ================= 🤖 SMART REPLY =================
+# ================= 🤖 SMART REPLY & REMOTE CONTROL =================
 async def check_mentions():
-    logger.info("🔍 فحص الردود والمنشن...")
+    logger.info("🔍 فحص المنشن والردود...")
     try:
         me = twitter.get_me().data.id
         mentions = twitter.get_users_mentions(id=me)
         if not mentions.data: return
 
         for tweet in mentions.data:
-            if is_processed(f"reply_{tweet.id}"): continue
+            if is_seen(f"reply_{tweet.id}"): continue
             
-            # هل هو رابط فيديو؟
+            # ميزة التحكم عن بُعد: إذا المنشن يحتوي على "اكتب ثريد عن"
+            if "اكتب ثريد عن" in tweet.text:
+                requested_topic = tweet.text.split("اكتب ثريد عن")[1].strip()
+                logger.info(f"📝 طلب يدوي مكتشف: {requested_topic}")
+                await run_daily_mission(custom_topic=requested_topic)
+                save_seen(f"reply_{tweet.id}")
+                continue
+
+            # الرد العادي أو تحليل يوتيوب
             url_match = re.search(r'(https?://\S+)', tweet.text)
             if url_match and "youtu" in url_match.group(0):
                 intel = await analyze_video(url_match.group(0))
-                reply_sys = "أنت خبير تقني تلخص فيديوهات يوتيوب بذكاء."
-                answer = await ask_ai(reply_sys, f"لخص هذا الفيديو بـ 200 حرف: {intel}")
+                answer = await ask_ai("أنت خبير تقني تلخص فيديوهات.", f"لخص بذكاء هندسي: {intel}")
             else:
-                reply_sys = "أنت Senior Architect. رد بذكاء وعمق تقني."
-                answer = await ask_ai(reply_sys, f"سؤال المتابع: {tweet.text}")
+                answer = await ask_ai("أنت خبير تقني رصين.", f"رد على استفسار المتابع: {tweet.text}")
 
             if answer:
                 twitter.create_tweet(text=clean_text(answer), in_reply_to_tweet_id=tweet.id)
-                save_processed(f"reply_{tweet.id}")
-                logger.success("✅ تم الرد.")
-    except Exception as e: logger.error(e)
+                save_seen(f"reply_{tweet.id}")
+                logger.success("✅ تم الرد بنجاح.")
+    except Exception as e:
+        logger.error(f"Reply Error: {e}")
 
-# ================= 🚀 SCHEDULER & MAIN =================
-scheduler = AsyncIOScheduler()
+# ================= 🚀 MAIN ENTRY POINT =================
+async def main_loop(mode="auto"):
+    logger.info(f"🚀 AI Media Engine V130 Started | Mode: {mode}")
 
-async def main_loop():
-    logger.info("🚀 AI Media Engine V125 ONLINE")
-    
-    # جدولة المهام داخل الـ Loop
-    scheduler.add_job(daily_mission, 'cron', hour=10) # 10 صباحاً
-    scheduler.add_job(check_mentions, 'interval', minutes=15) # كل ربع ساعة
+    if mode == "manual":
+        # نشر فوري ثم الخروج (مثالي للـ GitHub Actions اليدوي)
+        await run_daily_mission()
+        return
+
+    # وضع الجدولة المستمرة
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_daily_mission, 'cron', hour=10) # 10 صباحاً
+    scheduler.add_job(check_mentions, 'interval', minutes=15)
     
     scheduler.start()
-    logger.info("📅 Scheduler started successfully.")
+    logger.info("📅 Scheduler Active.")
 
     try:
         while True:
@@ -155,7 +178,10 @@ async def main_loop():
         scheduler.shutdown()
 
 if __name__ == "__main__":
+    # فحص الأوامر: python main.py manual للنشر الفوري
+    run_mode = "manual" if (len(sys.argv) > 1 and sys.argv[1] == "manual") else "auto"
+    
     try:
-        asyncio.run(main_loop())
+        asyncio.run(main_loop(mode=run_mode))
     except Exception as e:
-        logger.critical(f"Fatal Startup Error: {e}")
+        logger.critical(f"FATAL ERROR: {e}")
