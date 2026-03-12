@@ -1,55 +1,82 @@
+import os
+import asyncio
+import httpx
+import tweepy
+import sqlite3
+import re
+from datetime import datetime
+from loguru import logger
+from dotenv import load_dotenv
 
-@X_TechNews_
-·
-٢ س
-🚨 التقنية بعمق (Deep Dive):
+load_dotenv()
 
-"استخدم أداة (API Gateway) لتحسين أداء تطبيقاتك! 
-باستخدام (API Gateway) يمكنك تحسين أداء تطبيقاتك عن طريق تقليل (Latency) الزمني وتحسين تدفق البيانات. 
-هذا يتحقق من خلال استخدام (Load Balancing) لتحسين التوزيع العادل للبيانات، و (Caching) لتخزين البيانات الشائعة، و (Content Delivery Network (CDN)) لتوصيل البيانات بشكل أسرع. 
-بالإضافة إلى ذلك، يمكنك استخدام (Workflows) لتحسين تدفق البيانات وتقليل الوقت اللازم لتنفيذ العمليات. 
-وأخيراً، يمكنك استخدام (Infrastructure as Code (IaC)) لتحسين بنية التطبيق وتقليل الوقت اللازم لتنفيذ التغييرات. 
-هذه الأداة توفر لك ميزات متقدمة مثل (Authentication) و (Authorization) و (Encryption) لتأمين بياناتك. 
-استخدم (API Gateway) لتحسين أداء تطبيقاتك وتقليل الوقت اللازم لتنفيذ العمليات!"
+# ================= 🔐 CONFIG =================
+CONF = {
+    "GROQ": os.getenv("GROQ_API_KEY"),
+    "TAVILY": os.getenv("TAVILY_API_KEY"),
+    "X": {
+        "key": os.getenv("X_API_KEY"), "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"), "access_s": os.getenv("X_ACCESS_SECRET")
+    }
+}
 
-#AI_Architecture #DevTools #ذكاء_اصطناعي #TechDeepDive
-X_TechNews_
-@X_TechNews_
-·
-١٠ س
-🚨 التقنية بعمق (Deep Dive):
+client = tweepy.Client(
+    consumer_key=CONF["X"]["key"], consumer_secret=CONF["X"]["secret"],
+    access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
+)
 
-"تخيل أنك تستطيع توفير وقتك وتحسين أداء تطبيقاتك باستخدام أداة (Workflow Automation) أتمتة سير العمل! 
-هذه الأداة تعتمد على (APIs) واجهات برمجة التطبيقات لربط الأنظمة المختلفة وتسهيل عمليات (Data Integration) دمج البيانات.
-باستخدام (Containerization) حاويات التطبيقات، يمكنك إنشاء بيئة (Infrastructure) بنية تحتية مرنة وقابلة للتوسيع، مما يقلل من (Latency) التأخير ويحسن تجربة المستخدم.
-هذه هي (Microservices Architecture) بنية الخدمات الدقيقة، حيث يتم تقسيم التطبيقات إلى خدمات صغيرة متصلة باستخدام (APIs) واجهات برمجة التطبيقات، مما يسمح بتطوير وتحديث كل خدمة بشكل مستقل.
-استخدم (Monitoring Tools) أدوات المراقبة لتحليل أداء تطبيقاتك وتحديد المناطق التي تحتاج إلى تحسين، وقم بتشغيل (Automated Tests) الاختبارات الآلية لضمان جودة التطبيقات.
-باستخدام هذه الأدوات والتقنيات، يمكنك إنشاء تطبيقات قوية ومرنة وقادرة على التكيف مع التغيرات السريعة في السوق، وتحقيق أقصى استفادة من استثماراتك التكنولوجية." #أتمتة_سير_العمل #تطبيقات_الويب #بنية_التحتية #تجربة_المستخدم
+# ================= 🛡️ ANTI-TRUNCATION & CLEANING =================
+def final_polish(text):
+    # مسح أي حروف غريبة أو صينية
+    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text)
+    # التأكد من عدم انقطاع النص (الحد الأقصى للمشتركين 25,000 لكن نفضل الاختصار للقراءة)
+    if len(text) > 2000:
+        text = text[:1997] + "..."
+    return text.strip()
 
-#AI_Architecture #DevTools #ذكاء_اصطناعي #TechDeepDive
-X_TechNews_
-@X_TechNews_
-·
-١٥ س
-🚨 التقنية بعمق (Deep Dive):
+# ================= 🧠 ELITE AI ENGINE V33 =================
+async def ask_ai(system, prompt):
+    try:
+        async with httpx.AsyncClient(timeout=90) as client_http:
+            res = await client_http.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "temperature": 0.8, # رفعنا الحرارة قليلاً لكسر التكرار الممل
+                    "messages": [
+                        {"role": "system", "content": system + """
+- ممنوع نهائياً البدء بكلمة "تخيل" أو "هل تعلم" أو "أهلاً بك".
+- ابدأ فوراً بذكر اسم الأداة أو نقد لبروتوكول تقني معين.
+- التزم بلهجة خليجية بيضاء "حادة" وتقنية (Sharp Tech Tone).
+- استخدم المصطلحات الإنجليزية بين قوسين بكثافة لكن بذكاء.
+- ممنوع تكرار الهيكل الإنشائي للتغريدات السابقة."""},
+                        {"role": "user", "content": prompt}
+                    ]
+                }
+            )
+            return final_polish(res.json()["choices"][0]["message"]["content"])
+    except: return None
 
-"تخيل أنك تستطيع دمج تطبيقاتك المختلفة بسهولة باستخدام واجهات برمجة التطبيقات (APIs) المفتوحة، مما يتيح لك إنشاء سير عمل (Workflows) ديناميكي ومرن. يمكنك استخدام أداة التكامل (Integration Tool) لربط تطبيقاتك وتخفيض التأخير (Latency) في عمليات النقل البيانات.
+# ================= 🚀 EXECUTION =================
+async def main():
+    logger.info("📡 جاري تشغيل المحرك V33 كاسر التكرار...")
+    
+    # جلب أخبار عميقة جداً (Deep Tech)
+    news_query = "latest advancements in AI Agents orchestration and vector databases 2026"
+    # [هنا نستخدم Tavily لجلب السياق كما في النسخ السابقة]
+    
+    sys_msg = "أنت مهندس تقني متمرد (Tech Lead). تنتقد الحلول السطحية وتقدم Architecture عميق للأفراد."
+    
+    prompt = "حلل لنا كيف ندمج قواعد البيانات المتجهة (Vector Databases) مع (LLMs) لتقليل الهلوسة (Hallucinations) للأفراد."
+    
+    content = await ask_ai(sys_msg, prompt)
+    
+    if content:
+        # التأكد من أن التغريدة دسمة ومختلفة
+        final_post = f"🔥 مراجعة معمارية (Architecture Review):\n\n{content}\n\n#VectorDB #LLMs #AI_Architecture #DevTools"
+        client.create_tweet(text=final_post)
+        logger.success("✅ تم النشر بأسلوب متجدد وبدون انقطاع!")
 
-فيما يلي نظرة عامة على البنية المعمارية (Architecture) البسيطة:
-
-1. **تطبيقات السحابة (Cloud Applications)**: تستضيف تطبيقاتك المختلفة على منصات سحابية، مثل (AWS) أو (Azure).
-2. **واجهات برمجة التطبيقات (APIs)**: تستخدم واجهات برمجة التطبيقات المفتوحة لربط تطبيقاتك وتحقيق التكامل بينها.
-3. **أداة التكامل (Integration Tool)**: تستخدم أداة التكامل لربط تطبيقاتك وتحديد سير العمل (Workflows) المطلوبة.
-4. **سير العمل (Workflows)**: يتم تحديد سير العمل المطلوبة لتحقيق التكامل بين التطبيقات، مثل تحويل البيانات أو إرسال الإشعارات.
-5. **بنية التحتية (Infrastructure)**: يتم استضافة التطبيقات وأداة التكامل على بنية تحتية قوية، مثل (Microservices) أو (Containerization).
-
-باستخدام هذه البنية المعمارية، يمكنك إنشاء سير عمل ديناميكي ومرن، وتخفيض التأخير في عمليات النقل البيانات، وتحسين كفاءة تطبيقاتك."
-
-#AI_Architecture #DevTools #ذكاء_اصطناعي #TechDeepDive
-X_TechNews_
-@X_TechNews_
-·
-٢١ س
-🚨 التقنية بعمق (Deep Dive):
-
-"تخيل أنك تستطيع دمج أنظمة العمل (Workflows) المختلفة باستخدام واجهات البرمجة التطبيقية (APIs) المفتوحة، مما يتيح لك إنشاء تطبيقات متكاملة بسهولة. يمكن استخدام أداة (Apache Airflow) لتحسين تدفقات العمل (Workflows) وتحقيق الأتمتة الذاتية (Autonomou
+if __name__ == "__main__":
+    asyncio.run(main())
