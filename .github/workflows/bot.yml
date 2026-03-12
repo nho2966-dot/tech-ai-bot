@@ -1,33 +1,33 @@
-name: Run Tech AI Bot
+name: AI Media Engine V125 Execution
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # تشغيل آلي كل 6 ساعات
-  workflow_dispatch: # تشغيل يدوي عند الحاجة
+    - cron: '0 */4 * * *' # تشغيل كل 4 ساعات
+  workflow_dispatch:
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
-    
-    # 💡 هذا السطر هو السر اللي بيقفل التنبيه ويفعل Node 24 فوراً
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4 # تأكد إنها v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5 # تأكد إنها v5
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Libraries
         run: |
           python -m pip install --upgrade pip
-          pip install httpx tweepy loguru python-dotenv
+          pip install -r requirements.txt
 
-      - name: Run Bot V33
+      - name: Start the Engine
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
@@ -35,5 +35,4 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python main.py
