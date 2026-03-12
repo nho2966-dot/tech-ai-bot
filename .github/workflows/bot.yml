@@ -1,15 +1,15 @@
-name: AI Media Engine V130 - Tech Sovereignty
+name: AI Media Engine V150 - Technical Sovereignty
 
 on:
-  # 1. التشغيل التلقائي (يومياً الساعة 10 صباحاً بتوقيت مكة المكرمة/عمان تقريباً)
+  # 1. التشغيل التلقائي (يومياً الساعة 10 صباحاً بتوقيت عمان/مكة)
   schedule:
-    - cron: '0 7 * * *' # 07:00 UTC يوافق 10:00 أو 11:00 صباحاً حسب التوقيت المحلي
+    - cron: '0 7 * * *' 
   
-  # 2. التشغيل اليدوي من واجهة GitHub (Actions Tab)
+  # 2. التشغيل اليدوي من واجهة GitHub
   workflow_dispatch:
     inputs:
       run_mode:
-        description: 'اختر وضع التشغيل (manual للنشر الفوري | auto للجدولة المستمرة)'
+        description: 'اختر وضع التشغيل'
         default: 'manual'
         required: true
         type: choice
@@ -18,47 +18,46 @@ on:
           - auto
 
 jobs:
-  build-and-run:
+  run-tech-empire:
     runs-on: ubuntu-latest
-    
-    # تحديد مدة التشغيل القصوى لمنع استهلاك الدقائق في حال الـ Infinite Loop
-    timeout-minutes: 360
+    timeout-minutes: 120 # وقت كافٍ للبحث والتحليل والنشر
 
     steps:
-      - name: 📂 Checkout Repository Content
-        uses: actions/checkout@v3
+      - name: 📂 Checkout Repository
+        uses: actions/checkout@v4
 
       - name: 🐍 Set up Python 3.10
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # تسريع التثبيت في المرات القادمة
+          cache: 'pip'
 
-      - name: 🛠️ Install System Dependencies (FFmpeg)
+      - name: 🛠️ Install FFmpeg (For Video Intelligence)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: 📦 Install Python Libraries
+      - name: 📦 Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: 🚀 Launch AI Media Engine
+      - name: 🚀 Launch V150 CTO Engine
         env:
-          # تأكد من إضافة هذه المفاتيح في Settings -> Secrets and variables -> Actions
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        # إذا تم التشغيل يدوياً نمرر المدخل، وإلا نستخدم الـ cron الافتراضي
+        # تشغيل يدوي أو تلقائي بناءً على المدخلات
         run: |
           python main.py ${{ github.event.inputs.run_mode || 'auto' }}
 
-      - name: 💾 Upload Database (Optional Memory Persistence)
+      - name: 💾 Persistence: Upload V150 Database
+        if: always() # لضمان رفع قاعدة البيانات حتى لو فشل السكربت للتحليل
         uses: actions/upload-artifact@v4
         with:
-          name: tech-empire-db
-          path: tech_empire_v130.db
+          name: tech-sovereignty-v150-db
+          path: tech_sovereignty_v150.db # تأكد أن هذا الاسم مطابق تماماً لما في main.py
+          retention-days: 7 # الاحتفاظ بالملف لمدة أسبوع
