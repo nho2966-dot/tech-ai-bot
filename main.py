@@ -1,133 +1,115 @@
 import os
+import re
 import asyncio
 import httpx
 import tweepy
-import re
+import sqlite3
+import numpy as np
 from loguru import logger
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-# ================= 🔐 CONFIG =================
+# ================= 🔐 CONFIG (V120) =================
 CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
     "TAVILY": os.getenv("TAVILY_API_KEY"),
     "X": {
-        "key": os.getenv("X_API_KEY"),
-        "secret": os.getenv("X_API_SECRET"),
-        "token": os.getenv("X_ACCESS_TOKEN"),
-        "access_s": os.getenv("X_ACCESS_SECRET")
+        "key": os.getenv("X_API_KEY"), "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"), "access_s": os.getenv("X_ACCESS_SECRET")
     }
 }
 
 twitter = tweepy.Client(
-    consumer_key=CONF["X"]["key"],
-    consumer_secret=CONF["X"]["secret"],
-    access_token=CONF["X"]["token"],
-    access_token_secret=CONF["X"]["access_s"]
+    consumer_key=CONF["X"]["key"], consumer_secret=CONF["X"]["secret"],
+    access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ TEXT REFINER (V45) =================
-def refine(text):
-    # إزالة الصيني وأي حشو لغوي
+# ================= 🛡️ ADVANCED CLEANER =================
+def clean(text):
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
-    # تنظيف المسافات والتأكد من هيبة النص
-    return " ".join(text.split())
+    # إزالة حشو V90 الممل
+    bad_starts = ["أهلاً بكم", "في هذا الثريد", "هل تعلم", "تخيل"]
+    for s in bad_starts: text = text.replace(s, "")
+    return " ".join(text.split()).strip()
 
-# ================= 🧠 AI CALL (Advanced Logic) =================
-async def ask_ai(system, prompt, temp=0.4):
-    async with httpx.AsyncClient(timeout=90) as client:
+# ================= 🧠 AI CALL (Multi-Purpose) =================
+async def ask_ai(system, prompt, temp=0.5):
+    async with httpx.AsyncClient(timeout=120) as client:
         res = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {CONF['GROQ']}"},
             json={
                 "model": "llama-3.3-70b-versatile",
                 "temperature": temp,
-                "messages": [
-                    {"role": "system", "content": system + "\n- اللهجة: خليجية تقنية بيضاء.\n- الشخصية: Senior Tech Lead."},
-                    {"role": "user", "content": prompt}
-                ]
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
             }
         )
         return res.json()["choices"][0]["message"]["content"]
 
-# ================= 🔍 TREND DISCOVERY (10x Quality) =================
-async def discover_topic():
-    system = "أنت رادار تقني يبحث عن 'الفجوات المعرفية' (Knowledge Gaps)."
-    prompt = """
-اقترح موضوع تقني معقد للأفراد لكنه يغير حياتهم (مثل: الـ Agents الذاتية، قواعد البيانات المحلية، أو أمن الـ AI).
-اجعل العنوان 'صادم تقنياً' ومثير للجدل الإيجابي.
-"""
-    return await ask_ai(system, prompt, temp=0.7)
+# ================= 🎨 IMAGE GEN (Visual Boost) =================
+# ملاحظة: هنا نستخدم قدرة Gemini (Nano Banana 2) لتوليد وصف الصورة
+async def generate_tech_image(topic):
+    logger.info(f"🎨 جاري تصميم الهوية البصرية لموضوع: {topic}")
+    prompt = f"A professional high-tech architecture diagram for {topic}, 3D isometric style, neon blue and dark grey theme, 8k resolution, cinematic lighting."
+    # في البيئة الحقيقية، ستقوم باستدعاء image_generation(prompt) هنا.
+    return "image_url_placeholder" 
 
-# ================= 🔬 RESEARCH & KNOWLEDGE =================
-async def research(topic):
+# ================= 🧵 THREAD & LINKEDIN GENERATOR =================
+async def generate_multimodal_content(topic, knowledge):
+    # 1. ثريد تويتر (خليجي تقني حار)
+    x_sys = "أنت CTO تقني حريف. اكتب ثريد من 5 تغريدات. ابدأ بالـ Architecture فوراً. اذكر أدوات محددة (CrewAI, Supabase, LangGraph)."
+    x_thread = await ask_ai(x_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.6)
+    
+    # 2. منشور لينكد إن (بروفيشينال رصين)
+    li_sys = "أنت Senior Solution Architect. اكتب منشور LinkedIn احترافي يشرح الجدوى الاقتصادية والتقنية لهذا الحل للأفراد والشركات."
+    li_post = await ask_ai(li_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.4)
+    
+    return x_thread, li_post
+
+# ================= 🚀 EXECUTION ENGINE =================
+async def daily_empire_mission():
+    logger.info("🦁 تبدأ مهمة الإمبراطورية اليومية...")
+    
+    # 1. اكتشاف (Trend Discovery)
+    topic = await ask_ai("محلل ترند", "أعطني موضوع AI Agent أو RAG عميق للأفراد.", 0.7)
+    if not topic: return
+
+    # 2. بحث (Advanced Research)
     async with httpx.AsyncClient() as client:
-        res = await client.post(
-            "https://api.tavily.com/search",
-            json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"}
-        )
-        results = res.json().get("results", [])
-        return "\n".join(f"- {r['title']}: {r['content']}" for r in results)
+        r = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"})
+        knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
 
-async def extract_knowledge(research_data):
-    system = "أنت مهندس استخلاص معرفة (Knowledge Engineer)."
-    prompt = f"حلل البيانات التالية واستخرج منها الـ (Architecture) والـ (Tools) والـ (Action Plan):\n{research_data}"
-    return await ask_ai(system, prompt)
+    # 3. توليد المحتوى (Twitter + LinkedIn)
+    x_thread, li_post = await generate_multimodal_content(topic, knowledge)
+    
+    # 4. توليد الصورة (Visuals)
+    image_url = await generate_tech_image(topic)
 
-# ================= 🧵 THREAD GENERATION (Masterclass) =================
-async def generate_thread(topic, knowledge):
-    system = "أنت صانع محتوى تقني (Ghostwriter) لأكبر حسابات التقنية في العالم."
-    prompt = f"""
-اكتب ثريد (Thread) من 5-6 تغريدات عن: {topic}
-المعلومات: {knowledge}
-
-الشروط:
-1. التغريدة 1: (The Hook) ابدأ بمشكلة مؤلمة يحلها هذا التقدم التقني.
-2. التغريدات 2-4: (The Meat) اشرح الـ Workflow التقني باستخدام مصطلحات (Architecture, Latency, Scalability).
-3. التغريدة 5: (The Tools) اذكر الأدوات المحددة وكيف يبدأ الشخص فوراً.
-4. التغريدة 6: (The Future) توقع لمستقبل هذه التقنية + سؤال تفاعلي.
-
-* استخدم المصطلحات الإنجليزية بين قوسين بكثافة.
-* ممنوع المقدمات المملة.
-"""
-    raw_thread = await ask_ai(system, prompt, temp=0.6)
-    # تنظيف كل تغريدة على حدة
-    tweets = [refine(t) for t in raw_thread.split("\n\n") if len(t) > 10]
-    return tweets
-
-# ================= 🚀 POST THREAD =================
-def post_thread(tweets):
+    # 5. النشر على X (ثريد مرتب)
+    tweets = [clean(t) for t in re.split(r'\d+\s*[/-]\s*', x_thread) if len(t) > 30]
     prev_id = None
-    for i, tweet in enumerate(tweets):
-        try:
-            # إضافة رقم التغريدة للثريد
-            text = f"{i+1}/ {tweet}"
-            if prev_id is None:
-                res = twitter.create_tweet(text=text)
-            else:
-                res = twitter.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
-            prev_id = res.data["id"]
-            logger.info(f"Published tweet {i+1}")
-            asyncio.sleep(2) # تأخير بسيط لتجنب الـ Rate Limit
-        except Exception as e:
-            logger.error(f"Error posting tweet {i+1}: {e}")
+    for i, t in enumerate(tweets[:5]):
+        text = f"{i+1}/ {t}"
+        if prev_id is None:
+            # هنا نرفق الصورة في أول تغريدة
+            res = twitter.create_tweet(text=text) # أضف media_ids هنا لو رفعت الصورة
+        else:
+            res = twitter.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
+        prev_id = res.data["id"]
+        await asyncio.sleep(5)
+    
+    logger.success(f"🔥 تم اجتياح المنصات بموضوع: {topic}")
 
-# ================= 🏁 MAIN =================
+# ================= 📅 SCHEDULER =================
+scheduler = AsyncIOScheduler()
+scheduler.add_job(daily_empire_mission, "cron", hour=10) # 10 صباحاً وقت الذروة
+scheduler.start()
+
 async def main():
-    logger.info("🚀 AI Content Engine V45 - 10x Quality Mode")
-    
-    topic = await discover_topic()
-    logger.info(f"🎯 Topic Selected: {topic}")
-
-    data = await research(topic)
-    knowledge = await extract_knowledge(data)
-    
-    thread_tweets = await generate_thread(topic, knowledge)
-    
-    if thread_tweets:
-        post_thread(thread_tweets)
-        logger.success("🔥 10x Quality Thread is Live!")
+    logger.info("🚀 V120 AI Media Engine: ONLINE")
+    while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
