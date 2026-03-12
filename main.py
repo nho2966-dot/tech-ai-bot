@@ -1,63 +1,181 @@
-name: AI Media Engine V150 - Technical Sovereignty
+import os
+import re
+import sys
+import asyncio
+import httpx
+import tweepy
+import sqlite3
+import numpy as np
+import yt_dlp
+from loguru import logger
+from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-on:
-  # 1. التشغيل التلقائي (يومياً الساعة 10 صباحاً بتوقيت عمان/مكة)
-  schedule:
-    - cron: '0 7 * * *' 
-  
-  # 2. التشغيل اليدوي من واجهة GitHub
-  workflow_dispatch:
-    inputs:
-      run_mode:
-        description: 'اختر وضع التشغيل'
-        default: 'manual'
-        required: true
-        type: choice
-        options:
-          - manual
-          - auto
+# شحن الإعدادات
+load_dotenv()
 
-jobs:
-  run-tech-empire:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120 # وقت كافٍ للبحث والتحليل والنشر
+# ================= 🔐 CONFIGURATION =================
+CONF = {
+    "GROQ": os.getenv("GROQ_API_KEY"),
+    "TAVILY": os.getenv("TAVILY_API_KEY"),
+    "X": {
+        "key": os.getenv("X_API_KEY"),
+        "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"),
+        "access_s": os.getenv("X_ACCESS_SECRET")
+    }
+}
 
-    steps:
-      - name: 📂 Checkout Repository
-        uses: actions/checkout@v4
+# إعداد تويتر V2
+twitter = tweepy.Client(
+    consumer_key=CONF["X"]["key"],
+    consumer_secret=CONF["X"]["secret"],
+    access_token=CONF["X"]["token"],
+    access_token_secret=CONF["X"]["access_s"]
+)
 
-      - name: 🐍 Set up Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
+# ================= 🗄️ MEMORY DB =================
+db = sqlite3.connect("tech_sovereignty_v150.db")
+db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY)")
+db.commit()
 
-      - name: 🛠️ Install FFmpeg (For Video Intelligence)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+def is_seen(uid):
+    return db.execute("SELECT id FROM memory WHERE id=?", (uid,)).fetchone() is not None
 
-      - name: 📦 Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+def save_seen(uid):
+    db.execute("INSERT INTO memory (id) VALUES (?)", (uid,))
+    db.commit()
 
-      - name: 🚀 Launch V150 CTO Engine
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        # تشغيل يدوي أو تلقائي بناءً على المدخلات
-        run: |
-          python main.py ${{ github.event.inputs.run_mode || 'auto' }}
+# ================= 🛡️ ADVANCED CLEANER =================
+def clean_text(text):
+    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
+    weak_starts = ["مرحباً يا شباب", "في هذا المنشور", "هل تعلم", "اليوم سأشارككم", "أهلاً بكم"]
+    for s in weak_starts: text = text.replace(s, "")
+    return " ".join(text.split()).strip()
 
-      - name: 💾 Persistence: Upload V150 Database
-        if: always() # لضمان رفع قاعدة البيانات حتى لو فشل السكربت للتحليل
-        uses: actions/upload-artifact@v4
-        with:
-          name: tech-sovereignty-v150-db
-          path: tech_sovereignty_v150.db # تأكد أن هذا الاسم مطابق تماماً لما في main.py
-          retention-days: 7 # الاحتفاظ بالملف لمدة أسبوع
+# ================= 🧠 AI ENGINE (CTO MODE) =================
+async def ask_ai(system, prompt, temp=0.4):
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            res = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "temperature": temp,
+                    "messages": [
+                        {"role": "system", "content": system + "\n- اللهجة: خليجية تقنية بيضاء رصينة.\n- الشخصية: Senior Solution Architect."},
+                        {"role": "user", "content": prompt}
+                    ]
+                }
+            )
+            return res.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+        return None
+
+# ================= 📹 VIDEO INTEL =================
+async def analyze_video(url):
+    ydl_opts = {'quiet': True, 'skip_download': True}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return f"Title: {info.get('title')}\nDescription: {info.get('description')}"
+    except Exception as e:
+        logger.error(f"Video Error: {e}")
+        return "تحليل الفيديو فشل."
+
+# ================= 🧵 CORE MISSION (Technical Threads) =================
+async def run_daily_mission(custom_topic=None):
+    # تصحيح علامات التنصيص هنا لضمان عدم حدوث SyntaxError
+    logger.info("🎯 جاري استخراج الزبدة الهندسية ونشر الثريد...")
+    
+    if custom_topic:
+        topic = custom_topic
+    else:
+        topic_sys = "اقترح ترند AI Architecture معقد يهم المطورين (مثل Multi-agent أو RAG Optimization)."
+        topic = await ask_ai(topic_sys, "أعطني عنواناً تقنياً داسماً.", 0.7)
+
+    if not topic: return
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"})
+        knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
+
+    thread_sys = """أنت CTO متمرد وخبير نظم. 
+    قواعد النشر الصارمة:
+    - ابدأ بـ Hook تقني صادم يوضح مشكلة ومعمارية الحل.
+    - اذكر الـ Workflow والـ Tech Stack (أدوات محددة).
+    - استخدم مصطلحات: Latency, Scalability, Vectors, Inference.
+    - ممنوع المقدمات 'مرحباً'. ادخل في الـ Architecture فوراً."""
+    
+    raw_thread = await ask_ai(thread_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.4)
+    
+    tweets = [clean_text(t) for t in re.split(r'\d+\s*[/-]\s*', raw_thread) if len(t) > 30]
+    
+    prev_id = None
+    for i, t in enumerate(tweets[:6]):
+        full_tweet = f"{i+1}/ {t}"
+        res = twitter.create_tweet(text=full_tweet, in_reply_to_tweet_id=prev_id)
+        prev_id = res.data["id"]
+        await asyncio.sleep(5)
+    
+    logger.success(f"🔥 تم نشر المحتوى السيادي عن: {topic}")
+
+# ================= 🤖 SMART REPLY =================
+async def check_mentions():
+    logger.info("🔍 فحص المنشن للردود الاستشارية...")
+    try:
+        me = twitter.get_me().data.id
+        mentions = twitter.get_users_mentions(id=me)
+        if not mentions.data: return
+
+        for tweet in mentions.data:
+            if is_seen(f"reply_{tweet.id}"): continue
+            
+            if "اكتب ثريد عن" in tweet.text:
+                requested_topic = tweet.text.split("اكتب ثريد عن")[1].strip()
+                await run_daily_mission(custom_topic=requested_topic)
+                save_seen(f"reply_{tweet.id}")
+                continue
+
+            url_match = re.search(r'(https?://\S+)', tweet.text)
+            if url_match and "youtu" in url_match.group(0):
+                intel = await analyze_video(url_match.group(0))
+                answer = await ask_ai("أنت خبير تقني يحلل الـ Architecture.", f"لخص هندسة الفيديو بذكاء: {intel}")
+            else:
+                answer = await ask_ai("أنت Senior Architect.", f"رد على هذا السؤال التقني بعمق: {tweet.text}")
+
+            if answer:
+                twitter.create_tweet(text=clean_text(answer), in_reply_to_tweet_id=tweet.id)
+                save_seen(f"reply_{tweet.id}")
+                logger.success("✅ تم تقديم الاستشارة التقنية.")
+    except Exception as e:
+        logger.error(f"Reply Error: {e}")
+
+# ================= 🚀 EXECUTION =================
+async def main_loop(mode="auto"):
+    logger.info(f"🚀 AI Media Engine V150 Active | Mode: {mode}")
+
+    if mode == "manual":
+        await run_daily_mission()
+        return
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_daily_mission, 'cron', hour=10)
+    scheduler.add_job(check_mentions, 'interval', minutes=15)
+    
+    scheduler.start()
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
+
+if __name__ == "__main__":
+    run_mode = "manual" if (len(sys.argv) > 1 and sys.argv[1] == "manual") else "auto"
+    try:
+        asyncio.run(main_loop(mode=run_mode))
+    except Exception as e:
+        logger.critical(f"FATAL ERROR: {e}")
