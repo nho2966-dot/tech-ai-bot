@@ -4,7 +4,6 @@ import httpx
 import tweepy
 import sqlite3
 import re
-import random
 from datetime import datetime
 from loguru import logger
 from dotenv import load_dotenv
@@ -26,17 +25,18 @@ client = tweepy.Client(
     access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ THE ELITE FILTER V35 =================
-def elite_polish(text):
-    # إزالة أي حروف غير العربية والإنجليزية والرموز التقنية
-    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text)
-    # تنظيف الكلمات المهجنة أو "الهبد" اللغوي
-    bad_phrases = ["هاو،", "بيتكون لدينا", "بناءً على حاجاتك", "إلهام وتصميم"]
-    for phrase in bad_phrases:
-        text = text.replace(phrase, "")
-    return text.strip()
+# ================= 🛡️ THE ULTIMATE GUARDRAIL (V36) =================
+def final_validation(text):
+    # 1. منع أي حرف غير العربي والإنجليزي (إزالة الروسي والصيني تماماً)
+    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
+    # 2. منع دمج الكلمات البرمجية بكلمات عربية (مثل مركزية+center)
+    forbidden_mixed = ["مركزية", "центр", "createServer", "أ.", "центраالية"]
+    for word in forbidden_mixed:
+        text = text.replace(word, "")
+    # 3. تنظيف المسافات الزائدة الناتجة عن الحذف
+    return ' '.join(text.split()).strip()
 
-# ================= 🧠 AI ENGINE V35 (Visual & Interactive) =================
+# ================= 🧠 AI ENGINE V36 (Strict Tech Editor) =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -45,42 +45,35 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.6, 
+                    "temperature": 0.2, # تقليل الحرارة لأدنى مستوى لضمان الانضباط
                     "messages": [
                         {"role": "system", "content": system + """
-- اللهجة: خليجية تقنية متمكنة (White Dialect).
-- الهيكل: (المشكلة -> المخطط التقني -> الأداة -> النتيجة).
-- لا تستخدم لغة عاطفية، استخدم لغة هندسية (Engineering Language).
-- اذكر بوضوح كيف تتدفق البيانات بين الأدوات (Workflow)."""},
+- ممنوع دمج حروف عربية بإنجليزية في كلمة واحدة.
+- ممنوع كتابة أكواد برمجية (Code snippets) داخل التغريدة.
+- اذكر الأداة بالإنجليزية والوصف بالعربية الرصينة.
+- اللهجة: خليجية بيضاء رسمية للخبراء."""},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            return elite_polish(res.json()["choices"][0]["message"]["content"])
+            raw_text = res.json()["choices"][0]["message"]["content"]
+            return final_validation(raw_text)
     except: return None
 
 # ================= 🚀 EXECUTION =================
 async def main():
-    logger.info("📡 تشغيل محرك النخبة V35...")
+    logger.info("📡 تشغيل المحرر التقني V36...")
     
-    # جلب سياق تقني عن بناء أنظمة AI شخصية
-    context = "How to build a personal RAG system using Supabase and LangChain 2026"
-    
-    sys_msg = "أنت Solution Architect. قدم للناس Blueprint حقيقي لبناء نظامهم الخاص."
-    
-    prompt = f"بناءً على {context}، صمم تغريدة تشرح الـ Workflow التقني لربط بيانات المستخدم بـ Supabase كمتجهات واسترجاعها بـ Claude."
+    # تحديد مسار تقني واضح جداً لمنع الهلوسة
+    sys_msg = "أنت مهندس نظم (Systems Engineer). قدم شرحاً لخطوات ربط الأدوات بأسلوب النقاط."
+    prompt = "اشرح باختصار خطوات ربط Supabase كقاعدة بيانات مع Claude لتحليل ملفات PDF."
     
     content = await ask_ai(sys_msg, prompt)
     
-    if content:
-        # إضافة وصف المخطط البصري لتعزيز الفهم
-        diagram_desc = ""
-        
-        final_post = f"🏗️ مخطط هندسي (System Blueprint):\n\n{content}\n\n{diagram_desc}\n\n#Supabase #LangChain #RAG #Architecture"
-        
-        # نشر التغريدة
+    if content and len(content) > 30:
+        final_post = f"🏗️ مخطط العمل التقني:\n\n{content}\n\n#AI #Supabase #Claude #Architecture"
         client.create_tweet(text=final_post)
-        logger.success("✅ تم نشر المخطط الهندسي بنجاح!")
+        logger.success("✅ تم النشر بنجاح وبدقة عالية!")
 
 if __name__ == "__main__":
     asyncio.run(main())
