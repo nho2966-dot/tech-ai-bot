@@ -1,38 +1,64 @@
-name: AI Media Engine V125 Execution
+name: AI Media Engine V130 - Tech Sovereignty
 
 on:
+  # 1. التشغيل التلقائي (يومياً الساعة 10 صباحاً بتوقيت مكة المكرمة/عمان تقريباً)
   schedule:
-    - cron: '0 */4 * * *' # تشغيل كل 4 ساعات
+    - cron: '0 7 * * *' # 07:00 UTC يوافق 10:00 أو 11:00 صباحاً حسب التوقيت المحلي
+  
+  # 2. التشغيل اليدوي من واجهة GitHub (Actions Tab)
   workflow_dispatch:
+    inputs:
+      run_mode:
+        description: 'اختر وضع التشغيل (manual للنشر الفوري | auto للجدولة المستمرة)'
+        default: 'manual'
+        required: true
+        type: choice
+        options:
+          - manual
+          - auto
 
 jobs:
-  run-bot:
+  build-and-run:
     runs-on: ubuntu-latest
+    
+    # تحديد مدة التشغيل القصوى لمنع استهلاك الدقائق في حال الـ Infinite Loop
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout Code
+      - name: 📂 Checkout Repository Content
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
+      - name: 🐍 Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip' # تسريع التثبيت في المرات القادمة
 
-      - name: Install System Dependencies (FFmpeg)
+      - name: 🛠️ Install System Dependencies (FFmpeg)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install Python Libraries
+      - name: 📦 Install Python Libraries
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Start the Engine
+      - name: 🚀 Launch AI Media Engine
         env:
+          # تأكد من إضافة هذه المفاتيح في Settings -> Secrets and variables -> Actions
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           X_API_KEY: ${{ secrets.X_API_KEY }}
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: python main.py
+        # إذا تم التشغيل يدوياً نمرر المدخل، وإلا نستخدم الـ cron الافتراضي
+        run: |
+          python main.py ${{ github.event.inputs.run_mode || 'auto' }}
+
+      - name: 💾 Upload Database (Optional Memory Persistence)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tech-empire-db
+          path: tech_empire_v130.db
