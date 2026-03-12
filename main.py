@@ -24,15 +24,10 @@ CONF = {
     }
 }
 
-# ================= 🐦 Twitter Clients =================
-# Client للقراءة (Bearer Token) لتجنب 401
-twitter_read = tweepy.asynchronous.AsyncClient(
+# الحل الجذري لخطأ AttributeError: استخدام Client الموحد
+# يدعم العمليات المتزامنة وغير المتزامنة حسب الحاجة
+twitter = tweepy.Client(
     bearer_token=CONF["X"]["bearer"],
-    wait_on_rate_limit=True
-)
-
-# Client للنشر (مع كل المفاتيح)
-twitter_write = tweepy.Client(
     consumer_key=CONF["X"]["key"],
     consumer_secret=CONF["X"]["secret"],
     access_token=CONF["X"]["token"],
@@ -40,36 +35,33 @@ twitter_write = tweepy.Client(
     wait_on_rate_limit=True
 )
 
-# ================= 🗄️ MEMORY =================
-db = sqlite3.connect("tech_secrets_v250.db")
+# ================= 🗄️ MEMORY (Updated Name) =================
+# تأكد أن هذا الاسم هو نفسه الموجود في ملف الـ YAML
+DB_NAME = "tech_secrets_v250.db"
+db = sqlite3.connect(DB_NAME)
 db.execute("CREATE TABLE IF NOT EXISTS topics (topic TEXT)")
-db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY)")
 db.commit()
 
 def get_past_topics():
     cursor = db.execute("SELECT topic FROM topics")
-    return [row[0] for row in cursor.fetchall()][-15:]
+    return [row[0] for row in cursor.fetchall()][-20:]
 
 def save_topic(topic):
     db.execute("INSERT INTO topics (topic) VALUES (?)", (topic,))
     db.commit()
 
-def is_duplicate(entry_id):
-    check = db.execute("SELECT id FROM memory WHERE id=?", (entry_id,)).fetchone()
-    return check is not None
-
-def save_to_memory(entry_id):
-    db.execute("INSERT INTO memory (id) VALUES (?)", (entry_id,))
-    db.commit()
-
 # ================= 🛡️ CLEANER =================
 def clean_text(text):
-    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#-]', '', text)
-    text = " ".join(text.split())
-    return text
+    # مسح الرموز واللغات الغريبة (الصينية وغيرها)
+    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
+    # مسح أرقام التعداد في بداية الجمل
+    text = re.sub(r'^\d+[:/-]\s*', '', text)
+    # تنسيق مريح للعين
+    text = text.replace(". ", ".\n\n📍 ")
+    return " ".join(text.split()).replace(".\n\n ", ".\n\n").strip()
 
-# ================= 🧠 AI ENGINE =================
-async def ask_ai(system, prompt, temp=0.4):
+# ================= 🧠 AI BRAIN =================
+async def ask_ai(system, prompt, temp=0.3):
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             res = await client.post(
@@ -79,7 +71,7 @@ async def ask_ai(system, prompt, temp=0.4):
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
                     "messages": [
-                        {"role": "system", "content": system + "\n- اللهجة: خليجية تقنية حادة."},
+                        {"role": "system", "content": system + "\n- اللهجة: خليجية بيضاء.\n- التخصص: خبايا تقنية للأفراد."},
                         {"role": "user", "content": prompt}
                     ]
                 }
@@ -89,108 +81,55 @@ async def ask_ai(system, prompt, temp=0.4):
         logger.error(f"AI Error: {e}")
         return None
 
-# ================= 🐦 Twitter Helpers =================
-async def fetch_recent_tweets(username, limit=5):
-    try:
-        user = await twitter_read.get_user(username=username)
-        user_id = user.data.id
-        tweets = await twitter_read.get_users_tweets(id=user_id, max_results=limit)
-        if tweets.data:
-            return [t.text for t in tweets.data]
-        return []
-    except Exception as e:
-        logger.error(f"Error fetching tweets: {e}")
-        return []
+# ================= 🧵 MISSION =================
+async def run_daily_mission():
+    logger.info("🔍 جاري استخراج أسرار تقنية جديدة...")
+    
+    past = get_past_topics()
+    context = f"ممنوع تكرار: {', '.join(past)}"
 
-async def fetch_mentions():
-    try:
-        me = await twitter_read.get_me()
-        mentions = await twitter_read.get_users_mentions(id=me.data.id, max_results=5)
-        if mentions.data:
-            return [t.text for t in mentions.data]
-        return []
-    except Exception as e:
-        logger.error(f"Error fetching mentions: {e}")
-        return []
+    topic_sys = f"أنت خبير خبايا تقنية للأفراد. ابحث عن ميزة مخفية في آيفون أو أندرويد أو تطبيقات AI لعام 2026 تهم المتابع العادي.\n{context}"
+    topic = await ask_ai(topic_sys, "أعطني عنواناً لسر تقني.")
+    
+    if not topic: return
+    save_topic(topic)
 
-# ================= 🧵 THREAD BUILDER =================
-async def build_insight_thread(username):
-    tweets = await fetch_recent_tweets(username)
-    if not tweets:
-        logger.warning("لا توجد تغريدات لتحليلها.")
-        return []
-    knowledge = "\n".join(tweets)
-    system = "أنت Senior Solution Architect. حول التغريدات التقنية إلى Thread غني بالمعلومات، مع خطوات عملية وأدوات محددة."
-    raw_thread = await ask_ai(system, knowledge)
-    if raw_thread:
-        return [clean_text(t) for t in re.split(r'\n\n', raw_thread) if len(t) > 20]
-    return []
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://api.tavily.com/search", json={
+            "api_key": CONF["TAVILY"], 
+            "query": f"hidden tricks for {topic} 2026 for personal use",
+            "search_depth": "advanced"
+        })
+        knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
 
-async def post_thread(tweets):
+    thread_sys = "اكتب ثريد (4 تغريدات) بلهجة خليجية ذكية للأفراد. ابدأ بالزبدة ثم الخطوات. ممنوع الحشو."
+    raw_content = await ask_ai(thread_sys, f"الموضوع: {topic}\nالمعلومات: {knowledge}")
+    
+    tweets = [clean_text(t) for t in re.split(r'\n\n', raw_content) if len(t) > 20]
+    
     prev_id = None
-    for i, tweet in enumerate(tweets):
-        text = f"{i+1}/ {tweet}"
+    for i, t in enumerate(tweets[:4]):
         try:
-            if prev_id is None:
-                res = twitter_write.create_tweet(text=text)
-            else:
-                res = twitter_write.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
+            full_text = f"{i+1}/ {t}"
+            res = twitter.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
             prev_id = res.data["id"]
-            await asyncio.sleep(4)
+            await asyncio.sleep(10)
         except Exception as e:
-            logger.error(f"Error posting tweet {i+1}: {e}")
+            logger.error(f"X Post Error: {e}")
 
-# ================= 🔍 ANALYZE COMPETITORS =================
-async def analyze_competitors():
-    logger.info("📡 رادار المنافسين يعمل...")
-    targets = ["OpenAI", "Anthropic", "karpathy", "ylecun"]
-    for target in targets:
-        try:
-            tweets = await fetch_recent_tweets(target, limit=1)
-            if not tweets: continue
-            latest = tweets[0]
-            if is_duplicate(f"roast_{target}"): continue
-            system = "أنت CTO متمرد. انتقد هذا الطرح السطحي بعمق تقني (Architecture, Latency, Cost)."
-            response = await ask_ai(system, latest)
-            if response:
-                twitter_write.create_tweet(text=clean_text(response), in_reply_to_tweet_id=None)
-                save_to_memory(f"roast_{target}")
-        except Exception as e:
-            logger.error(f"Error analyzing competitor {target}: {e}")
+    logger.success(f"🔥 تم نشر الخبيئة بنجاح: {topic}")
 
-# ================= 🤖 SMART REPLY =================
-async def smart_reply():
-    mentions = await fetch_mentions()
-    for mention in mentions:
-        if is_duplicate(f"reply_{mention}"): continue
-        system = "أنت Senior Solution Architect. رد على السؤال التقني بوضوح وعمق."
-        answer = await ask_ai(system, mention)
-        if answer:
-            twitter_write.create_tweet(text=clean_text(answer))
-            save_to_memory(f"reply_{mention}")
-
-# ================= 🚀 DAILY MISSION =================
-async def daily_mission(username="X_TechNews_"):
-    logger.info(f"🔍 تحليل ونشر Thread من @{username}")
-    thread = await build_insight_thread(username)
-    if thread:
-        await post_thread(thread)
-
-# ================= 🏁 MAIN LOOP =================
-async def main_loop(username="X_TechNews_", mode="auto"):
-    logger.info(f"🚀 V250 Full Empire Online | Mode: {mode}")
+# ================= 🏁 RUN =================
+async def main_loop(mode="auto"):
+    logger.info(f"🚀 V250 Fixed Online | Mode: {mode}")
     if mode == "manual":
-        await daily_mission(username)
-        await analyze_competitors()
-        await smart_reply()
+        await run_daily_mission()
         return
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(daily_mission, 'cron', hour=10, args=[username])
+    scheduler.add_job(run_daily_mission, 'cron', hour=10)
     scheduler.start()
-    while True:
-        await asyncio.sleep(3600)
+    while True: await asyncio.sleep(3600)
 
-# ================= 🏃 RUN =================
 if __name__ == "__main__":
     mode = "manual" if (len(sys.argv) > 1 and sys.argv[1] == "manual") else "auto"
     asyncio.run(main_loop(mode=mode))
