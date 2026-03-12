@@ -167,22 +167,28 @@ async def daily_mission():
     logger.info(f"Thread score: {score}")
     await post_thread(thread)
 
-# ================= SCHEDULER =================
-scheduler = AsyncIOScheduler()
-scheduler.add_job(daily_mission, "cron", hour=10)
-scheduler.add_job(smart_reply, "cron", hour=19)
-scheduler.start()
-
-# ================= MAIN =================
+# ================= MAIN LOOP =================
 async def main_loop(mode="auto"):
     logger.info(f"🚀 V200 Full Automation Online | Mode: {mode}")
-    if mode=="manual":
+
+    # Start the scheduler inside the running event loop
+    scheduler = AsyncIOScheduler()
+    if mode != "manual":
+        scheduler.add_job(daily_mission, "cron", hour=10)
+        scheduler.add_job(smart_reply, "cron", hour=19)
+        scheduler.start()
+
+    # Manual mode runs tasks immediately
+    if mode == "manual":
         await daily_mission()
         await smart_reply()
         return
+
+    # Keep the loop alive in auto mode
     while True:
         await asyncio.sleep(3600)
 
-if __name__=="__main__":
+# ================= ENTRY POINT =================
+if __name__ == "__main__":
     mode = "manual" if (len(sys.argv)>1 and sys.argv[1]=="manual") else "auto"
     asyncio.run(main_loop(mode))
