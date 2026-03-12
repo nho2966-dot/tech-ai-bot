@@ -5,175 +5,190 @@ import asyncio
 import httpx
 import tweepy
 import sqlite3
-import numpy as np
-import faiss
 from loguru import logger
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ===================== CONFIG =====================
 load_dotenv()
 
-GROQ = os.getenv("GROQ_API_KEY")
-TAVILY = os.getenv("TAVILY_API_KEY")
+# ================= 🔐 CONFIG =================
+CONF = {
+    "GROQ": os.getenv("GROQ_API_KEY"),
+    "TAVILY": os.getenv("TAVILY_API_KEY"),
+    "X": {
+        "key": os.getenv("X_API_KEY"),
+        "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"),
+        "access_s": os.getenv("X_ACCESS_SECRET")
+    }
+}
 
 twitter = tweepy.Client(
-    consumer_key=os.getenv("X_API_KEY"),
-    consumer_secret=os.getenv("X_API_SECRET"),
-    access_token=os.getenv("X_ACCESS_TOKEN"),
-    access_token_secret=os.getenv("X_ACCESS_SECRET")
+    consumer_key=CONF["X"]["key"],
+    consumer_secret=CONF["X"]["secret"],
+    access_token=CONF["X"]["token"],
+    access_token_secret=CONF["X"]["access_s"],
+    wait_on_rate_limit=True
 )
 
-# ===================== DATABASE =====================
-db = sqlite3.connect("v250_memory.db")
-db.execute("CREATE TABLE IF NOT EXISTS topics(id INTEGER PRIMARY KEY, topic TEXT UNIQUE)")
-db.execute("CREATE TABLE IF NOT EXISTS replies(id TEXT PRIMARY KEY)")
+# ================= 🗄️ MEMORY =================
+db = sqlite3.connect("tech_empire_v250.db")
+db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY)")
+db.execute("CREATE TABLE IF NOT EXISTS topics (topic TEXT UNIQUE)")
 db.commit()
 
-# ===================== VECTOR MEMORY =====================
-dimension = 384
-index = faiss.IndexFlatL2(dimension)
-memory_text = []
+def is_duplicate(entry_id):
+    return db.execute("SELECT id FROM memory WHERE id=?", (entry_id,)).fetchone() is not None
 
-def embed(text):
-    return np.random.rand(dimension).astype("float32")  # استبدلها بوظيفة embedding حقيقية إذا أردت
+def save_to_memory(entry_id):
+    db.execute("INSERT OR IGNORE INTO memory (id) VALUES (?)", (entry_id,))
+    db.commit()
 
-def save_vector(text):
-    vec = embed(text)
-    index.add(np.array([vec]))
-    memory_text.append(text)
+def get_past_topics(limit=15):
+    cursor = db.execute("SELECT topic FROM topics ORDER BY rowid DESC LIMIT ?", (limit,))
+    return [row[0] for row in cursor.fetchall()]
 
-def is_similar(text):
-    if index.ntotal == 0:
-        return False
-    D, I = index.search(np.array([embed(text)]), 1)
-    return D[0][0] < 0.3
+def save_topic(topic):
+    db.execute("INSERT OR IGNORE INTO topics (topic) VALUES (?)", (topic,))
+    db.commit()
 
-# ===================== CLEANING =====================
-def clean(text):
+# ================= 🛡️ CLEAN CONTENT =================
+def clean_and_verify(text):
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#-]', '', text)
-    text = re.sub(r'^\d+[:/]\s*', '', text)
-    return " ".join(text.split())
+    garbage = ["يلا يا ناس", "لا تصدق؟", "جربوه وجيب لنا", "نراك في التغريدة التالية"]
+    for word in garbage:
+        text = text.replace(word, "")
+    text = text.replace(". ", ".\n\n📍 ")
+    return " ".join(text.split()).replace(".\n\n ", ".\n\n").strip()
 
-# ===================== AI CALL =====================
+# ================= 🧠 AI BRAIN =================
 async def ask_ai(system, prompt, temp=0.3):
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
+            res = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ}"},
+                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
-                    "messages":[
-                        {"role":"system","content":system},
-                        {"role":"user","content":prompt}
+                    "messages": [
+                        {"role": "system", "content": system + "\n- اللهجة: خليجية بيضاء رصينة.\n- ممنوع استخدام أي لغة غير العربية.\n- ممنوع الترقيم (1:, 2:) داخل النص."},
+                        {"role": "user", "content": prompt}
                     ]
                 }
             )
-            return r.json()["choices"][0]["message"]["content"]
+            return res.json()["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"AI Error: {e}")
         return None
 
-# ===================== FETCH X TWEETS =====================
-async def fetch_recent_tweets(username, limit=10):
-    user = twitter.get_user(username=username)
-    tweets = twitter.get_users_tweets(id=user.data.id, max_results=limit)
-    return [t.text for t in tweets.data] if tweets.data else []
+# ================= 🐦 FETCH TWEETS =================
+async def fetch_recent_tweets(username, limit=5):
+    try:
+        user = twitter.get_user(username=username)
+        tweets = twitter.get_users_tweets(id=user.data.id, max_results=limit)
+        return [t.text for t in tweets.data] if tweets.data else []
+    except Exception as e:
+        logger.error(f"Error fetching tweets: {e}")
+        return []
 
-# ===================== ANALYZE TWEET DEEPLY =====================
-async def analyze_tweet_deeply(tweet):
-    system = """
-أنت Senior Tech Analyst & Solution Architect
-- اقرأ التغريدة وفسر معناها التقني بدقة.
-- استخرج: الفكرة الرئيسية، التقنية المستخدمة، الفائدة العملية، المخاطر، الفرص المستقبلية.
-- اعطِ خلاصة مختصرة قابلة للنشر كThread.
-"""
-    return await ask_ai(system, tweet, temp=0.3)
-
-# ===================== THREAD BUILDER =====================
+# ================= 🧵 BUILD INSIGHT THREAD =================
 async def build_insight_thread(username):
-    tweets = await fetch_recent_tweets(username, limit=5)
-    thread = []
-    for i, t in enumerate(tweets):
-        if db.execute("SELECT id FROM replies WHERE id=?", (t,)).fetchone(): continue
-        analysis = await analyze_tweet_deeply(t)
-        cleaned = clean(analysis)
-        if not is_similar(cleaned):  # لا تكرر المحتوى
-            thread.append(f"{i+1}/ {cleaned}")
-            save_vector(cleaned)
-            db.execute("INSERT INTO replies(id) VALUES(?)", (t,))
-            db.commit()
-    return thread
+    tweets = await fetch_recent_tweets(username)
+    if not tweets:
+        logger.warning("لا توجد تغريدات لتحليلها.")
+        return []
 
-# ===================== THREAD QUALITY CHECK =====================
-async def quality_check(thread):
-    system = """
-أنت محرر محتوى تقني متمكن.
-قيم هذا Thread على العمق التقني والوضوح وإمكانية الانتشار.
-اعطِ درجة من 1-10 لكل معيار.
-"""
-    score = await ask_ai(system, "\n".join(thread))
-    return score
+    system = "أنت خبير تحليل أخبار التقنية. استخرج الفائدة العملية، المخاطر، الأدوات، الخطوات، والملخص الاحترافي."
+    prompt = "\n\n".join(tweets)
+    raw_analysis = await ask_ai(system, prompt, temp=0.5)
+    if not raw_analysis:
+        return []
 
-# ===================== POST THREAD WITH RETRY =====================
-async def post_thread(thread):
+    steps = [clean_and_verify(s) for s in re.split(r'\n{1,2}', raw_analysis) if len(s) > 20]
+    return steps[:6]
+
+# ================= 🧵 POST THREAD =================
+async def post_thread(tweets):
     prev_id = None
-    for t in thread:
-        for attempt in range(3):
-            try:
-                full_text = t[:270]
-                if prev_id is None:
-                    res = twitter.create_tweet(text=full_text)
-                else:
-                    res = twitter.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
-                prev_id = res.data["id"]
-                await asyncio.sleep(8)
-                break
-            except Exception as e:
-                logger.warning(f"Retry {attempt+1} for tweet failed: {e}")
-                await asyncio.sleep(5)
+    for i, tweet in enumerate(tweets):
+        try:
+            full_text = f"{i+1}/ {tweet}"
+            if prev_id is None:
+                res = twitter.create_tweet(text=full_text)
+            else:
+                res = twitter.create_tweet(text=full_text, in_reply_to_tweet_id=prev_id)
+            prev_id = res.data["id"]
+            await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"Error posting tweet {i+1}: {e}")
 
-# ===================== SMART REPLY =====================
+# ================= 🕵️ COMPETITOR ANALYSIS =================
+async def analyze_competitors(targets):
+    logger.info("📡 رادار المنافسين يعمل...")
+    for target in targets:
+        try:
+            user = twitter.get_user(username=target)
+            tweets = twitter.get_users_tweets(id=user.data.id, max_results=3)
+            if not tweets.data: continue
+
+            latest = tweets.data[0]
+            if is_duplicate(f"roast_{latest.id}"): continue
+
+            system = "أنت CTO متمرد. انقد التغريدة التقنية بعمق (Architecture, Latency, Cost). اذكر ما فاتهم."
+            response = await ask_ai(system, latest.text, temp=0.7)
+            if response:
+                twitter.create_tweet(text=clean_and_verify(response), in_reply_to_tweet_id=latest.id)
+                save_to_memory(f"roast_{latest.id}")
+                logger.success(f"🔥 تم تنفيذ الهيمنة على {target}")
+        except Exception as e:
+            logger.error(f"Error analyzing competitor {target}: {e}")
+
+# ================= 🤖 SMART REPLY =================
 async def smart_reply():
-    me = twitter.get_me()
-    mentions = twitter.get_users_mentions(id=me.data.id)
+    logger.info("🔍 فحص المنشن للردود الذكية...")
+    mentions = twitter.get_users_mentions(id=twitter.get_me().data.id)
     if not mentions.data: return
+
     for tweet in mentions.data:
-        if db.execute("SELECT id FROM replies WHERE id=?", (tweet.id,)).fetchone(): continue
-        system = "أنت Senior Solution Architect، رد على السؤال التقني بدقة وعملية."
-        answer = await ask_ai(system, tweet.text)
+        if is_duplicate(f"reply_{tweet.id}"): continue
+        system = "أنت Senior Solution Architect. رد على السؤال التقني بوضوح وعمق. تجاهل المجاملات."
+        answer = await ask_ai(system, tweet.text, temp=0.5)
         if answer:
-            twitter.create_tweet(text=clean(answer), in_reply_to_tweet_id=tweet.id)
-            db.execute("INSERT INTO replies(id) VALUES(?)",(tweet.id,))
-            db.commit()
+            twitter.create_tweet(text=clean_and_verify(answer), in_reply_to_tweet_id=tweet.id)
+            save_to_memory(f"reply_{tweet.id}")
+            logger.success("✅ تم الرد الذكي!")
 
-# ===================== DAILY MISSION =====================
+# ================= 🚀 DAILY MISSION =================
 async def daily_mission(username):
+    logger.info(f"🔍 تحليل ونشر Thread من @{username}")
     thread = await build_insight_thread(username)
-    if not thread: return
-    score = await quality_check(thread)
-    logger.info(f"Thread quality score:\n{score}")
-    await post_thread(thread)
+    if thread:
+        await post_thread(thread)
+        logger.success(f"🔥 تم نشر Thread تحليل الخبر من @{username}")
 
-# ===================== MAIN LOOP =====================
+# ================= 🚀 MAIN LOOP =================
 async def main_loop(username, mode="auto"):
-    logger.info(f"🚀 V250 Full Automation Online | Mode: {mode}")
-    scheduler = AsyncIOScheduler()
-    if mode != "manual":
-        scheduler.add_job(lambda: daily_mission(username), "cron", hour=10)
-        scheduler.add_job(smart_reply, "cron", hour=19)
-        scheduler.start()
+    logger.info(f"🚀 V250 Full Empire Online | Mode: {mode}")
+    targets = ["OpenAI", "Anthropic", "karpathy", "ylecun"]
+
     if mode == "manual":
         await daily_mission(username)
+        await analyze_competitors(targets)
         await smart_reply()
         return
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(lambda: asyncio.create_task(daily_mission(username)), 'cron', hour=10)
+    scheduler.add_job(lambda: asyncio.create_task(analyze_competitors(targets)), 'cron', hour=12)
+    scheduler.add_job(lambda: asyncio.create_task(smart_reply()), 'cron', hour=14)
+    scheduler.start()
+
     while True:
         await asyncio.sleep(3600)
 
-# ===================== ENTRY POINT =====================
+# ================= 🏁 ENTRY POINT =================
 if __name__ == "__main__":
-    username = "X_TechNews_"  # الحساب الذي تريد تحليل تغريداته
-    mode = "manual" if (len(sys.argv)>1 and sys.argv[1]=="manual") else "auto"
+    username = "X_TechNews_"
+    mode = "manual" if (len(sys.argv) > 1 and sys.argv[1] == "manual") else "auto"
     asyncio.run(main_loop(username, mode))
