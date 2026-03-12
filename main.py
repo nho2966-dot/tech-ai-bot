@@ -30,7 +30,7 @@ twitter = tweepy.Client(
     access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🗄️ DYNAMIC MEMORY (الاستكشاف العميق) =================
+# ================= 🗄️ DYNAMIC MEMORY =================
 db = sqlite3.connect("tech_secrets_v180.db")
 db.execute("CREATE TABLE IF NOT EXISTS topics (topic TEXT)")
 db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY)")
@@ -38,24 +38,21 @@ db.commit()
 
 def get_past_topics():
     cursor = db.execute("SELECT topic FROM topics")
-    return [row[0] for row in cursor.fetchall()][-15:] # تذكر آخر 15 موضوع لمنع التكرار
+    return [row[0] for row in cursor.fetchall()][-15:]
 
 def save_topic(topic):
     db.execute("INSERT INTO topics (topic) VALUES (?)", (topic,))
     db.commit()
 
-# ================= 🛡️ THE CLEANER (Zero Fluff) =================
+# ================= 🛡️ THE CLEANER =================
 def clean_and_verify(text):
-    # إزالة الكلمات الضعيفة وحشو الجمل
     forbidden = ["تعتبر هذه الميزة", "في هذا الثريد", "هل تعلم أن", "إليك الطريقة"]
     for word in forbidden: text = text.replace(word, "")
-    
-    # حذف الرموز الغريبة وتنسيق النقاط
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#]', '', text)
     text = text.replace(". ", ".\n\n📍 ")
     return " ".join(text.split()).replace(".\n\n ", ".\n\n").strip()
 
-# ================= 🧠 AI BRAIN (Secret Hunter Mode) =================
+# ================= 🧠 AI BRAIN =================
 async def ask_ai(system, prompt, temp=0.7):
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -66,7 +63,7 @@ async def ask_ai(system, prompt, temp=0.7):
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
                     "messages": [
-                        {"role": "system", "content": system + "\n- اللهجة: خليجية بيضاء ذكية.\n- التخصص: خبايا وأسرار التقنية للأفراد."},
+                        {"role": "system", "content": system + "\n- اللهجة: خليجية بيضاء.\n- التخصص: أسرار التقنية للأفراد."},
                         {"role": "user", "content": prompt}
                     ]
                 }
@@ -76,41 +73,39 @@ async def ask_ai(system, prompt, temp=0.7):
         logger.error(f"AI Error: {e}")
         return None
 
-# ================= 🧵 MISSION (Uncovering Secrets) =================
+# ================= 🧵 MISSION (Corrected Syntax) =================
 async def run_daily_mission():
-    logger.info("🔍 جاري البحث عن "خبيئة تقنية" جديدة لعام 2026...")
+    # تم تصحيح علامات التنصيص هنا
+    logger.info('🔍 جاري البحث عن "خبيئة تقنية" جديدة لعام 2026...')
     
     past_topics = get_past_topics()
     past_context = f"المواضيع السابقة: {', '.join(past_topics)}"
 
-    # 1. توليد فكرة "سرية" أو "خبايا" أداة مشهورة
-    topic_sys = f"""أنت خبير تقني "داهية". ابحث عن ميزة مخفية (Hidden Feature) أو اختصار (Shortcut) أو طريقة ذكية (Hack) في أدوات الذكاء الاصطناعي أو أنظمة الجوال لعام 2026.
-    - التركيز: الفرد العادي (الموظف، الطالب، صانع المحتوى).
+    topic_sys = f"""أنت خبير تقني داهية. ابحث عن ميزة مخفية أو اختصار ذكي في أدوات الـ AI أو الجوال لعام 2026.
+    - التركيز: الفرد العادي.
     - ممنوع التكرار مع: {past_context}.
-    - ابحث عن شيء 'صادم' ومفيد جداً (مثل ميزة في الكاميرا، سر في ChatGPT، اختصار في الويندوز)."""
+    - ابحث عن شيء صادم ومفيد جداً."""
     
-    topic = await ask_ai(topic_sys, "أعطني عنواناً يشعل الفضول (مثل: سر في آيفون ما حد قاله لك).")
+    topic = await ask_ai(topic_sys, "أعطني عنواناً يشعل الفضول عن سر تقني.")
     
     if not topic: return
     save_topic(topic)
 
-    # 2. بحث Tavily عن "أسرار وحيل" (Deep Hack Search)
     async with httpx.AsyncClient() as client:
         r = await client.post("https://api.tavily.com/search", json={
             "api_key": CONF["TAVILY"], 
-            "query": f"hidden tricks, secrets and productivity hacks for {topic} 2026",
+            "query": f"hidden tricks and hacks for {topic} 2026",
             "search_depth": "advanced"
         })
         knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
 
-    # 3. صياغة الثريد (أسلوب الخبايا)
-    thread_sys = """اكتب ثريد (5 تغريدات) بأسلوب 'الخبايا والأسرار'.
-    - التغريدة الأولى: Hook قوي جداً يخلي المتابع يحفظ الثريد.
-    - التغريدات الباقية: اشرح 'الخبيئة' بخطوات بسيطة (١، ٢، ٣).
-    - اللهجة: خليجية حماسية (مثلاً: 'هالحركة بتغير يومك'، 'تخيل تقدر تسوي كذا بضغطة زر').
-    - ممنوع الحشو أو المقدمات الطويلة."""
+    thread_sys = """اكتب ثريد (5 تغريدات) بأسلوب الخبايا والأسرار.
+    - التغريدة الأولى: Hook قوي جداً.
+    - البقية: شرح الخطوات بوضوح.
+    - اللهجة: خليجية حماسية.
+    - ممنوع الحشو."""
     
-    raw_content = await ask_ai(thread_sys, f"السر/الخبيئة: {topic}\nالتفاصيل: {knowledge}")
+    raw_content = await ask_ai(thread_sys, f"السر: {topic}\nالتفاصيل: {knowledge}")
     
     tweets = [clean_and_verify(t) for t in re.split(r'\d+\s*[/-]\s*', raw_content) if len(t) > 20]
     
@@ -127,7 +122,7 @@ async def run_daily_mission():
 
 # ================= 🚀 EXECUTION =================
 async def main_loop(mode="auto"):
-    logger.info(f"🚀 V180 (AI Secrets) Online | Mode: {mode}")
+    logger.info(f"🚀 V180 Fixed Online | Mode: {mode}")
     
     if mode == "manual":
         await run_daily_mission()
