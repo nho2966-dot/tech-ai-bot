@@ -1,11 +1,22 @@
+# الأساسيات
 tweepy>=4.14.0
+httpx>=0.25.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# محركات الذكاء والبحث
 openai>=1.10.0
 groq>=0.4.0
-python-dotenv>=1.0.0
-httpx>=0.25.0
+
+# معالجة البيانات والذاكرة المتجهية
+numpy>=1.24.0
+faiss-cpu>=1.7.4
+
+# الجدولة والأتمتة
+apscheduler>=3.10.1
+schedule>=1.2.1
+
+# استخراج البيانات (Scraping)
 lxml>=5.1.0
 beautifulsoup4>=4.12.0
 yt-dlp>=2025.01.01
-loguru>=0.7.0
-FFmpeg
-schedule
