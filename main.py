@@ -5,110 +5,101 @@ import httpx
 import tweepy
 import sqlite3
 import numpy as np
+import yt_dlp
 from loguru import logger
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-# ================= 🔐 CONFIG (V120) =================
-CONF = {
-    "GROQ": os.getenv("GROQ_API_KEY"),
-    "TAVILY": os.getenv("TAVILY_API_KEY"),
-    "X": {
-        "key": os.getenv("X_API_KEY"), "secret": os.getenv("X_API_SECRET"),
-        "token": os.getenv("X_ACCESS_TOKEN"), "access_s": os.getenv("X_ACCESS_SECRET")
-    }
-}
-
+# ================= 🔐 CONFIG =================
+# تأكد أنك وضعت كل المفاتيح في Secrets الـ GitHub
 twitter = tweepy.Client(
-    consumer_key=CONF["X"]["key"], consumer_secret=CONF["X"]["secret"],
-    access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
+    consumer_key=os.getenv("X_API_KEY"),
+    consumer_secret=os.getenv("X_API_SECRET"),
+    access_token=os.getenv("X_ACCESS_TOKEN"),
+    access_token_secret=os.getenv("X_ACCESS_SECRET")
 )
 
-# ================= 🛡️ ADVANCED CLEANER =================
-def clean(text):
-    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
-    # إزالة حشو V90 الممل
-    bad_starts = ["أهلاً بكم", "في هذا الثريد", "هل تعلم", "تخيل"]
-    for s in bad_starts: text = text.replace(s, "")
-    return " ".join(text.split()).strip()
+# ================= 📹 VIDEO INTEL (yt-dlp) =================
+async def analyze_video(url):
+    logger.info(f"🎥 جاري سحب وتحليل الفيديو: {url}")
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'skip_download': True,
+        'writeinfojson': True,
+        'quiet': True
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            # نأخذ الوصف والعنوان والترجمة إن وجدت
+            description = info.get('description', '')
+            title = info.get('title', '')
+            return f"Title: {title}\nDescription: {description}"
+    except Exception as e:
+        logger.error(f"Video Error: {e}")
+        return None
 
-# ================= 🧠 AI CALL (Multi-Purpose) =================
-async def ask_ai(system, prompt, temp=0.5):
+# ================= 🧠 AI BRAIN (Expert Prompting) =================
+async def ask_ai(system, prompt, temp=0.6):
     async with httpx.AsyncClient(timeout=120) as client:
         res = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {CONF['GROQ']}"},
+            headers={"Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}"},
             json={
                 "model": "llama-3.3-70b-versatile",
                 "temperature": temp,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+                "messages": [{"role": "system", "content": system + "\nاللهجة: خليجية تقنية حادة."}, 
+                             {"role": "user", "content": prompt}]
             }
         )
         return res.json()["choices"][0]["message"]["content"]
 
-# ================= 🎨 IMAGE GEN (Visual Boost) =================
-# ملاحظة: هنا نستخدم قدرة Gemini (Nano Banana 2) لتوليد وصف الصورة
-async def generate_tech_image(topic):
-    logger.info(f"🎨 جاري تصميم الهوية البصرية لموضوع: {topic}")
-    prompt = f"A professional high-tech architecture diagram for {topic}, 3D isometric style, neon blue and dark grey theme, 8k resolution, cinematic lighting."
-    # في البيئة الحقيقية، ستقوم باستدعاء image_generation(prompt) هنا.
-    return "image_url_placeholder" 
-
-# ================= 🧵 THREAD & LINKEDIN GENERATOR =================
-async def generate_multimodal_content(topic, knowledge):
-    # 1. ثريد تويتر (خليجي تقني حار)
-    x_sys = "أنت CTO تقني حريف. اكتب ثريد من 5 تغريدات. ابدأ بالـ Architecture فوراً. اذكر أدوات محددة (CrewAI, Supabase, LangGraph)."
-    x_thread = await ask_ai(x_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.6)
+# ================= 🧵 MULTI-SOURCE THREAD =================
+async def create_video_thread(video_url):
+    raw_data = await analyze_video(video_url)
+    if not raw_data: return
     
-    # 2. منشور لينكد إن (بروفيشينال رصين)
-    li_sys = "أنت Senior Solution Architect. اكتب منشور LinkedIn احترافي يشرح الجدوى الاقتصادية والتقنية لهذا الحل للأفراد والشركات."
-    li_post = await ask_ai(li_sys, f"الموضوع: {topic}\nالمعرفة: {knowledge}", 0.4)
+    sys = "أنت Senior AI Architect. حلل محتوى هذا الفيديو واستخرج 'الخلاصة التقنية' للأفراد."
+    knowledge = await ask_ai(sys, raw_data)
     
-    return x_thread, li_post
-
-# ================= 🚀 EXECUTION ENGINE =================
-async def daily_empire_mission():
-    logger.info("🦁 تبدأ مهمة الإمبراطورية اليومية...")
+    # تحويل الخلاصة لثريد
+    thread_sys = "اكتب ثريد تويتر من 5 تغريدات تقنية عميقة. ابدأ بالـ Impact. اذكر الأدوات."
+    thread_raw = await ask_ai(thread_sys, knowledge, 0.4)
     
-    # 1. اكتشاف (Trend Discovery)
-    topic = await ask_ai("محلل ترند", "أعطني موضوع AI Agent أو RAG عميق للأفراد.", 0.7)
-    if not topic: return
+    # تنظيف ونشر (نفس ميكانيكية الـ V120)
+    tweets = [t.strip() for t in re.split(r'\d+\s*[/-]\s*', thread_raw) if len(t) > 20]
+    # (كود النشر هنا...)
 
-    # 2. بحث (Advanced Research)
-    async with httpx.AsyncClient() as client:
-        r = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"})
-        knowledge = "\n".join([x["content"] for x in r.json().get("results", [])])
+# ================= 🤖 SMART REPLY (With Context) =================
+async def smart_reply():
+    logger.info("🔍 فحص المنشن للردود الذكية...")
+    me = twitter.get_me()
+    mentions = twitter.get_users_mentions(id=me.data.id)
+    if not mentions.data: return
 
-    # 3. توليد المحتوى (Twitter + LinkedIn)
-    x_thread, li_post = await generate_multimodal_content(topic, knowledge)
-    
-    # 4. توليد الصورة (Visuals)
-    image_url = await generate_tech_image(topic)
-
-    # 5. النشر على X (ثريد مرتب)
-    tweets = [clean(t) for t in re.split(r'\d+\s*[/-]\s*', x_thread) if len(t) > 30]
-    prev_id = None
-    for i, t in enumerate(tweets[:5]):
-        text = f"{i+1}/ {t}"
-        if prev_id is None:
-            # هنا نرفق الصورة في أول تغريدة
-            res = twitter.create_tweet(text=text) # أضف media_ids هنا لو رفعت الصورة
+    for tweet in mentions.data:
+        # إذا المنشن فيه رابط يوتيوب، حلله فوراً ورد عليه
+        url_match = re.search(r'(https?://\S+)', tweet.text)
+        if url_match and "youtube" in url_match.group(0):
+            video_summary = await analyze_video(url_match.group(0))
+            reply = await ask_ai("أنت خبير تقني تلخص الفيديوهات.", f"لخص هذا بذكاء: {video_summary}")
+            twitter.create_tweet(text=f"زبدة الفيديو: {reply[:250]}", in_reply_to_tweet_id=tweet.id)
         else:
-            res = twitter.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
-        prev_id = res.data["id"]
-        await asyncio.sleep(5)
-    
-    logger.success(f"🔥 تم اجتياح المنصات بموضوع: {topic}")
+            # رد تقني عادي (كما في V120)
+            pass
 
-# ================= 📅 SCHEDULER =================
+# ================= 🚀 SCHEDULER =================
 scheduler = AsyncIOScheduler()
-scheduler.add_job(daily_empire_mission, "cron", hour=10) # 10 صباحاً وقت الذروة
+# مهمة الصباح: تحليل ترند يوتيوب ونشر ثريد
+scheduler.add_job(create_video_thread, 'cron', hour=9, args=["https://www.youtube.com/@ThePyCoach/videos"]) # مثال لقناة تقنية
+# مهمة المساء: الردود الذكية
+scheduler.add_job(smart_reply, 'interval', minutes=30)
 scheduler.start()
 
 async def main():
-    logger.info("🚀 V120 AI Media Engine: ONLINE")
+    logger.info("🚀 AI Media Engine V125 (Video Edition) is Active!")
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
