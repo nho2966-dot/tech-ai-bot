@@ -26,16 +26,17 @@ client = tweepy.Client(
     access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ THE PRO FILTER (V34) =================
-def pro_clean(text):
-    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text) # حذف الصيني
-    # حذف الافتتاحيات المملة والكلمات الأكاديمية الزائدة
-    boring_stuff = ["نقدم لكم", "تخيل", "مما يسمح بـ", "عزيزي المتابع"]
-    for word in boring_stuff:
-        text = text.replace(word, "")
+# ================= 🛡️ THE ELITE FILTER V35 =================
+def elite_polish(text):
+    # إزالة أي حروف غير العربية والإنجليزية والرموز التقنية
+    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text)
+    # تنظيف الكلمات المهجنة أو "الهبد" اللغوي
+    bad_phrases = ["هاو،", "بيتكون لدينا", "بناءً على حاجاتك", "إلهام وتصميم"]
+    for phrase in bad_phrases:
+        text = text.replace(phrase, "")
     return text.strip()
 
-# ================= 🧠 AI ENGINE V34 (Practical Expert) =================
+# ================= 🧠 AI ENGINE V35 (Visual & Interactive) =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -44,37 +45,42 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.85, # رفعنا الحرارة لكسر الجمود
+                    "temperature": 0.6, 
                     "messages": [
                         {"role": "system", "content": system + """
-- اللهجة: خليجية بيضاء "حريفة" (Tech Savvy).
-- القاعدة الذهبية: (مشكلة تقنية -> أداة محددة -> كود أو برومبت أو طريقة ربط).
-- ممنوع الشرح النظري البحت. نبي "تطبيق عملي" للأفراد.
-- اذكر اسم أداة مشهورة (مثل @pinecone, @LangChainAI, @supabase) وأشر لها."""},
+- اللهجة: خليجية تقنية متمكنة (White Dialect).
+- الهيكل: (المشكلة -> المخطط التقني -> الأداة -> النتيجة).
+- لا تستخدم لغة عاطفية، استخدم لغة هندسية (Engineering Language).
+- اذكر بوضوح كيف تتدفق البيانات بين الأدوات (Workflow)."""},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            return pro_clean(res.json()["choices"][0]["message"]["content"])
+            return elite_polish(res.json()["choices"][0]["message"]["content"])
     except: return None
 
 # ================= 🚀 EXECUTION =================
 async def main():
-    logger.info("📡 جاري توليد محتوى 'تطبيقي' دسم V34...")
+    logger.info("📡 تشغيل محرك النخبة V35...")
     
-    # جلب سياق من Tavily لضمان الحداثة
-    news_context = "Best no-code tools to build RAG systems for personal use 2026"
+    # جلب سياق تقني عن بناء أنظمة AI شخصية
+    context = "How to build a personal RAG system using Supabase and LangChain 2026"
     
-    sys_msg = "أنت مهندس (RAG Architect) ممارس. لا تنظر، بل أعطِ خطوات التنفيذ للأفراد."
+    sys_msg = "أنت Solution Architect. قدم للناس Blueprint حقيقي لبناء نظامهم الخاص."
     
-    prompt = f"بناءً على هذا السياق: {news_context}\nصمم تغريدة تشرح كيف يبني الشخص 'ذاكرة ثانية' لنفسه باستخدام Vector DB بدون تعقيد برمي."
+    prompt = f"بناءً على {context}، صمم تغريدة تشرح الـ Workflow التقني لربط بيانات المستخدم بـ Supabase كمتجهات واسترجاعها بـ Claude."
     
     content = await ask_ai(sys_msg, prompt)
     
     if content:
-        final_post = f"🛠️ من الميدان التقني (Practical AI):\n\n{content}\n\n#RAG #Pinecone #LLMs #أتمتة"
+        # إضافة وصف المخطط البصري لتعزيز الفهم
+        diagram_desc = ""
+        
+        final_post = f"🏗️ مخطط هندسي (System Blueprint):\n\n{content}\n\n{diagram_desc}\n\n#Supabase #LangChain #RAG #Architecture"
+        
+        # نشر التغريدة
         client.create_tweet(text=final_post)
-        logger.success("✅ تم النشر بأسلوب تطبيقي وعملي!")
+        logger.success("✅ تم نشر المخطط الهندسي بنجاح!")
 
 if __name__ == "__main__":
     asyncio.run(main())
