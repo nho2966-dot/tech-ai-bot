@@ -4,6 +4,7 @@ import httpx
 import tweepy
 import sqlite3
 import re
+import random
 from datetime import datetime
 from loguru import logger
 from dotenv import load_dotenv
@@ -25,16 +26,16 @@ client = tweepy.Client(
     access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ ANTI-TRUNCATION & CLEANING =================
-def final_polish(text):
-    # مسح أي حروف غريبة أو صينية
-    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text)
-    # التأكد من عدم انقطاع النص (الحد الأقصى للمشتركين 25,000 لكن نفضل الاختصار للقراءة)
-    if len(text) > 2000:
-        text = text[:1997] + "..."
+# ================= 🛡️ THE PRO FILTER (V34) =================
+def pro_clean(text):
+    text = re.sub(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]', '', text) # حذف الصيني
+    # حذف الافتتاحيات المملة والكلمات الأكاديمية الزائدة
+    boring_stuff = ["نقدم لكم", "تخيل", "مما يسمح بـ", "عزيزي المتابع"]
+    for word in boring_stuff:
+        text = text.replace(word, "")
     return text.strip()
 
-# ================= 🧠 ELITE AI ENGINE V33 =================
+# ================= 🧠 AI ENGINE V34 (Practical Expert) =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=90) as client_http:
@@ -43,40 +44,37 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.8, # رفعنا الحرارة قليلاً لكسر التكرار الممل
+                    "temperature": 0.85, # رفعنا الحرارة لكسر الجمود
                     "messages": [
                         {"role": "system", "content": system + """
-- ممنوع نهائياً البدء بكلمة "تخيل" أو "هل تعلم" أو "أهلاً بك".
-- ابدأ فوراً بذكر اسم الأداة أو نقد لبروتوكول تقني معين.
-- التزم بلهجة خليجية بيضاء "حادة" وتقنية (Sharp Tech Tone).
-- استخدم المصطلحات الإنجليزية بين قوسين بكثافة لكن بذكاء.
-- ممنوع تكرار الهيكل الإنشائي للتغريدات السابقة."""},
+- اللهجة: خليجية بيضاء "حريفة" (Tech Savvy).
+- القاعدة الذهبية: (مشكلة تقنية -> أداة محددة -> كود أو برومبت أو طريقة ربط).
+- ممنوع الشرح النظري البحت. نبي "تطبيق عملي" للأفراد.
+- اذكر اسم أداة مشهورة (مثل @pinecone, @LangChainAI, @supabase) وأشر لها."""},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
-            return final_polish(res.json()["choices"][0]["message"]["content"])
+            return pro_clean(res.json()["choices"][0]["message"]["content"])
     except: return None
 
 # ================= 🚀 EXECUTION =================
 async def main():
-    logger.info("📡 جاري تشغيل المحرك V33 كاسر التكرار...")
+    logger.info("📡 جاري توليد محتوى 'تطبيقي' دسم V34...")
     
-    # جلب أخبار عميقة جداً (Deep Tech)
-    news_query = "latest advancements in AI Agents orchestration and vector databases 2026"
-    # [هنا نستخدم Tavily لجلب السياق كما في النسخ السابقة]
+    # جلب سياق من Tavily لضمان الحداثة
+    news_context = "Best no-code tools to build RAG systems for personal use 2026"
     
-    sys_msg = "أنت مهندس تقني متمرد (Tech Lead). تنتقد الحلول السطحية وتقدم Architecture عميق للأفراد."
+    sys_msg = "أنت مهندس (RAG Architect) ممارس. لا تنظر، بل أعطِ خطوات التنفيذ للأفراد."
     
-    prompt = "حلل لنا كيف ندمج قواعد البيانات المتجهة (Vector Databases) مع (LLMs) لتقليل الهلوسة (Hallucinations) للأفراد."
+    prompt = f"بناءً على هذا السياق: {news_context}\nصمم تغريدة تشرح كيف يبني الشخص 'ذاكرة ثانية' لنفسه باستخدام Vector DB بدون تعقيد برمي."
     
     content = await ask_ai(sys_msg, prompt)
     
     if content:
-        # التأكد من أن التغريدة دسمة ومختلفة
-        final_post = f"🔥 مراجعة معمارية (Architecture Review):\n\n{content}\n\n#VectorDB #LLMs #AI_Architecture #DevTools"
+        final_post = f"🛠️ من الميدان التقني (Practical AI):\n\n{content}\n\n#RAG #Pinecone #LLMs #أتمتة"
         client.create_tweet(text=final_post)
-        logger.success("✅ تم النشر بأسلوب متجدد وبدون انقطاع!")
+        logger.success("✅ تم النشر بأسلوب تطبيقي وعملي!")
 
 if __name__ == "__main__":
     asyncio.run(main())
