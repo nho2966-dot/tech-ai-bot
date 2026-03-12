@@ -2,9 +2,7 @@ import os
 import asyncio
 import httpx
 import tweepy
-import sqlite3
 import re
-from datetime import datetime
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -15,65 +13,121 @@ CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
     "TAVILY": os.getenv("TAVILY_API_KEY"),
     "X": {
-        "key": os.getenv("X_API_KEY"), "secret": os.getenv("X_API_SECRET"),
-        "token": os.getenv("X_ACCESS_TOKEN"), "access_s": os.getenv("X_ACCESS_SECRET")
+        "key": os.getenv("X_API_KEY"),
+        "secret": os.getenv("X_API_SECRET"),
+        "token": os.getenv("X_ACCESS_TOKEN"),
+        "access_s": os.getenv("X_ACCESS_SECRET")
     }
 }
 
-client = tweepy.Client(
-    consumer_key=CONF["X"]["key"], consumer_secret=CONF["X"]["secret"],
-    access_token=CONF["X"]["token"], access_token_secret=CONF["X"]["access_s"]
+twitter = tweepy.Client(
+    consumer_key=CONF["X"]["key"],
+    consumer_secret=CONF["X"]["secret"],
+    access_token=CONF["X"]["token"],
+    access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🛡️ THE ULTIMATE GUARDRAIL (V36) =================
-def final_validation(text):
-    # 1. منع أي حرف غير العربي والإنجليزي (إزالة الروسي والصيني تماماً)
+# ================= 🛡️ TEXT REFINER (V45) =================
+def refine(text):
+    # إزالة الصيني وأي حشو لغوي
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:()@#/-]', '', text)
-    # 2. منع دمج الكلمات البرمجية بكلمات عربية (مثل مركزية+center)
-    forbidden_mixed = ["مركزية", "центр", "createServer", "أ.", "центраالية"]
-    for word in forbidden_mixed:
-        text = text.replace(word, "")
-    # 3. تنظيف المسافات الزائدة الناتجة عن الحذف
-    return ' '.join(text.split()).strip()
+    # تنظيف المسافات والتأكد من هيبة النص
+    return " ".join(text.split())
 
-# ================= 🧠 AI ENGINE V36 (Strict Tech Editor) =================
-async def ask_ai(system, prompt):
-    try:
-        async with httpx.AsyncClient(timeout=90) as client_http:
-            res = await client_http.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.2, # تقليل الحرارة لأدنى مستوى لضمان الانضباط
-                    "messages": [
-                        {"role": "system", "content": system + """
-- ممنوع دمج حروف عربية بإنجليزية في كلمة واحدة.
-- ممنوع كتابة أكواد برمجية (Code snippets) داخل التغريدة.
-- اذكر الأداة بالإنجليزية والوصف بالعربية الرصينة.
-- اللهجة: خليجية بيضاء رسمية للخبراء."""},
-                        {"role": "user", "content": prompt}
-                    ]
-                }
-            )
-            raw_text = res.json()["choices"][0]["message"]["content"]
-            return final_validation(raw_text)
-    except: return None
+# ================= 🧠 AI CALL (Advanced Logic) =================
+async def ask_ai(system, prompt, temp=0.4):
+    async with httpx.AsyncClient(timeout=90) as client:
+        res = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {CONF['GROQ']}"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "temperature": temp,
+                "messages": [
+                    {"role": "system", "content": system + "\n- اللهجة: خليجية تقنية بيضاء.\n- الشخصية: Senior Tech Lead."},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+        )
+        return res.json()["choices"][0]["message"]["content"]
 
-# ================= 🚀 EXECUTION =================
+# ================= 🔍 TREND DISCOVERY (10x Quality) =================
+async def discover_topic():
+    system = "أنت رادار تقني يبحث عن 'الفجوات المعرفية' (Knowledge Gaps)."
+    prompt = """
+اقترح موضوع تقني معقد للأفراد لكنه يغير حياتهم (مثل: الـ Agents الذاتية، قواعد البيانات المحلية، أو أمن الـ AI).
+اجعل العنوان 'صادم تقنياً' ومثير للجدل الإيجابي.
+"""
+    return await ask_ai(system, prompt, temp=0.7)
+
+# ================= 🔬 RESEARCH & KNOWLEDGE =================
+async def research(topic):
+    async with httpx.AsyncClient() as client:
+        res = await client.post(
+            "https://api.tavily.com/search",
+            json={"api_key": CONF["TAVILY"], "query": topic, "search_depth": "advanced"}
+        )
+        results = res.json().get("results", [])
+        return "\n".join(f"- {r['title']}: {r['content']}" for r in results)
+
+async def extract_knowledge(research_data):
+    system = "أنت مهندس استخلاص معرفة (Knowledge Engineer)."
+    prompt = f"حلل البيانات التالية واستخرج منها الـ (Architecture) والـ (Tools) والـ (Action Plan):\n{research_data}"
+    return await ask_ai(system, prompt)
+
+# ================= 🧵 THREAD GENERATION (Masterclass) =================
+async def generate_thread(topic, knowledge):
+    system = "أنت صانع محتوى تقني (Ghostwriter) لأكبر حسابات التقنية في العالم."
+    prompt = f"""
+اكتب ثريد (Thread) من 5-6 تغريدات عن: {topic}
+المعلومات: {knowledge}
+
+الشروط:
+1. التغريدة 1: (The Hook) ابدأ بمشكلة مؤلمة يحلها هذا التقدم التقني.
+2. التغريدات 2-4: (The Meat) اشرح الـ Workflow التقني باستخدام مصطلحات (Architecture, Latency, Scalability).
+3. التغريدة 5: (The Tools) اذكر الأدوات المحددة وكيف يبدأ الشخص فوراً.
+4. التغريدة 6: (The Future) توقع لمستقبل هذه التقنية + سؤال تفاعلي.
+
+* استخدم المصطلحات الإنجليزية بين قوسين بكثافة.
+* ممنوع المقدمات المملة.
+"""
+    raw_thread = await ask_ai(system, prompt, temp=0.6)
+    # تنظيف كل تغريدة على حدة
+    tweets = [refine(t) for t in raw_thread.split("\n\n") if len(t) > 10]
+    return tweets
+
+# ================= 🚀 POST THREAD =================
+def post_thread(tweets):
+    prev_id = None
+    for i, tweet in enumerate(tweets):
+        try:
+            # إضافة رقم التغريدة للثريد
+            text = f"{i+1}/ {tweet}"
+            if prev_id is None:
+                res = twitter.create_tweet(text=text)
+            else:
+                res = twitter.create_tweet(text=text, in_reply_to_tweet_id=prev_id)
+            prev_id = res.data["id"]
+            logger.info(f"Published tweet {i+1}")
+            asyncio.sleep(2) # تأخير بسيط لتجنب الـ Rate Limit
+        except Exception as e:
+            logger.error(f"Error posting tweet {i+1}: {e}")
+
+# ================= 🏁 MAIN =================
 async def main():
-    logger.info("📡 تشغيل المحرر التقني V36...")
+    logger.info("🚀 AI Content Engine V45 - 10x Quality Mode")
     
-    # تحديد مسار تقني واضح جداً لمنع الهلوسة
-    sys_msg = "أنت مهندس نظم (Systems Engineer). قدم شرحاً لخطوات ربط الأدوات بأسلوب النقاط."
-    prompt = "اشرح باختصار خطوات ربط Supabase كقاعدة بيانات مع Claude لتحليل ملفات PDF."
+    topic = await discover_topic()
+    logger.info(f"🎯 Topic Selected: {topic}")
+
+    data = await research(topic)
+    knowledge = await extract_knowledge(data)
     
-    content = await ask_ai(sys_msg, prompt)
+    thread_tweets = await generate_thread(topic, knowledge)
     
-    if content and len(content) > 30:
-        final_post = f"🏗️ مخطط العمل التقني:\n\n{content}\n\n#AI #Supabase #Claude #Architecture"
-        client.create_tweet(text=final_post)
-        logger.success("✅ تم النشر بنجاح وبدقة عالية!")
+    if thread_tweets:
+        post_thread(thread_tweets)
+        logger.success("🔥 10x Quality Thread is Live!")
 
 if __name__ == "__main__":
     asyncio.run(main())
