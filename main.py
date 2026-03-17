@@ -25,41 +25,30 @@ CONF = {
     }
 }
 
-# عميل تويتر الموحد
 twitter = tweepy.Client(
     bearer_token=CONF["X"]["bearer"],
     consumer_key=CONF["X"]["key"],
     consumer_secret=CONF["X"]["secret"],
     access_token=CONF["X"]["token"],
-    access_token_secret=CONF["X"]["access_s"],
-    wait_on_rate_limit=True
+    access_token_secret=CONF["X"]["access_s"]
 )
 
-# ================= 🗄️ MEMORY (نظام الذاكرة المتطور) =================
-db = sqlite3.connect("tech_sovereign_v400.db")
+# ================= 🗄️ MEMORY =================
+db = sqlite3.connect("tech_master_v500.db")
 db.execute("CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY, type TEXT, timestamp DATETIME)")
 db.commit()
 
-def is_processed(uid):
-    return db.execute("SELECT id FROM memory WHERE id=?", (uid,)).fetchone() is not None
-
-def save_memory(uid, mtype="post"):
-    db.execute("INSERT INTO memory (id, type, timestamp) VALUES (?, ?, ?)", (uid, mtype, datetime.now()))
-    db.commit()
-
-# ================= 🛡️ CLEANER & HUMANIZER (الأنسنة) =================
-def humanize_text(text):
-    # تنظيف الرموز الغريبة والهلوسة
-    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
-    # إزالة الترقيم الجاف (1/, 2:) لتبدو كأنها كتابة يدوية
+# ================= 🛡️ PRO FILTER (قتل الابتذال) =================
+def pro_cleaner(text):
+    # إزالة لغة "اليوتيوبرز" المستهلكة
+    text = re.sub(r'(يا شباب|خبيئة مذهلة|اليوم جايب لكم|هل تعلمون|نصيحة اليوم|Stay tuned|يا ناس)', '', text)
+    # تنظيف الترقيم لتبدو كأنها كتابة خبير حقيقي
     text = re.sub(r'^\d+[:/-]\s*', '', text)
-    # كلمات الحشو اللي تقتل "الأنسنة"
-    forbidden = ["يا شباب", "أهلاً بكم", "في هذا الثريد", "إليك الخطوات"]
-    for word in forbidden: text = text.replace(word, "")
-    return text.strip()
+    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
+    return " ".join(text.split()).strip()
 
-# ================= 🧠 AI BRAIN (The Tech Specialist) =================
-async def ask_ai(system, prompt, temp=0.4):
+# ================= 🧠 AI BRAIN (The Rationalist) =================
+async def ask_ai(system, prompt, temp=0.1): # حرارة منخفضة جداً لضمان الواقعية
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             res = await client.post(
@@ -69,7 +58,7 @@ async def ask_ai(system, prompt, temp=0.4):
                     "model": "llama-3.3-70b-versatile",
                     "temperature": temp,
                     "messages": [
-                        {"role": "system", "content": f"{system}\n- اللهجة: خليجية بيضاء (إنسانية وغير جافة).\n- التخصص: خبايا تقنية حقيقية 100%."},
+                        {"role": "system", "content": f"{system}\n- القواعد: لا تأليف، لا نصائح بدائية، لا إشاعات."},
                         {"role": "user", "content": prompt}
                     ]
                 }
@@ -79,38 +68,50 @@ async def ask_ai(system, prompt, temp=0.4):
         logger.error(f"AI Error: {e}")
         return None
 
-# ================= 🧵 AUTO POST (خبايا حقيقية) =================
+# ================= 🧵 AUTO POST (الخبايا العميقة) =================
 async def run_daily_mission():
-    logger.info("📡 جاري البحث عن خبيئة تقنية دسمة لنشرها...")
+    logger.info("📡 البحث عن ميزة تقنية 'حقيقية' وحصرية لعام 2026...")
     
-    # البحث عن شيء حقيقي ومؤكد في 2026
-    search_query = "hidden pro hacks for social media and AI tools march 2026"
+    # البحث عن أخبار تقنية عميقة (Deep Tech Search)
+    search_queries = [
+        "new hidden features in iOS 19.4 March 2026",
+        "advanced productivity hacks for ChatGPT-5 agents 2026",
+        "secret features in Instagram professional mode 2026",
+        "hidden browser dev tools for non-developers 2026"
+    ]
+    query = search_queries[datetime.now().day % len(search_queries)]
+    
     async with httpx.AsyncClient() as client:
         r = await client.post("https://api.tavily.com/search", json={
             "api_key": CONF["TAVILY"], 
-            "query": search_query,
+            "query": query,
             "search_depth": "advanced"
         })
         knowledge = "\n".join([x['content'] for x in r.json().get("results", [])])
 
-    sys_prompt = "أنت خبير تقني خليجي. استخرج خبيئة (Hack) حقيقية ومذهلة للأفراد. اكتب ثريد 3-4 تغريدات بأسلوب إنساني مشوق، ابدأ بالزبدة فوراً."
-    content = await ask_ai(sys_prompt, f"المعلومات الموثقة:\n{knowledge}")
+    sys_prompt = """أنت Senior Tech Consultant. استخرج ميزة واحدة دسمة من النص المرفق.
+    اكتب ثريد (3 تغريدات) بأسلوب خليجي تقني راقٍ:
+    1. الميزة والقيمة (بدون مقدمات).
+    2. الخطوات العملية.
+    3. نصيحة للمحترفين.
+    - ممنوع استخدام كلمة 'خبيئة' أو 'سر'. استخدم 'ميزة'، 'تعديل'، 'تريك'."""
     
+    content = await ask_ai(sys_prompt, f"المعلومات من الويب:\n{knowledge}")
     if not content: return
-    tweets = [humanize_text(t) for t in re.split(r'\n\n', content) if len(t) > 15]
+
+    tweets = [pro_cleaner(t) for t in re.split(r'\n\n', content) if len(t) > 20]
     
     prev_id = None
-    for i, t in enumerate(tweets[:4]):
+    for i, t in enumerate(tweets[:3]):
         try:
-            # الترقيم بأسلوب إنساني (1., 2.) أو بدون
-            msg = f"{i+1}. {t}" if i > 0 else t
+            msg = f"{i+1}/ {t}"
             res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=prev_id)
             prev_id = res.data["id"]
             await asyncio.sleep(15)
         except Exception as e: logger.error(e)
-    logger.success("✅ تم النشر التلقائي للثريد.")
+    logger.success("✅ تم نشر المحتوى الموثق.")
 
-# ================= 💬 SMART REPLY (الردود المؤنسنة) =================
+# ================= 💬 SMART REPLY (أنسنة مهذبة) =================
 async def smart_reply():
     try:
         me = twitter.get_me().data.id
@@ -118,34 +119,28 @@ async def smart_reply():
         if not mentions.data: return
 
         for tweet in mentions.data:
-            if is_processed(tweet.id): continue
+            if db.execute("SELECT id FROM memory WHERE id=?", (tweet.id,)).fetchone(): continue
             
-            logger.info(f"📩 جاري الرد على منشن: {tweet.text}")
-            reply_sys = "أنت مستشار تقني صديق. رد على هذا المنشن بأسلوب خليجي مهذب ومختصر. إذا سأل عن خبيئة أعطه معلومة حقيقية."
-            answer = await ask_ai(reply_sys, tweet.text)
+            reply_sys = "أنت خبير تقني خليجي. رد على المنشن بذكاء واختصار. إذا كان السؤال تافهاً، أعطه معلومة تقنية دسمة بدلاً منه."
+            answer = await ask_ai(reply_sys, tweet.text, temp=0.5)
             
             if answer:
-                twitter.create_tweet(text=humanize_text(answer), in_reply_to_tweet_id=tweet.id)
-                save_memory(tweet.id, "reply")
-                await asyncio.sleep(10)
-    except Exception as e:
-        logger.error(f"Reply Error: {e}")
+                twitter.create_tweet(text=pro_cleaner(answer), in_reply_to_tweet_id=tweet.id)
+                db.execute("INSERT INTO memory (id, type, timestamp) VALUES (?, ?, ?)", (tweet.id, "reply", datetime.now()))
+                db.commit()
+    except Exception as e: logger.error(e)
 
-# ================= 🏁 MAIN LOOP (الأتمتة الكاملة) =================
+# ================= 🏁 AUTOMATION =================
 async def main_loop(mode="auto"):
-    logger.info(f"🚀 V400 Sovereign Online | Mode: {mode}")
-    
+    logger.info(f"🚀 V500 Investigator Online | Mode: {mode}")
     if mode == "manual":
         await run_daily_mission()
         await smart_reply()
         return
 
     scheduler = AsyncIOScheduler()
-    # 1. النشر التلقائي (كل يوم الساعة 10 صباحاً و 6 مساءً)
-    scheduler.add_job(run_daily_mission, 'cron', hour='10,18')
-    # 2. الردود التلقائية (كل 10 دقائق)
-    scheduler.add_job(smart_reply, 'interval', minutes=10)
-    
+    scheduler.add_job(run_daily_mission, 'cron', hour='10,21') # نشر 10 صباحاً و 9 مساءً
+    scheduler.add_job(smart_reply, 'interval', minutes=15)
     scheduler.start()
     while True: await asyncio.sleep(3600)
 
