@@ -13,9 +13,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-# ================= 🔐 CONFIG (استخدام المفاتيح الموثوقة) =================
+# ================= 🔐 CONFIG =================
 CONF = {
-    "GROQ": os.getenv("GROQ_API_KEY"), # نعود لـ Groq لضمان الاستقرار
+    "GROQ": os.getenv("GROQ_API_KEY"),
     "TAVILY": os.getenv("TAVILY_KEY"),
     "TG_TOKEN": os.getenv("TG_TOKEN"),
     "TG_CHAT_ID": os.getenv("TELEGRAM_CHAT_ID"),
@@ -34,7 +34,6 @@ twitter = tweepy.Client(
     access_token_secret=CONF["X"]["access_s"]
 )
 
-# تصحيح اسم قاعدة البيانات ليتوافق مع الـ Artifacts
 DB_NAME = "tech_master_v1100.db"
 db = sqlite3.connect(DB_NAME)
 db.execute("CREATE TABLE IF NOT EXISTS logs (topic TEXT, date TEXT)")
@@ -42,16 +41,15 @@ db.commit()
 
 # ================= 🛡️ PRO CLEANER =================
 def clean_pro(text):
-    # تنظيف صارم لضمان هيبة الـ CTO
     text = re.sub(r'(يا شباب|خبيئة مذهلة|اليوم جايب لكم|هل تعلمون|أهلاً بكم|عاجل|حصري|الزبدة)', '', text)
     text = re.sub(r'^\d+[:/-]\s*', '', text)
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
     return " ".join(text.split()).strip()
 
-# ================= 🧠 AI BRAIN (The Stable Engine) =================
+# ================= 🧠 AI BRAIN =================
 async def ask_ai(system, prompt):
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
@@ -59,34 +57,44 @@ async def ask_ai(system, prompt):
                     "model": "llama-3.3-70b-versatile",
                     "temperature": 0.2,
                     "messages": [
-                        {"role": "system", "content": f"{system}\n- اللهجة: خليجية بيضاء مهنية.\n- الهدف: فائدة حقيقية 2026."},
+                        {"role": "system", "content": f"{system}\n- اللهجة: خليجية بيضاء مهنية."},
                         {"role": "user", "content": prompt}
                     ]
                 }
             )
             data = res.json()
-            if "choices" in data:
-                return data["choices"][0]["message"]["content"]
-            else:
-                logger.error(f"AI Response Error: {data}")
-                return None
+            return data["choices"][0]["message"]["content"] if "choices" in data else None
     except Exception as e:
-        logger.error(f"Request Error: {e}")
+        logger.error(f"AI Error: {e}")
         return None
 
-# ================= 📢 TELEGRAM LOG =================
-async def send_tg_log(message):
-    if not CONF['TG_TOKEN']: return
-    try:
-        url = f"https://api.telegram.org/bot{CONF['TG_TOKEN']}/sendMessage"
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json={"chat_id": CONF['TG_CHAT_ID'], "text": f"🚀 تم النشر:\n\n{message}"})
-    except Exception as e: logger.error(f"TG Error: {e}")
+# ================= 🔄 SMART SEARCH (With Retries) =================
+async def get_knowledge(query, retries=3):
+    for i in range(retries):
+        try:
+            logger.info(f"🔍 محاولة البحث رقم {i+1} عن: {query}...")
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                r = await client.post("https://api.tavily.com/search", json={
+                    "api_key": CONF["TAVILY"], 
+                    "query": query,
+                    "search_depth": "advanced"
+                })
+                r.raise_for_status()
+                results = r.json().get("results", [])
+                if results:
+                    return "\n".join([x['content'] for x in results])
+        except (httpx.ReadTimeout, httpx.ConnectError):
+            logger.warning(f"⏳ تأخر الرد، إعادة المحاولة بعد 10 ثواني...")
+            await asyncio.sleep(10)
+        except Exception as e:
+            logger.error(f"❌ خطأ غير متوقع في البحث: {e}")
+            break
+    return None
 
 # ================= 🎥 VIDEO SEARCH =================
 async def find_video(topic):
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post("https://api.tavily.com/search", json={
                 "api_key": CONF["TAVILY"], 
                 "query": f"{topic} tutorial video youtube tiktok 2026",
@@ -96,12 +104,12 @@ async def find_video(topic):
             return results[0]['url'] if results else None
     except: return None
 
-# ================= 🧵 MISSION (Diverse & High Value) =================
+# ================= 🧵 MISSION =================
 async def run_mission():
-    logger.info("📡 جاري إنتاج محتوى تقني مواكب...")
+    logger.info("📡 بدء المهمة التقنية...")
     
     categories = [
-        "تحديثات خوارزمية X (تويتر) وطرق التصدر 2026",
+        "تحديثات خوارزمية X وطرق التصدر 2026",
         "ميزات مخفية في iOS 19 للمحترفين",
         "أدوات AI Agent تنجز مهام البيزنس تلقائياً",
         "تريكات زيادة الوصول في تيك توك وإنستقرام",
@@ -110,18 +118,15 @@ async def run_mission():
     
     topic = random.choice(categories)
     
-    # 1. البحث عن معلومة "طازجة" من Tavily
-    async with httpx.AsyncClient() as client:
-        r = await client.post("https://api.tavily.com/search", json={
-            "api_key": CONF["TAVILY"], 
-            "query": f"latest unique technical feature for {topic} March 2026",
-            "search_depth": "advanced"
-        })
-        knowledge = "\n".join([x['content'] for x in r.json().get("results", [])])
+    # استخدام محرك البحث الجديد ذو المحاولات المتكررة
+    knowledge = await get_knowledge(f"latest unique technical feature for {topic} March 2026")
+    
+    if not knowledge:
+        logger.error("🚫 فشل البحث بعد عدة محاولات. يتم إيقاف الحلقة الحالية.")
+        return
 
-    # 2. الصياغة بأسلوب مهندس
     sys_prompt = "أنت CTO تقني. استخرج ميزة واحدة حقيقية ودسمة. اكتب ثريد 3 تغريدات. ابدأ بالمشكلة وحلها فوراً."
-    content = await ask_ai(sys_prompt, f"المعرفة:\n{knowledge}")
+    content = await ask_ai(sys_prompt, f"المعرفة المستخرجة:\n{knowledge}")
     if not content: return
 
     video_url = await find_video(topic)
@@ -132,23 +137,21 @@ async def run_mission():
     for i, t in enumerate(tweets[:3]):
         try:
             msg = f"{i+1}. {t}"
-            if i == 2 and video_url:
-                msg += f"\n\n📺 شرح مرئي:\n{video_url}"
+            if i == 2 and video_url: msg += f"\n\n📺 شرح مرئي:\n{video_url}"
             
             res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=prev_id, user_auth=True)
             prev_id = res.data["id"]
             log_text += f"{msg}\n"
             await asyncio.sleep(15)
-        except Exception as e: logger.error(e)
+        except Exception as e: logger.error(f"Post Error: {e}")
 
     db.execute("INSERT INTO logs VALUES (?, ?)", (topic, datetime.now().isoformat()))
     db.commit()
-    await send_tg_log(log_text)
-    logger.success(f"✅ تم نشر الثريد عن: {topic}")
+    logger.success(f"✅ تم النشر بنجاح: {topic}")
 
 # ================= 🏁 RUN =================
 async def main_loop(mode="auto"):
-    logger.info(f"🚀 V1100 Stable Online | Mode: {mode}")
+    logger.info(f"🚀 V1200 Smart System Online | Mode: {mode}")
     if mode == "manual":
         await run_mission()
         return
