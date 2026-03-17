@@ -1,17 +1,17 @@
-name: Tech Sovereign Bot V1100
+name: Tech Sovereign Bot V1800
 
 on:
   schedule:
-    # يعمل كل 6 ساعات لضمان فحص المواعيد والردود (أو حسب رغبتك)
+    # يعمل كل 6 ساعات لفحص المهام المجدولة والمنشنات
     - cron: '0 */6 * * *' 
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً من GitHub Actions
+  workflow_dispatch: # للتشغيل اليدوي من GitHub Actions
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -20,18 +20,18 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install tweepy httpx loguru python-dotenv apscheduler
 
-      - name: Download previous database
+      - name: Download Previous Database
         uses: actions/download-artifact@v4
         with:
           name: tech-database
-        continue-on-error: true # لكي لا يتوقف العمل في أول مرة قبل وجود قاعدة بيانات
+        continue-on-error: true # لضمان استمرار العمل في أول مرة قبل وجود قاعدة بيانات
 
-      - name: Run Bot (Manual Mode for Actions)
+      - name: Run Sovereign Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_KEY: ${{ secrets.TAVILY_KEY }}
@@ -39,13 +39,11 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python main.py manual
+        run: python main.py manual # نستخدم manual هنا ليعمل البوت مرة واحدة وينتهي داخل الـ Workflow
 
-      - name: Upload updated database
+      - name: Upload Updated Database
         uses: actions/upload-artifact@v4
         with:
           name: tech-database
-          path: tech_master_v1100.db
-          retention-days: 7 # يحفظ القاعدة لمدة 7 أيام
+          path: tech_database.db # المسار الموحد الجديد
+          retention-days: 7
