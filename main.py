@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 
-# ================= 🔐 CONFIG =================
+# ================= 🔐 CONFIG (إصدار مستقر) =================
 CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
     "TAVILY": os.getenv("TAVILY_KEY"),
@@ -25,7 +25,9 @@ CONF = {
     }
 }
 
+# إعداد العميل مع دعم كامل للصلاحيات والقراءة (OAuth 1.0a + OAuth 2.0)
 twitter = tweepy.Client(
+    bearer_token=None, # نعتمد على المفاتيح الأربعة للقراءة والكتابة
     consumer_key=CONF["X"]["key"],
     consumer_secret=CONF["X"]["secret"],
     access_token=CONF["X"]["token"],
@@ -33,35 +35,31 @@ twitter = tweepy.Client(
     wait_on_rate_limit=True
 )
 
-# قاعدة بيانات بذاكرة "متجددة"
-DB_NAME = "tech_sovereignty_v1700.db"
+# اسم قاعدة البيانات الموحد لـ GitHub Actions
+DB_NAME = "tech_database.db"
 db = sqlite3.connect(DB_NAME)
-db.execute("CREATE TABLE IF NOT EXISTS logs (tweet_id TEXT PRIMARY KEY, type TEXT, date TIMESTAMP)")
+db.execute("CREATE TABLE IF NOT EXISTS logs (tweet_id TEXT PRIMARY KEY, type TEXT, date TEXT)")
 db.commit()
 
-# ================= 🧹 خاصية التنظيف الذاتي (Maintenance) =================
+# ================= 🧹 MAINTENANCE =================
 def run_maintenance():
-    """مسح السجلات القديمة للحفاظ على خفة القاعدة ومنع امتلائها"""
     try:
         limit_date = (datetime.now() - timedelta(days=7)).isoformat()
-        cursor = db.cursor()
-        cursor.execute("DELETE FROM logs WHERE date < ?", (limit_date,))
+        db.execute("DELETE FROM logs WHERE date < ?", (limit_date,))
         db.commit()
-        logger.info(f"🧹 تمت صيانة قاعدة البيانات وحذف السجلات الأقدم من: {limit_date}")
-    except Exception as e:
-        logger.error(f"Maintenance Error: {e}")
+        logger.info(f"🧹 تم تنظيف السجلات الأقدم من 7 أيام.")
+    except Exception as e: logger.error(e)
 
-# ================= 🛡️ الفلاتر =================
-BLACKLIST_WORDS = ["يا شباب", "يا جماعة", "لا تقلقوا", "فرصة", "مذهل", "تكنو", "هواوي"]
-BAD_REPLY_WORDS = ["كذاب", "بايخ", "سيء", "حمار", "غبي", "كلب", "نصاب", "بوت"]
+# ================= 🛡️ FILTERS =================
+BLACKLIST = ["يا شباب", "يا جماعة", "لا تقلقوا", "فرصة", "مذهل", "تكنو", "هواوي"]
+BAD_REPLY = ["كذاب", "بايخ", "سيء", "حمار", "غبي", "كلب", "نصاب", "بوت"]
 
 def clean_pro(text):
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
-    for word in BLACKLIST_WORDS:
-        text = text.replace(word, '')
+    for word in BLACKLIST: text = text.replace(word, '')
     return " ".join(text.split()).strip()
 
-# ================= 🧠 محرك ذكاء المستقبل =================
+# ================= 🧠 AI ENGINE =================
 async def ask_ai(system, prompt):
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -80,50 +78,52 @@ async def ask_ai(system, prompt):
             return res.json()["choices"][0]["message"]["content"]
     except: return None
 
-# ================= 🕵️ رادار الردود (Anti-Loop) =================
+# ================= 🕵️ SMART REPLY (Refined) =================
 async def smart_reply():
     try:
-        me = twitter.get_me().data
+        # جلب معلومات البوت للتأكد من الاتصال
+        me = twitter.get_me(user_auth=True).data
         my_id = str(me.id)
         
-        mentions = twitter.get_users_mentions(id=my_id, max_results=10)
+        # جلب المنشنات (استخدام user_auth=True إلزامي هنا لتجنب 401)
+        mentions = twitter.get_users_mentions(id=my_id, max_results=10, user_auth=True)
         if not mentions or not mentions.data: return
 
         for tweet in mentions.data:
             tweet_id = str(tweet.id)
             author_id = str(tweet.author_id) if hasattr(tweet, 'author_id') else ""
             
-            # شرط عدم التكرار وعدم الرد على النفس
+            # منع التكرار والرد على النفس
             exists = db.execute("SELECT tweet_id FROM logs WHERE tweet_id=?", (tweet_id,)).fetchone()
             if exists or author_id == my_id: continue
             
-            if any(bad in tweet.text.lower() for bad in BAD_REPLY_WORDS):
+            # فحص الكلمات السيئة
+            if any(bad in tweet.text.lower() for bad in BAD_REPLY):
                 db.execute("INSERT INTO logs VALUES (?, ?, ?)", (tweet_id, "ignored", datetime.now().isoformat()))
                 db.commit()
                 continue
 
-            answer = await ask_ai("أنت خبير تقني في 2026. رد باختصار شديد.", tweet.text)
-            if answer:
-                twitter.create_tweet(text=clean_pro(answer), in_reply_to_tweet_id=tweet_id)
+            # توليد رد
+            ans = await ask_ai("أنت مهندس تقني في 2026. رد باختصار شديد وفائدة.", tweet.text)
+            if ans:
+                twitter.create_tweet(text=clean_pro(ans), in_reply_to_tweet_id=tweet.id, user_auth=True)
                 db.execute("INSERT INTO logs VALUES (?, ?, ?)", (tweet_id, "replied", datetime.now().isoformat()))
                 db.commit()
-                logger.success(f"✅ رد ذكي على: {tweet_id}")
+                logger.success(f"✅ تم الرد على: {tweet_id}")
                 
-    except Exception as e: logger.error(f"Reply Error: {e}")
+    except Exception as e:
+        logger.error(f"Reply Error: {e}")
 
-# ================= 🧵 المهمة الدورية =================
-async def run_future_mission():
-    logger.info("📡 رصد تقنيات 2026 وما فوق...")
-    
-    future_topics = [
-        "معالجات 1nm القادمة", "نظام iOS 20", "شبكات 6G", "GPT-6 Agents", "الواقع المعزز 2026"
-    ]
-    topic = random.choice(future_topics)
+# ================= 🧵 FUTURE MISSION =================
+async def run_mission():
+    logger.info("📡 استكشاف تقنيات 2026 وما فوق...")
+    topics = ["معالجات 1nm", "واجهة iOS 20", "شبكات 6G", "GPT-6 Agents", "الواقع المعزز 2026"]
+    topic = random.choice(topics)
     
     async with httpx.AsyncClient(timeout=45.0) as client:
         r = await client.post("https://api.tavily.com/search", json={
             "api_key": CONF["TAVILY"], 
-            "query": f"latest tech features {topic} 2026",
+            "query": f"latest unique tech features {topic} 2026",
             "search_depth": "advanced"
         })
         knowledge = "\n".join([x['content'] for x in r.json().get("results", [])])
@@ -136,30 +136,25 @@ async def run_future_mission():
     for i, t in enumerate(tweets[:3]):
         try:
             msg = f"{i+1}/3: {t}"
-            res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=prev_id)
+            res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=prev_id, user_auth=True)
             prev_id = res.data["id"]
             await asyncio.sleep(15)
         except: pass
-
-    logger.success(f"✅ تم نشر الثريد: {topic}")
+    logger.success(f"✅ تم نشر ثريد 2026 عن: {topic}")
 
 # ================= 🏁 RUN =================
 async def main_loop(mode="auto"):
-    logger.info(f"🚀 V1700 Self-Maintainer Online | Mode: {mode}")
+    logger.info(f"🚀 V1800 Sovereign Final | Mode: {mode}")
     if mode == "manual":
-        run_maintenance() # تشغيل التنظيف يدوياً عند التجربة
-        await run_future_mission()
+        run_maintenance()
+        await run_mission()
         await smart_reply()
         return
 
     scheduler = AsyncIOScheduler()
-    # تنظيف القاعدة يومياً الساعة 3 فجراً
     scheduler.add_job(run_maintenance, 'cron', hour=3)
-    # نشر الثريد 3 مرات يومياً
-    scheduler.add_job(run_future_mission, 'cron', hour='9,15,21')
-    # فحص المنشنات كل 30 دقيقة
+    scheduler.add_job(run_mission, 'cron', hour='9,15,21')
     scheduler.add_job(smart_reply, 'interval', minutes=30)
-    
     scheduler.start()
     while True: await asyncio.sleep(3600)
 
