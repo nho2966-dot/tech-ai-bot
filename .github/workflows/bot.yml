@@ -2,13 +2,16 @@ name: Tech Sovereign Bot V1800
 
 on:
   schedule:
-    # يعمل كل 6 ساعات لفحص المهام المجدولة والمنشنات
-    - cron: '0 */6 * * *' 
-  workflow_dispatch: # للتشغيل اليدوي من GitHub Actions
+    # تشغيل كل ساعة لضمان عدم ضياع المنشنات (توازن بين الاستهلاك والسرعة)
+    - cron: '0 * * * *' 
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions: # إضافة صلاحيات الكتابة لضمان رفع الملفات
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout Code
@@ -29,7 +32,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tech-database
-        continue-on-error: true # لضمان استمرار العمل في أول مرة قبل وجود قاعدة بيانات
+        continue-on-error: true 
 
       - name: Run Sovereign Bot
         env:
@@ -39,11 +42,13 @@ jobs:
           X_API_SECRET: ${{ secrets.X_API_SECRET }}
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
-        run: python main.py manual # نستخدم manual هنا ليعمل البوت مرة واحدة وينتهي داخل الـ Workflow
+        run: python main.py manual 
 
       - name: Upload Updated Database
+        if: always() # لضمان رفع القاعدة حتى لو فشل جزء من الكود
         uses: actions/upload-artifact@v4
         with:
           name: tech-database
-          path: tech_database.db # المسار الموحد الجديد
+          path: tech_database.db
           retention-days: 7
+          overwrite: true # يضمن تحديث الملف القديم بالجديد
