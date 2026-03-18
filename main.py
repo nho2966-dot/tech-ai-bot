@@ -33,9 +33,22 @@ twitter = tweepy.Client(
     wait_on_rate_limit=True
 )
 
+# ================= 🗄️ DATABASE EVOLUTION =================
 DB_NAME = "tech_database.db"
 db = sqlite3.connect(DB_NAME)
-db.execute("CREATE TABLE IF NOT EXISTS logs (tweet_id TEXT PRIMARY KEY, type TEXT, date TEXT)")
+# تحديث الجدول لدعم التعلم والأداء
+db.execute("""
+    CREATE TABLE IF NOT EXISTS logs (
+        tweet_id TEXT PRIMARY KEY, 
+        author_id TEXT,
+        type TEXT, 
+        style TEXT, 
+        hook TEXT, 
+        likes INTEGER DEFAULT 0, 
+        retweets INTEGER DEFAULT 0, 
+        date TEXT
+    )
+""")
 db.commit()
 
 # ================= 🏷️ MENTIONS MAP =================
@@ -45,27 +58,50 @@ MENTIONS_MAP = {
     "قوقل": "@Google", "أوبن إيه آي": "@OpenAI"
 }
 
-# ================= 🛡️ THE GOLDEN FILTER (V2900) =================
+# ================= 🛡️ THE GOLDEN FILTER & UTILS =================
 def clean_pro(text):
-    # 1. إزالة أي كلمات تحتوي على حروف صينية أو غريبة فوراً
     text = re.sub(r'[\u4e00-\u9fff]+', '', text)
-    
-    # 2. إزالة الترقيم المتكرر (مثل: التغريد 2، 2/3)
     text = re.sub(r'^\d+[/]\d+[:/-]*\s*', '', text)
-    text = re.sub(r'التغريد\s*\d+[:/-]*\s*', '', text)
-    
-    # 3. تنظيف الحروف والرموز
     text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
-    
-    # 4. دمج المنشن الذكي
     for key, mention in MENTIONS_MAP.items():
         if key in text and mention not in text:
             text = text.replace(key, f"{key} ({mention})", 1)
-            
-    return " ".join(text.split()).strip()
+    return " ".join(text.split()).strip()[:275]
 
-# ================= 🧠 AI ENGINE =================
-async def ask_ai(system, prompt):
+def get_cooldown_hours(followers):
+    if followers >= 1_000_000: return 6
+    if followers >= 100_000: return 12
+    if followers >= 10_000: return 24
+    return 48
+
+# ================= 🧠 BRAIN: STRATEGY & LEARNING =================
+def get_best_strategy():
+    res = db.execute("""
+        SELECT style, hook FROM logs 
+        WHERE likes > 2 
+        ORDER BY (likes + (retweets * 2)) DESC LIMIT 1
+    """).fetchone()
+    return {"style": res[0], "hook": res[1]} if res else None
+
+def get_recent_hooks():
+    res = db.execute("SELECT hook FROM logs ORDER BY date DESC LIMIT 10").fetchall()
+    return [r[0] for r in res if r[0]]
+
+# ================= 🧠 AI ENGINE (AUTO-EVOLUTION) =================
+async def ask_ai(prompt, mode="opinion"):
+    strategy = get_best_strategy()
+    recent_hooks = get_recent_hooks()
+    
+    current_style = strategy['style'] if strategy else "تحليلي ومستقبلي"
+    
+    system = f"""
+    أنت خبير تقني Sniper في 2026. ردودك ذكية، مكثفة، وبدون حشو.
+    [الهوية] صوتك واثق، رؤيتك استشرافية.
+    [التطور الذاتي] أفضل أسلوب حقق نجاحاً لك هو: "{current_style}". تفوق عليه بذكاء.
+    [قاعدة التنوع] ممنوع استخدام هذه الافتتاحيات: {", ".join(recent_hooks)}.
+    [الوضع] {mode}. التاريخ: 2026.
+    """
+    
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             res = await client.post(
@@ -73,9 +109,9 @@ async def ask_ai(system, prompt):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.6, # تقليل الحرارة لزيادة الدقة ومنع التخريف
+                    "temperature": 0.7,
                     "messages": [
-                        {"role": "system", "content": f"{system}\n- التاريخ: 2026.\n- ممنوع استخدام الصينية.\n- ابدأ النص فوراً بدون 'التغريد رقم كذا'."},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
                     ]
                 }
@@ -83,79 +119,49 @@ async def ask_ai(system, prompt):
             return res.json()["choices"][0]["message"]["content"]
     except: return None
 
-# ================= 🧵 MISSION (Thread Fix) =================
-async def run_mission():
-    logger.info("📡 رصد 2026 - تصفية شاملة...")
-    topics = ["روبوت Helix 02 وقدرات التنظيف", "معالجات Maya 200 للسحابة", "نظارات Vision Pro 2026"]
-    topic = random.choice(topics)
-    
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        r = await client.post("https://api.tavily.com/search", json={
-            "api_key": CONF["TAVILY"], 
-            "query": f"detailed features {topic} 2026",
-            "search_depth": "advanced",
-            "include_images": True
-        })
-        results = r.json()
-        knowledge = "\n".join([x['content'] for x in results.get("results", [])])
-        media_url = results["images"][0] if results.get("images") else ""
-
-    sys_prompt = "أنت مهتم بالتقنية في 2026. اكتب ثريد 3 تغريدات سوالف ممتعة. لا ترقم التغريدات داخل النص."
-    content = await ask_ai(sys_prompt, f"المعرفة:\n{knowledge}")
-    if not content: return
-
-    # تقسيم الثريد بناءً على الأسطر أو النقاط
-    raw_tweets = [t for t in re.split(r'\n\n|\n', content) if len(t) > 30]
-    
-    prev_id = None
-    for i, t in enumerate(raw_tweets[:3]):
-        try:
-            # الترقيم يضاف هنا فقط لضمان النظافة
-            msg = f"{i+1}/3: {clean_pro(t)}"
-            if i == 0 and media_url: msg += f"\n\n📷 {media_url}"
-            
-            res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=prev_id, user_auth=True)
-            prev_id = res.data["id"]
-            await asyncio.sleep(15)
-        except: pass
-    logger.success(f"✅ تم نشر الثريد المصفى: {topic}")
-
-# ================= 🕵️ SMART REPLY =================
+# ================= 🕵️ SMART SNIPER REPLY =================
 async def smart_reply():
     try:
         me = twitter.get_me(user_auth=True).data
         my_id = str(me.id)
-        mentions = twitter.get_users_mentions(id=my_id, max_results=10, user_auth=True, tweet_fields=['created_at', 'author_id'])
+        
+        mentions = twitter.get_users_mentions(
+            id=my_id, max_results=15, user_auth=True, 
+            tweet_fields=['created_at', 'author_id', 'text'],
+            expansions=['author_id'], user_fields=['public_metrics']
+        )
+        
         if not mentions or not mentions.data: return
-        time_threshold = datetime.now(timezone.utc) - timedelta(hours=6)
+        users_map = {str(u.id): u.public_metrics['followers_count'] for u in mentions.includes['users']} if mentions.includes else {}
 
         for tweet in mentions.data:
-            tweet_id = str(tweet.id)
-            if tweet.created_at < time_threshold: continue
-            exists = db.execute("SELECT tweet_id FROM logs WHERE tweet_id=?", (tweet_id,)).fetchone()
-            if exists or str(tweet.author_id) == my_id: continue
+            t_id = str(tweet.id)
+            a_id = str(tweet.author_id)
+            
+            # 1. منع التكرار والردود الذاتية
+            if a_id == my_id: continue
+            
+            # 2. Cooldown ديناميكي بناءً على القوة
+            followers = users_map.get(a_id, 0)
+            cd_limit = (datetime.now(timezone.utc) - timedelta(hours=get_cooldown_hours(followers))).isoformat()
+            if db.execute("SELECT tweet_id FROM logs WHERE author_id=? AND date > ?", (a_id, cd_limit)).fetchone():
+                continue
 
-            ans = await ask_ai("أنت زميل تقني في 2026. رد بسلاسة جملة واحدة.", tweet.text)
-            if ans and "IGNORE" not in ans.upper():
-                twitter.create_tweet(text=clean_pro(ans), in_reply_to_tweet_id=tweet_id, user_auth=True)
-                db.execute("INSERT INTO logs VALUES (?, ?, ?)", (tweet_id, "replied", datetime.now().isoformat()))
+            # 3. صيد التغريدات الجديدة فقط (Sniping < 15 min)
+            if (datetime.now(timezone.utc) - tweet.created_at).total_seconds() > 900:
+                continue
+
+            # 4. الرد الذكي
+            mode = "educational" if any(x in tweet.text for x in ["كيف", "ليش", "وش"]) else "opinion"
+            ans = await ask_ai(tweet.text, mode=mode)
+            
+            if ans and len(ans.split()) >= 6:
+                final = clean_pro(ans)
+                resp = twitter.create_tweet(text=final, in_reply_to_tweet_id=t_id, user_auth=True)
+                
+                # 5. حفظ للتعلم (تخزين ID ردنا لنتتبعه لاحقاً)
+                db.execute("INSERT INTO logs (tweet_id, author_id, type, style, hook, date) VALUES (?, ?, ?, ?, ?, ?)",
+                           (str(resp.data['id']), a_id, "reply", mode, final[:50], datetime.now().isoformat()))
                 db.commit()
-    except: pass
-
-# ================= 🏁 RUN =================
-async def main_loop(mode="auto"):
-    logger.info(f"🚀 V2900 Filtered Online | Mode: {mode}")
-    if mode == "manual":
-        await run_mission()
-        await smart_reply()
-        return
-
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_mission, 'cron', hour='9,15,21')
-    scheduler.add_job(smart_reply, 'interval', minutes=30)
-    scheduler.start()
-    while True: await asyncio.sleep(3600)
-
-if __name__ == "__main__":
-    arg_mode = "manual" if (len(sys.argv) > 1 and sys.argv[1] == "manual") else "auto"
-    asyncio.run(main_loop(mode=arg_mode))
+                logger.success(f"🎯 Sniped Tier {get_cooldown_hours(followers)}h | {a_id}")
+                await asyncio.sleep(random.
