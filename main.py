@@ -16,7 +16,6 @@ load_dotenv()
 # ================= 🔐 CONFIG =================
 CONF = {
     "GROQ": os.getenv("GROQ_API_KEY"),
-    "TAVILY": os.getenv("TAVILY_KEY"),
     "X": {
         "key": os.getenv("X_API_KEY"),
         "secret": os.getenv("X_API_SECRET"),
@@ -84,15 +83,15 @@ def get_recent_hooks():
 async def ask_ai(prompt, mode="opinion"):
     strategy = get_best_strategy()
     recent_hooks = get_recent_hooks()
-    
     current_style = strategy['style'] if strategy else "تحليلي ومستقبلي"
     
     system = f"""
-    أنت خبير تقني Sniper في 2026. ردودك ذكية، مكثفة، وبدون حشو.
-    [الهوية] صوتك واثق، رؤيتك استشرافية، تعطي توقعات دقيقة.
-    [التطور الذاتي] أفضل أسلوب حقق نجاحاً لك هو: "{current_style}". تفوق عليه بذكاء.
+    أنت خبير تقني Sniper في عام 2026. ردودك ذكية ومكثفة.
+    [الهوية] صوتك واثق، رؤيتك استشرافية لعام 2026، تعطي توقعات دقيقة.
+    [اللهجة] استخدم اللهجة الخليجية البيضاء الممزوجة بمصطلحات تقنية إنجليزية (بين قوسين).
+    [التطور الذاتي] أفضل أسلوب حقق نجاحاً لك هو: "{current_style}". تفوق عليه.
     [قاعدة التنوع] ممنوع استخدام هذه الافتتاحيات: {", ".join(recent_hooks)}.
-    [الوضع] {mode}. التاريخ: 2026.
+    [الوضع] {mode}. التاريخ الحالي: أبريل 2026.
     """
     
     try:
@@ -102,7 +101,7 @@ async def ask_ai(prompt, mode="opinion"):
                 headers={"Authorization": f"Bearer {CONF['GROQ']}"},
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.7,
+                    "temperature": 0.8,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
@@ -122,7 +121,7 @@ async def smart_reply():
         my_id = str(me.id)
         
         mentions = twitter.get_users_mentions(
-            id=my_id, max_results=15, user_auth=True, 
+            id=my_id, max_results=10, user_auth=True, 
             tweet_fields=['created_at', 'author_id', 'text'],
             expansions=['author_id'], user_fields=['public_metrics']
         )
@@ -136,24 +135,21 @@ async def smart_reply():
         for tweet in mentions.data:
             t_id = str(tweet.id)
             a_id = str(tweet.author_id)
-            
             if a_id == my_id: continue
             
             followers = users_map.get(a_id, 0)
             cd_limit = (datetime.now(timezone.utc) - timedelta(hours=get_cooldown_hours(followers))).isoformat()
             
-            # فحص الـ Cooldown
             if db.execute("SELECT tweet_id FROM logs WHERE author_id=? AND date > ?", (a_id, cd_limit)).fetchone():
                 continue
 
-            # صيد التغريدات الجديدة (Sniping < 15 min)
-            if (datetime.now(timezone.utc) - tweet.created_at).total_seconds() > 900:
+            if (datetime.now(timezone.utc) - tweet.created_at).total_seconds() > 1800: # زيادة الوقت لـ 30 دقيقة
                 continue
 
             mode = "educational" if any(x in tweet.text for x in ["كيف", "ليش", "وش"]) else "opinion"
-            ans = await ask_ai(tweet.text, mode=mode)
+            ans = await ask_ai(f"رد بذكاء على هذه التغريدة: {tweet.text}", mode=mode)
             
-            if ans and len(ans.split()) >= 6:
+            if ans and len(ans.split()) >= 5:
                 final = clean_pro(ans)
                 resp = twitter.create_tweet(text=final, in_reply_to_tweet_id=t_id, user_auth=True)
                 
@@ -171,7 +167,6 @@ async def update_stats():
     try:
         time_limit = (datetime.now() - timedelta(days=2)).isoformat()
         rows = db.execute("SELECT tweet_id FROM logs WHERE type='reply' AND date > ?", (time_limit,)).fetchall()
-        
         for (tid,) in rows:
             try:
                 t = twitter.get_tweet(id=tid, tweet_fields=['public_metrics'], user_auth=True)
@@ -183,26 +178,41 @@ async def update_stats():
         logger.info("✅ تم تحديث الأداء بنجاح.")
     except Exception as e: logger.error(f"Stats Error: {e}")
 
-# ================= 🧵 MISSION (Threads) =================
+# ================= 🧵 MISSION (Independent Mode) =================
 async def run_mission():
-    logger.info("📡 بدء مهمة البحث والنشر (Thread Mission)...")
-    topic = random.choice(["روبوت Helix 02", "معالجات Maya 200", "Vision Pro 2026", "الخصوصية في 2026"])
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.post("https://api.tavily.com/search", json={"api_key": CONF["TAVILY"], "query": f"{topic} technology future 2026"})
-            knowledge = "\n".join([x['content'] for x in r.json().get("results", [])])
+    logger.info("📡 بدء مهمة النشر الذاتي (Independent Mode)...")
+    topics = [
+        "مستقبل الهواتف القابلة للطي في 2026", 
+        "تطور معالجات الذكاء الاصطناعي (NPU)", 
+        "ثورة الويب 4.0 واللامركزية",
+        "الأجهزة القابلة للارتداء والذكاء المحيطي",
+        "مستقبل الخصوصية في عصر النماذج اللغوية"
+    ]
+    target_topic = random.choice(topics)
 
-        content = await ask_ai(f"اكتب ثريد 3 تغريدات مشوقة عن: {knowledge}", mode="thread")
+    try:
+        prompt = f"""
+        اكتب ثريد تقني من 3 تغريدات مشوقة عن: {target_topic}.
+        تخيل أننا في منتصف عام 2026. ركز على حلول برمجية أو أدوات ذكية (AI Tools) تفيد الأفراد.
+        ابدأ التغريدة الأولى بـ 'Hook' صادم أو تساؤل عميق.
+        استخدم الرموز التعبيرية (Emojis) بشكل ذكي.
+        """
+        
+        content = await ask_ai(prompt, mode="thread")
         if not content: return
         
-        tweets = [t for t in re.split(r'\n\n|\n', content) if len(t) > 30]
+        # تقسيم المحتوى بناءً على الأرقام 1/3، 2/3، 3/3 أو الأسطر
+        tweets_raw = [t.strip() for t in re.split(r'\d/\d[:/-]*', content) if len(t.strip()) > 10]
+        
         p_id = None
-        for i, t in enumerate(tweets[:3]):
-            msg = f"{i+1}/3: {clean_pro(t)}"
+        for i, t in enumerate(tweets_raw[:3]):
+            msg = f"{i+1}/3 {clean_pro(t)}"
             res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=p_id, user_auth=True)
             p_id = res.data["id"]
-            await asyncio.sleep(random.randint(60, 120))
-        logger.success(f"✅ تم نشر ثريد عن: {topic}")
+            logger.success(f"✅ تم نشر الجزء {i+1}")
+            await asyncio.sleep(random.randint(50, 100))
+            
+        logger.success(f"🎯 تم إكمال الثريد بنجاح عن: {target_topic}")
     except Exception as e: logger.error(f"Mission Error: {e}")
 
 # ================= 🏁 RUN =================
@@ -217,7 +227,7 @@ async def main_loop(mode="auto"):
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_mission, 'cron', hour='10,22') 
-    scheduler.add_job(smart_reply, 'interval', minutes=15) 
+    scheduler.add_job(smart_reply, 'interval', minutes=30) # فحص كل 30 دقيقة ليتناسب مع الـ Action
     scheduler.add_job(update_stats, 'interval', hours=3)   
     
     scheduler.start()
