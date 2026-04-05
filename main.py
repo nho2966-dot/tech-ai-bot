@@ -1,242 +1,153 @@
-import os
-import re
-import sys
-import asyncio
-import httpx
-import tweepy
-import sqlite3
-import random
-from loguru import logger
-from dotenv import load_dotenv
-from datetime import datetime, timedelta, timezone
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-load_dotenv()
-
-# ================= 🔐 CONFIG =================
-# تم حذف TAVILY لضمان عدم ظهور خطأ 402 مستقبلاً
-CONF = {
-    "GROQ": os.getenv("GROQ_API_KEY"),
-    "X": {
-        "key": os.getenv("X_API_KEY"),
-        "secret": os.getenv("X_API_SECRET"),
-        "token": os.getenv("X_ACCESS_TOKEN"),
-        "access_s": os.getenv("X_ACCESS_SECRET")
-    }
-}
-
-# إعداد اتصال تويتر (تأكد من صلاحيات Read and Write في Developer Portal)
-twitter = tweepy.Client(
-    consumer_key=CONF["X"]["key"],
-    consumer_secret=CONF["X"]["secret"],
-    access_token=CONF["X"]["token"],
-    access_token_secret=CONF["X"]["access_s"],
-    wait_on_rate_limit=True
-)
-
-# ================= 🗄️ DATABASE SETUP =================
-DB_NAME = "tech_database.db"
-db = sqlite3.connect(DB_NAME)
-db.execute("""
-    CREATE TABLE IF NOT EXISTS logs (
-        tweet_id TEXT PRIMARY KEY, 
-        author_id TEXT,
-        type TEXT, 
-        style TEXT, 
-        hook TEXT, 
-        likes INTEGER DEFAULT 0, 
-        retweets INTEGER DEFAULT 0, 
-        date TEXT
-    )
-""")
-db.commit()
-
-# ================= 🛡️ FILTERS & UTILS =================
-def clean_pro(text):
-    # حذف الرموز الغريبة واللغات غير المطلوبة مع الحفاظ على النص العربي والتقني
-    text = re.sub(r'[\u4e00-\u9fff]+', '', text)
-    text = re.sub(r'^\d+[/]\d+[:/-]*\s*', '', text)
-    text = re.sub(r'[^\u0600-\u06FF\s\w.,!?;:/#%-]', '', text)
-    return " ".join(text.split()).strip()[:275]
-
-def get_cooldown_hours(followers):
-    if followers >= 1_000_000: return 6
-    if followers >= 100_000: return 12
-    if followers >= 10_000: return 24
-    return 48
-
-# ================= 🧠 BRAIN: STRATEGY & LEARNING =================
-def get_best_strategy():
-    try:
-        res = db.execute("""
-            SELECT style, hook FROM logs 
-            WHERE likes > 2 
-            ORDER BY (likes + (retweets * 2)) DESC LIMIT 1
-        """).fetchone()
-        return {"style": res[0], "hook": res[1]} if res else None
-    except: return None
-
-def get_recent_hooks():
-    try:
-        res = db.execute("SELECT hook FROM logs ORDER BY date DESC LIMIT 10").fetchall()
-        return [r[0] for r in res if r[0]]
-    except: return []
-
-# ================= 🤖 AI ENGINE (INDEPENDENT) =================
-async def ask_ai(prompt, mode="opinion"):
-    strategy = get_best_strategy()
-    recent_hooks = get_recent_hooks()
-    current_style = strategy['style'] if strategy else "تحليلي ومستقبلي"
-    
-    system = f"""
-    أنت خبير تقني Sniper في عام 2026. ردودك ذكية ومكثفة جداً.
-    [الهوية] صوتك واثق، رؤيتك استشرافية لعام 2026، تعطي توقعات دقيقة للأفراد.
-    [اللهجة] استخدم اللهجة الخليجية البيضاء الممزوجة بمصطلحات تقنية إنجليزية (بين قوسين).
-    [التطور الذاتي] أفضل أسلوب حقق نجاحاً لك هو: "{current_style}". تفوق عليه بذكاء.
-    [قاعدة التنوع] ممنوع استخدام هذه الافتتاحيات: {", ".join(recent_hooks)}.
-    [التاريخ] أبريل 2026.
-    """
-    
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            res = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {CONF['GROQ']}"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "temperature": 0.8,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt}
-                    ]
-                }
-            )
-            return res.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.error(f"AI Error: {e}")
-        return None
-
-# ================= 🕵️ SMART SNIPER REPLY =================
-async def smart_reply():
-    logger.info("🕵️ فحص المنشنات للردود الذكية...")
-    try:
-        me = twitter.get_me(user_auth=True).data
-        my_id = str(me.id)
-        
-        mentions = twitter.get_users_mentions(
-            id=my_id, max_results=10, user_auth=True, 
-            tweet_fields=['created_at', 'author_id', 'text'],
-            expansions=['author_id'], user_fields=['public_metrics']
-        )
-        
-        if not mentions or not mentions.data: 
-            logger.info("⏳ لا توجد منشنات جديدة.")
-            return
-
-        users_map = {str(u.id): u.public_metrics['followers_count'] for u in mentions.includes['users']} if mentions.includes else {}
-
-        for tweet in mentions.data:
-            t_id = str(tweet.id)
-            a_id = str(tweet.author_id)
-            if a_id == my_id: continue
-            
-            followers = users_map.get(a_id, 0)
-            cd_limit = (datetime.now(timezone.utc) - timedelta(hours=get_cooldown_hours(followers))).isoformat()
-            
-            if db.execute("SELECT tweet_id FROM logs WHERE author_id=? AND date > ?", (a_id, cd_limit)).fetchone():
-                continue
-
-            # الرد فقط على التغريدات في آخر 30 دقيقة
-            if (datetime.now(timezone.utc) - tweet.created_at).total_seconds() > 1800:
-                continue
-
-            mode = "educational" if any(x in tweet.text for x in ["كيف", "ليش", "وش", "ممكن"]) else "opinion"
-            ans = await ask_ai(f"رد بذكاء واختصار على: {tweet.text}", mode=mode)
-            
-            if ans and len(ans.split()) >= 5:
-                final = clean_pro(ans)
-                resp = twitter.create_tweet(text=final, in_reply_to_tweet_id=t_id, user_auth=True)
-                
-                db.execute("INSERT INTO logs (tweet_id, author_id, type, style, hook, date) VALUES (?, ?, ?, ?, ?, ?)",
-                           (str(resp.data['id']), a_id, "reply", mode, final[:50], datetime.now().isoformat()))
-                db.commit()
-                logger.success(f"🎯 Sniped Account: {a_id}")
-                await asyncio.sleep(random.randint(40, 80))
-
-    except Exception as e: logger.error(f"Reply Error: {e}")
-
-# ================= 🧵 MISSION (Independent) =================
-async def run_mission():
-    logger.info("📡 بدء مهمة النشر الذاتي (Independent Mode)...")
-    
-    # قائمة مواضيع متجددة لعام 2026 لضمان التنوع بدون محرك بحث
-    topics = [
-        "مستقبل معالجات الكموم في الأجهزة الشخصية",
-        "تطور أدوات الـ No-Code بالذكاء الاصطناعي 2026",
-        "الأمان السيبراني في عصر الحوسبة اللامركزية",
-        "أدوات AI ثورية للمبرمجين والمصممين في 2026",
-        "تطور تقنيات الهولوغرام والاتصال عن بعد"
-    ]
-    target_topic = random.choice(topics)
-
-    try:
-        prompt = f"اكتب ثريد تقني مبهر من 3 تغريدات عن: {target_topic}. اجعل الأسلوب استشرافي لعام 2026، مكثفاً وباللهجة الخليجية. ابدأ بـ Hook قوي."
-        content = await ask_ai(prompt, mode="thread")
-        
-        if not content: return
-        
-        # تقسيم المحتوى لضمان نشره كثريد
-        tweets_raw = [t.strip() for t in re.split(r'\d/\d[:/-]*|\n\n', content) if len(t.strip()) > 15]
-        
-        p_id = None
-        for i, t in enumerate(tweets_raw[:3]):
-            msg = f"{i+1}/3 {clean_pro(t)}"
-            res = twitter.create_tweet(text=msg, in_reply_to_tweet_id=p_id, user_auth=True)
-            p_id = res.data["id"]
-            logger.success(f"✅ نشر الجزء {i+1}")
-            await asyncio.sleep(60) # فاصل زمني دقيقة
-            
-        logger.success(f"🎯 اكتمل الثريد بنجاح.")
-    except Exception as e: logger.error(f"Mission Error: {e}")
-
-# ================= 📈 PERFORMANCE UPDATER =================
-async def update_stats():
-    logger.info("📊 تحديث إحصائيات الأداء...")
-    try:
-        time_limit = (datetime.now() - timedelta(days=2)).isoformat()
-        rows = db.execute("SELECT tweet_id FROM logs WHERE date > ?", (time_limit,)).fetchall()
-        for (tid,) in rows:
-            try:
-                t = twitter.get_tweet(id=tid, tweet_fields=['public_metrics'], user_auth=True)
-                if t and t.data:
-                    m = t.data.public_metrics
-                    db.execute("UPDATE logs SET likes=?, retweets=? WHERE tweet_id=?", (m['like_count'], m['retweet_count'], tid))
-            except: pass
-        db.commit()
-    except Exception as e: logger.error(f"Stats Error: {e}")
-
-# ================= 🏁 RUN =================
-async def main_loop(mode="auto"):
-    logger.info(f"🚀 Sniper Engine Online | Mode: {mode}")
-    
-    if mode == "manual":
-        await run_mission()
-        await smart_reply()
-        await update_stats()
-        return
-
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_mission, 'cron', hour='10,22') 
-    scheduler.add_job(smart_reply, 'interval', minutes=30) 
-    scheduler.add_job(update_stats, 'interval', hours=3)   
-    
-    scheduler.start()
-    while True: 
-        await asyncio.sleep(3600)
-
-if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else "auto"
-    try:
-        asyncio.run(main_loop(mode=arg))
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("👋 تم إيقاف النظام.")
+1s
+Current runner version: '2.333.1'
+Runner Image Provisioner
+Operating System
+Runner Image
+GITHUB_TOKEN Permissions
+Secret source: Actions
+Prepare workflow directory
+Prepare all required actions
+Getting action download info
+Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+Download action repository 'actions/download-artifact@v4' (SHA:d3f86a106a0bac45b974a628896c90dbdf5c8093)
+Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+Complete job name: run-bot
+1s
+Run actions/checkout@v4
+Syncing repository: nho2966-dot/tech-ai-bot
+Getting Git version info
+Temporarily overriding HOME='/home/runner/work/_temp/067e5fa1-bf99-419a-a5cd-4ae716a8431c' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/tech-ai-bot/tech-ai-bot
+Deleting the contents of '/home/runner/work/tech-ai-bot/tech-ai-bot'
+Initializing the repository
+Disabling automatic garbage collection
+Setting up auth
+Fetching the repository
+Determining the checkout info
+/usr/bin/git sparse-checkout disable
+/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Checking out the ref
+/usr/bin/git log -1 --format=%H
+2110836a400467cd6eb1b4f4901d803309a6db6f
+2s
+Run actions/setup-python@v5
+Installed versions
+/opt/hostedtoolcache/Python/3.10.20/x64/bin/pip cache dir
+/home/runner/.cache/pip
+Received 58384973 of 58384973 (100.0%), 83.7 MBs/sec
+Cache Size: ~56 MB (58384973 B)
+/usr/bin/tar -xf /home/runner/work/_temp/6a1eb778-2cd4-44ae-935d-3edabcb7c233/cache.tzst -P -C /home/runner/work/tech-ai-bot/tech-ai-bot --use-compress-program unzstd
+Cache restored successfully
+Cache restored from key: setup-python-Linux-x64-24.04-Ubuntu-python-3.10.20-pip-f8d72b779a528058af651eefde9e282c910a64e27019678a85f326208801724f
+3s
+Run python -m pip install --upgrade pip
+  
+Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/site-packages (26.0.1)
+Collecting tweepy
+  Using cached tweepy-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting httpx
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting loguru
+  Using cached loguru-0.7.3-py3-none-any.whl.metadata (22 kB)
+Collecting python-dotenv
+  Using cached python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+Collecting apscheduler
+  Using cached apscheduler-3.11.2-py3-none-any.whl.metadata (6.4 kB)
+Collecting oauthlib<4,>=3.2.0 (from tweepy)
+  Using cached oauthlib-3.3.1-py3-none-any.whl.metadata (7.9 kB)
+Collecting requests<3,>=2.27.0 (from tweepy)
+  Downloading requests-2.33.1-py3-none-any.whl.metadata (4.8 kB)
+Collecting requests-oauthlib<3,>=1.2.0 (from tweepy)
+  Using cached requests_oauthlib-2.0.0-py2.py3-none-any.whl.metadata (11 kB)
+Collecting charset_normalizer<4,>=2 (from requests<3,>=2.27.0->tweepy)
+  Downloading charset_normalizer-3.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+Collecting idna<4,>=2.5 (from requests<3,>=2.27.0->tweepy)
+  Using cached idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+Collecting urllib3<3,>=1.26 (from requests<3,>=2.27.0->tweepy)
+  Using cached urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+Collecting certifi>=2023.5.7 (from requests<3,>=2.27.0->tweepy)
+  Using cached certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+Collecting anyio (from httpx)
+  Downloading anyio-4.13.0-py3-none-any.whl.metadata (4.5 kB)
+Collecting httpcore==1.* (from httpx)
+  Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx)
+  Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting tzlocal>=3.0 (from apscheduler)
+  Using cached tzlocal-5.3.1-py3-none-any.whl.metadata (7.6 kB)
+Collecting exceptiongroup>=1.0.2 (from anyio->httpx)
+  Using cached exceptiongroup-1.3.1-py3-none-any.whl.metadata (6.7 kB)
+Collecting typing_extensions>=4.5 (from anyio->httpx)
+  Using cached typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Using cached tweepy-4.16.0-py3-none-any.whl (98 kB)
+Using cached oauthlib-3.3.1-py3-none-any.whl (160 kB)
+Downloading requests-2.33.1-py3-none-any.whl (64 kB)
+Downloading charset_normalizer-3.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (216 kB)
+Using cached idna-3.11-py3-none-any.whl (71 kB)
+Using cached requests_oauthlib-2.0.0-py2.py3-none-any.whl (24 kB)
+Using cached urllib3-2.6.3-py3-none-any.whl (131 kB)
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+Using cached loguru-0.7.3-py3-none-any.whl (61 kB)
+Using cached python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+Using cached apscheduler-3.11.2-py3-none-any.whl (64 kB)
+Using cached certifi-2026.2.25-py3-none-any.whl (153 kB)
+Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+Using cached tzlocal-5.3.1-py3-none-any.whl (18 kB)
+Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+Using cached exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
+Using cached typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Installing collected packages: urllib3, tzlocal, typing_extensions, python-dotenv, oauthlib, loguru, idna, h11, charset_normalizer, certifi, requests, httpcore, exceptiongroup, apscheduler, requests-oauthlib, anyio, tweepy, httpx
+Successfully installed anyio-4.13.0 apscheduler-3.11.2 certifi-2026.2.25 charset_normalizer-3.4.7 exceptiongroup-1.3.1 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.11 loguru-0.7.3 oauthlib-3.3.1 python-dotenv-1.2.2 requests-2.33.1 requests-oauthlib-2.0.0 tweepy-4.16.0 typing_extensions-4.15.0 tzlocal-5.3.1 urllib3-2.6.3
+0s
+Run actions/download-artifact@v4
+  
+Downloading single artifact
+Error: Unable to download artifact(s): Artifact not found for name: tech-database
+        Please ensure that your artifact is not expired and the artifact was uploaded using a compatible version of toolkit/upload-artifact.
+        For more information, visit the GitHub Artifacts FAQ: https://github.com/actions/toolkit/blob/main/packages/artifact/docs/faq.md
+4s
+Run python main.py manual
+  
+2026-04-05 09:29:09.640 | INFO     | __main__:main_loop:220 - 🚀 Sniper Engine Online | Mode: manual
+2026-04-05 09:29:09.640 | INFO     | __main__:run_mission:170 - 📡 بدء مهمة النشر الذاتي (Independent Mode)...
+2026-04-05 09:29:11.696 | ERROR    | __main__:run_mission:200 - Mission Error: 402 Payment Required
+Your enrolled account [2005187138799951872] does not have any credits to fulfill this request.
+2026-04-05 09:29:11.696 | INFO     | __main__:smart_reply:121 - 🕵️ فحص المنشنات للردود الذكية...
+2026-04-05 09:29:11.847 | ERROR    | __main__:smart_reply:166 - Reply Error: 402 Payment Required
+Your enrolled account [2005187138799951872] does not have any credits to fulfill this request.
+2026-04-05 09:29:11.847 | INFO     | __main__:update_stats:204 - 📊 تحديث إحصائيات الأداء...
+1s
+Run actions/upload-artifact@v4
+  
+With the provided path, there will be 1 file uploaded
+Artifact name is valid!
+Root directory input is valid!
+Beginning upload of artifact content to blob storage
+Uploaded bytes 438
+Finished uploading artifact content to blob storage!
+SHA256 digest of uploaded artifact zip is fc6e1fec5cd2842150bc815cf5ba4e56c147710882f9254f6c69ec7e4e462f62
+Finalizing artifact upload
+Artifact tech-database.zip successfully finalized. Artifact ID 6276475111
+Artifact tech-database has been successfully uploaded! Final size is 438 bytes. Artifact ID is 6276475111
+Artifact download URL: https://github.com/nho2966-dot/tech-ai-bot/actions/runs/23998712791/artifacts/6276475111
+0s
+Post job cleanup.
+Cache hit occurred on the primary key setup-python-Linux-x64-24.04-Ubuntu-python-3.10.20-pip-f8d72b779a528058af651eefde9e282c910a64e27019678a85f326208801724f, not saving cache.
+0s
+Post job cleanup.
+/usr/bin/git version
+git version 2.53.0
+Temporarily overriding HOME='/home/runner/work/_temp/a924cbd0-09ae-44a0-8a8a-f0848c18a1e1' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/tech-ai-bot/tech-ai-bot
+/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
